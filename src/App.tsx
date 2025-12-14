@@ -15,6 +15,7 @@ import AdminBalancesPage from "./pages/AdminBalancesPage";
 import StockExchangeDataPage from "./pages/StockExchangeDataPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
 import SecuritiesPage from "./pages/SecuritiesPage";
+import PortfolioPage from "./pages/PortfolioPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -38,6 +39,7 @@ const App = () => (
           <Route path="/stock-exchange" element={<StockExchangeDataPage />} />
           <Route path="/trade-history" element={<TradeHistoryPage />} />
           <Route path="/securities" element={<SecuritiesPage />} />
+          <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
