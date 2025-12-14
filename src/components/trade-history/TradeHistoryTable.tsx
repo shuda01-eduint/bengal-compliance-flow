@@ -145,6 +145,7 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
 export function TradeHistoryTable() {
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchInput, setSearchInput] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [sideFilter, setSideFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
@@ -155,6 +156,15 @@ export function TradeHistoryTable() {
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const { toast } = useToast();
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchTerm(searchInput);
+      setCurrentPage(1);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // Column customization
   const [visibleColumns, setVisibleColumns] = useState<string[]>(
@@ -176,16 +186,21 @@ export function TradeHistoryTable() {
   }, [customColumns]);
 
   useEffect(() => {
-    fetchTrades();
     fetchFileNames();
     fetchTotalCount();
   }, []);
+
+  // Fetch trades with server-side filtering
+  useEffect(() => {
+    fetchTrades();
+  }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, currentPage, pageSize]);
 
   const fetchFileNames = async () => {
     const { data } = await supabase
       .from("trade_history")
       .select("file_name")
-      .not("file_name", "is", null);
+      .not("file_name", "is", null)
+      .limit(1000);
     
     if (data) {
       const unique = [...new Set(data.map(d => d.file_name).filter(Boolean))] as string[];
@@ -203,13 +218,50 @@ export function TradeHistoryTable() {
   const fetchTrades = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      // Build query with server-side filtering
+      let query = supabase
         .from("trade_history")
-        .select("*")
-        .order("uploaded_at", { ascending: false });
+        .select("*", { count: "exact" });
+
+      // Apply search filter (server-side)
+      if (searchTerm) {
+        query = query.or(`client_code.ilike.%${searchTerm}%,security_code.ilike.%${searchTerm}%`);
+      }
+
+      // Apply side filter
+      if (sideFilter !== "all") {
+        query = query.eq("side", sideFilter);
+      }
+
+      // Apply file filter
+      if (selectedFile !== "all") {
+        query = query.eq("file_name", selectedFile);
+      }
+
+      // Apply date filters
+      if (dateFrom) {
+        const fromStr = format(dateFrom, "yyyyMMdd");
+        query = query.gte("trade_date", fromStr);
+      }
+      if (dateTo) {
+        const toStr = format(dateTo, "yyyyMMdd");
+        query = query.lte("trade_date", toStr);
+      }
+
+      // Apply pagination
+      const from = (currentPage - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      const { data, error, count } = await query
+        .order("uploaded_at", { ascending: false })
+        .range(from, to);
 
       if (error) throw error;
+      
       setTrades(data || []);
+      if (count !== null) {
+        setFilteredCount(count);
+      }
     } catch (error) {
       console.error("Error fetching trades:", error);
       toast({
@@ -222,36 +274,11 @@ export function TradeHistoryTable() {
     }
   };
 
-  const filteredTrades = useMemo(() => {
-    return trades.filter((trade) => {
-      const matchesSearch =
-        !searchTerm ||
-        trade.client_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        trade.security_code?.toLowerCase().includes(searchTerm.toLowerCase());
-
-      const matchesSide = sideFilter === "all" || trade.side === sideFilter;
-      const matchesFile = selectedFile === "all" || trade.file_name === selectedFile;
-
-      const tradeDate = trade.trade_date ? new Date(trade.trade_date.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3")) : null;
-      const matchesDateFrom = !dateFrom || (tradeDate && tradeDate >= dateFrom);
-      const matchesDateTo = !dateTo || (tradeDate && tradeDate <= dateTo);
-
-      return matchesSearch && matchesSide && matchesFile && matchesDateFrom && matchesDateTo;
-    });
-  }, [trades, searchTerm, sideFilter, selectedFile, dateFrom, dateTo]);
-
-  const totalPages = Math.ceil(filteredTrades.length / pageSize);
-  
-  const paginatedTrades = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredTrades.slice(start, start + pageSize);
-  }, [filteredTrades, currentPage, pageSize]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, pageSize]);
+  const [filteredCount, setFilteredCount] = useState(0);
+  const totalPages = Math.ceil(filteredCount / pageSize);
 
   const clearFilters = () => {
+    setSearchInput("");
     setSearchTerm("");
     setSideFilter("all");
     setDateFrom(undefined);
@@ -450,8 +477,8 @@ export function TradeHistoryTable() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search client/security code..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="pl-9"
             />
           </div>
@@ -511,7 +538,7 @@ export function TradeHistoryTable() {
             Clear Filters
           </Button>
           <span className="text-sm text-muted-foreground">
-            Showing {paginatedTrades.length} of {filteredTrades.length} trades (Total: {totalCount.toLocaleString()})
+            Showing {trades.length} of {filteredCount} filtered trades (Total: {totalCount.toLocaleString()})
           </span>
         </div>
 
@@ -541,14 +568,14 @@ export function TradeHistoryTable() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedTrades.length === 0 ? (
+                {trades.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={visibleColumns.length + customColumns.length} className="text-center py-8 text-muted-foreground">
                       No trades found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  paginatedTrades.map((trade) => (
+                  trades.map((trade) => (
                     <TableRow key={trade.id}>
                       {BASE_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(column => (
                         <TableCell 
@@ -579,7 +606,7 @@ export function TradeHistoryTable() {
         )}
 
         {/* Pagination */}
-        {!loading && filteredTrades.length > 0 && (
+        {!loading && filteredCount > 0 && (
           <div className="flex items-center justify-between pt-4">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Rows per page:</span>
