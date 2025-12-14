@@ -29,15 +29,15 @@ export default function AuthPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [signupData, setSignupData] = useState({ fullName: "", email: "", password: "", confirmPassword: "" });
-  const { signIn, signUp, user } = useAuth();
+  const { signIn, signUp, user, isApproved } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
-    if (user) {
+    if (user && isApproved) {
       navigate("/", { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, isApproved, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,8 +53,17 @@ export default function AuthPage() {
     }
 
     setIsLoading(true);
-    const { error } = await signIn(loginData.email, loginData.password);
+    const { error, needsApproval } = await signIn(loginData.email, loginData.password);
     setIsLoading(false);
+
+    if (needsApproval) {
+      toast({
+        title: "Pending Approval",
+        description: "Your account is pending admin approval. Please wait for approval before logging in.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     if (error) {
       toast({
@@ -101,8 +110,10 @@ export default function AuthPage() {
     } else {
       toast({
         title: "Account Created",
-        description: "Welcome! You're now logged in.",
+        description: "Your account has been created. Please wait for admin approval before logging in.",
       });
+      // Sign out immediately since not approved yet
+      setSignupData({ fullName: "", email: "", password: "", confirmPassword: "" });
     }
   };
 

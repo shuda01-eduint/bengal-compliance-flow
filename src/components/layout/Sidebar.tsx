@@ -14,7 +14,8 @@ import {
   History,
   Landmark,
   Briefcase,
-  LogOut
+  LogOut,
+  UserCog
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ interface SidebarProps {
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "User Management", href: "/admin/users", icon: UserCog },
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
   { name: "Stock Exchange Data", href: "/stock-exchange", icon: TrendingUp },
   { name: "Trade History", href: "/trade-history", icon: History },
