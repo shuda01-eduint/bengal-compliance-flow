@@ -86,6 +86,66 @@ export type Database = {
         }
         Relationships: []
       }
+      securities: {
+        Row: {
+          audited_pe: number | null
+          category: string | null
+          close_price: number | null
+          created_at: string
+          director_percent: number | null
+          eps: number | null
+          foreign_percent: number | null
+          govt_percent: number | null
+          id: string
+          institute_percent: number | null
+          instrument_type: string | null
+          public_percent: number | null
+          sector: string | null
+          total_securities: number | null
+          trading_code: string
+          updated_at: string
+          volume: number | null
+        }
+        Insert: {
+          audited_pe?: number | null
+          category?: string | null
+          close_price?: number | null
+          created_at?: string
+          director_percent?: number | null
+          eps?: number | null
+          foreign_percent?: number | null
+          govt_percent?: number | null
+          id?: string
+          institute_percent?: number | null
+          instrument_type?: string | null
+          public_percent?: number | null
+          sector?: string | null
+          total_securities?: number | null
+          trading_code: string
+          updated_at?: string
+          volume?: number | null
+        }
+        Update: {
+          audited_pe?: number | null
+          category?: string | null
+          close_price?: number | null
+          created_at?: string
+          director_percent?: number | null
+          eps?: number | null
+          foreign_percent?: number | null
+          govt_percent?: number | null
+          id?: string
+          institute_percent?: number | null
+          instrument_type?: string | null
+          public_percent?: number | null
+          sector?: string | null
+          total_securities?: number | null
+          trading_code?: string
+          updated_at?: string
+          volume?: number | null
+        }
+        Relationships: []
+      }
       trade_history: {
         Row: {
           action: string | null
