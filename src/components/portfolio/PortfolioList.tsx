@@ -21,6 +21,19 @@ interface Portfolio {
   created_at: string;
 }
 
+interface ClientData {
+  inv_code: string;
+  investor_name: string;
+  ledger_balance: number;
+  market_value: number;
+  accrued_interest: number;
+  equity: number;
+}
+
+interface PortfolioWithClient extends Portfolio {
+  client: ClientData | null;
+}
+
 interface CustomField {
   id: string;
   field_name: string;
@@ -40,16 +53,32 @@ export function PortfolioList() {
   });
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
 
-  // Fetch portfolios
+// Fetch portfolios with client data
   const { data: portfolios = [], isLoading } = useQuery({
-    queryKey: ["portfolios"],
+    queryKey: ["portfolios-with-clients"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: portfolioData, error: portfolioError } = await supabase
         .from("portfolios")
         .select("*")
         .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data as Portfolio[];
+      if (portfolioError) throw portfolioError;
+
+      // Fetch client data for all investor codes
+      const investorCodes = [...new Set(portfolioData.map(p => p.investor_code))];
+      const { data: clientsData, error: clientsError } = await supabase
+        .from("clients")
+        .select("inv_code, investor_name, ledger_balance, market_value, accrued_interest, equity")
+        .in("inv_code", investorCodes);
+      if (clientsError) throw clientsError;
+
+      // Create lookup map
+      const clientMap = new Map(clientsData?.map(c => [c.inv_code, c]) || []);
+
+      // Merge portfolio with client data
+      return portfolioData.map(p => ({
+        ...p,
+        client: clientMap.get(p.investor_code) || null
+      })) as PortfolioWithClient[];
     }
   });
 
@@ -145,8 +174,14 @@ export function PortfolioList() {
 
   const filteredPortfolios = portfolios.filter(p =>
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.investor_code.toLowerCase().includes(searchTerm.toLowerCase())
+    p.investor_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    p.client?.investor_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const formatCurrency = (value: number | null | undefined) => {
+    if (value === null || value === undefined) return "-";
+    return new Intl.NumberFormat("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  };
 
   return (
     <Card className="bg-card border-border">
@@ -258,27 +293,47 @@ export function PortfolioList() {
             No portfolios found. Create your first portfolio to get started.
           </div>
         ) : (
-          <div className="rounded-md border border-border overflow-hidden">
+          <div className="rounded-md border border-border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">
-                  <TableHead className="text-foreground">Name</TableHead>
-                  <TableHead className="text-foreground">Investor Code</TableHead>
-                  <TableHead className="text-foreground">Description</TableHead>
-                  <TableHead className="text-foreground">Created</TableHead>
+                  <TableHead className="text-foreground">Portfolio Name</TableHead>
+                  <TableHead className="text-foreground">Investor</TableHead>
+                  <TableHead className="text-foreground text-right">Ledger Balance</TableHead>
+                  <TableHead className="text-foreground text-right">Market Value</TableHead>
+                  <TableHead className="text-foreground text-right">Accrued Fees</TableHead>
+                  <TableHead className="text-foreground text-right">Equity</TableHead>
                   <TableHead className="text-foreground text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredPortfolios.map((portfolio) => (
                   <TableRow key={portfolio.id} className="hover:bg-muted/30">
-                    <TableCell className="font-medium text-foreground">{portfolio.name}</TableCell>
-                    <TableCell className="text-muted-foreground">{portfolio.investor_code}</TableCell>
-                    <TableCell className="text-muted-foreground max-w-xs truncate">
-                      {portfolio.description || "-"}
+                    <TableCell className="font-medium text-foreground">
+                      <div>
+                        <p>{portfolio.name}</p>
+                        {portfolio.description && (
+                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{portfolio.description}</p>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {new Date(portfolio.created_at).toLocaleDateString()}
+                      <div>
+                        <p className="font-medium text-foreground">{portfolio.client?.investor_name || "-"}</p>
+                        <p className="text-xs">{portfolio.investor_code}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-foreground">
+                      {formatCurrency(portfolio.client?.ledger_balance)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-foreground">
+                      {formatCurrency(portfolio.client?.market_value)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-foreground">
+                      {formatCurrency(portfolio.client?.accrued_interest)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-foreground">
+                      {formatCurrency(portfolio.client?.equity)}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
