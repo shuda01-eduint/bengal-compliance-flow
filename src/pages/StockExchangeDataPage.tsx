@@ -1,5 +1,6 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { StockExchangeUpload } from "@/components/stock-exchange/StockExchangeUpload";
+import { ClientTradeSearch } from "@/components/stock-exchange/ClientTradeSearch";
 
 const StockExchangeDataPage = () => {
   return (
@@ -7,7 +8,10 @@ const StockExchangeDataPage = () => {
       title="Stock Exchange Data" 
       subtitle="Upload daily HTML files from DSE/CSE for compliance checks and balance reconciliation"
     >
-      <StockExchangeUpload />
+      <div className="space-y-6">
+        <ClientTradeSearch />
+        <StockExchangeUpload />
+      </div>
     </MainLayout>
   );
 };
