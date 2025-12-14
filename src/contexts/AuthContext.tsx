@@ -6,9 +6,11 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  isApproved: boolean | null;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null; needsApproval?: boolean }>;
   signOut: () => Promise<void>;
+  checkApprovalStatus: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -17,6 +19,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isApproved, setIsApproved] = useState<boolean | null>(null);
+
+  const checkApprovalStatus = async (): Promise<boolean> => {
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (!currentUser) return false;
+    
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("is_approved")
+      .eq("id", currentUser.id)
+      .single();
+    
+    const approved = profile?.is_approved ?? false;
+    setIsApproved(approved);
+    return approved;
+  };
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -25,6 +43,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        
+        // Check approval status when user logs in
+        if (session?.user) {
+          setTimeout(() => {
+            checkApprovalStatus();
+          }, 0);
+        } else {
+          setIsApproved(null);
+        }
       }
     );
 
@@ -33,6 +60,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      
+      if (session?.user) {
+        checkApprovalStatus();
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -59,15 +90,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       password,
     });
+    
+    if (!error) {
+      // Check if user is approved
+      const approved = await checkApprovalStatus();
+      if (!approved) {
+        await supabase.auth.signOut();
+        return { error: null, needsApproval: true };
+      }
+    }
+    
     return { error };
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    setIsApproved(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, isApproved, signUp, signIn, signOut, checkApprovalStatus }}>
       {children}
     </AuthContext.Provider>
   );
