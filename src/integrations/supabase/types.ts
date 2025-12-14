@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_codes: {
+        Row: {
+          agent_id: string
+          created_at: string
+          id: string
+          investor_code: string
+          rm_id: string
+        }
+        Insert: {
+          agent_id: string
+          created_at?: string
+          id?: string
+          investor_code: string
+          rm_id: string
+        }
+        Update: {
+          agent_id?: string
+          created_at?: string
+          id?: string
+          investor_code?: string
+          rm_id?: string
+        }
+        Relationships: []
+      }
       clients: {
         Row: {
           accrued_interest: number
