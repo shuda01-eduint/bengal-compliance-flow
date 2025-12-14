@@ -12,6 +12,7 @@ import RulesPage from "./pages/RulesPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import SettingsPage from "./pages/SettingsPage";
 import AdminBalancesPage from "./pages/AdminBalancesPage";
+import StockExchangeDataPage from "./pages/StockExchangeDataPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/admin/balances" element={<AdminBalancesPage />} />
+          <Route path="/stock-exchange" element={<StockExchangeDataPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
