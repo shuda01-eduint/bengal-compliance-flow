@@ -86,6 +86,24 @@ export type Database = {
         }
         Relationships: []
       }
+      departments: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
       deposits_withdrawals: {
         Row: {
           amount: number
@@ -270,31 +288,45 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string
+          department_id: string | null
           email: string
           full_name: string | null
           id: string
           is_approved: boolean
+          is_department_head: boolean
           updated_at: string
         }
         Insert: {
           avatar_url?: string | null
           created_at?: string
+          department_id?: string | null
           email: string
           full_name?: string | null
           id: string
           is_approved?: boolean
+          is_department_head?: boolean
           updated_at?: string
         }
         Update: {
           avatar_url?: string | null
           created_at?: string
+          department_id?: string | null
           email?: string
           full_name?: string | null
           id?: string
           is_approved?: boolean
+          is_department_head?: boolean
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       securities: {
         Row: {
@@ -480,6 +512,10 @@ export type Database = {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
+        Returns: boolean
+      }
+      is_department_head_of_rm: {
+        Args: { _rm_email: string }
         Returns: boolean
       }
     }
