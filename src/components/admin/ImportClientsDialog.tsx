@@ -146,19 +146,21 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
     }
   };
 
-  const handleClose = () => {
+  const handleOpenChange = (newOpen: boolean) => {
     if (!importing) {
-      setOpen(false);
-      setStatus("idle");
-      setProgress(0);
-      setResult(null);
+      setOpen(newOpen);
+      if (!newOpen) {
+        setStatus("idle");
+        setProgress(0);
+        setResult(null);
+      }
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button onClick={() => setOpen(true)} className="gap-2">
+        <Button className="gap-2">
           <Upload className="h-4 w-4" />
           Import Excel
         </Button>
@@ -230,7 +232,7 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
                   </p>
                 )}
               </div>
-              <Button onClick={handleClose} className="w-full">
+              <Button onClick={() => handleOpenChange(false)} className="w-full">
                 Close
               </Button>
             </div>
@@ -247,7 +249,7 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
                   {result.errors[0]}
                 </p>
               </div>
-              <Button onClick={handleClose} variant="outline" className="w-full">
+              <Button onClick={() => handleOpenChange(false)} variant="outline" className="w-full">
                 Close
               </Button>
             </div>
