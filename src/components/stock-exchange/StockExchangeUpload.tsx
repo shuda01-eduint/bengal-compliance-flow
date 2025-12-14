@@ -52,11 +52,62 @@ export function StockExchangeUpload() {
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [parsedTrades, setParsedTrades] = useState<ParsedTrade[]>([]);
   const [results, setResults] = useState<ReconciliationResult[]>([]);
   const [parseStatus, setParseStatus] = useState<"idle" | "parsed" | "reconciled">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  const saveToDatabase = async (trades: ParsedTrade[], fileName: string) => {
+    setSaving(true);
+    try {
+      const tradeRecords = trades.map(trade => ({
+        action: trade.action,
+        status: trade.status,
+        isin: trade.isin,
+        asset_class: trade.asset_class,
+        order_id: trade.order_id,
+        ref_order_id: trade.ref_order_id,
+        side: trade.side,
+        boid: trade.boid,
+        security_code: trade.security_code,
+        board: trade.board,
+        trade_date: trade.date,
+        trade_time: trade.time,
+        quantity: trade.quantity,
+        price: trade.price,
+        value: trade.value,
+        exec_id: trade.exec_id,
+        session: trade.session,
+        fill_type: trade.fill_type,
+        category: trade.category,
+        compulsory_spot: trade.compulsory_spot,
+        client_code: trade.client_code,
+        trader_dealer_id: trade.trader_dealer_id,
+        owner_dealer_id: trade.owner_dealer_id,
+        trade_report_type: trade.trade_report_type,
+        file_name: fileName,
+      }));
+
+      const { error } = await supabase.from('trade_history').insert(tradeRecords);
+      if (error) throw error;
+
+      toast({
+        title: "Trades saved",
+        description: `${trades.length} trades stored for audit trail`,
+      });
+    } catch (error) {
+      console.error('Error saving trades:', error);
+      toast({
+        title: "Save error",
+        description: "Failed to save trades to database",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -193,6 +244,10 @@ export function StockExchangeUpload() {
 
       setParsedTrades(trades);
       setParseStatus("parsed");
+      
+      // Save trades to database for audit trail
+      await saveToDatabase(trades, file.name);
+      
       toast({
         title: "File parsed successfully",
         description: `Found ${trades.length} trades from the file`,
