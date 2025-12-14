@@ -1,4 +1,5 @@
 import { postReportActivities } from "@/data/complianceData";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { 
   FileText, 
@@ -38,7 +39,7 @@ export function RecentActivity() {
     <div className="glass-card rounded-xl p-6 animate-slide-up" style={{ animationDelay: "300ms" }}>
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-semibold font-serif text-foreground">Recent Activity</h3>
-        <a href="/activity" className="text-sm text-primary hover:underline">View all</a>
+        <Link to="/activity" className="text-sm text-primary hover:underline">View all</Link>
       </div>
       
       <div className="space-y-4">
