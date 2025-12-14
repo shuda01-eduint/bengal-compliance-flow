@@ -62,6 +62,99 @@ export type Database = {
         }
         Relationships: []
       }
+      trade_history: {
+        Row: {
+          action: string | null
+          asset_class: string | null
+          board: string | null
+          boid: string | null
+          category: string | null
+          client_code: string | null
+          compulsory_spot: string | null
+          created_at: string
+          exec_id: string | null
+          file_name: string | null
+          fill_type: string | null
+          id: string
+          isin: string | null
+          order_id: string | null
+          owner_dealer_id: string | null
+          price: number | null
+          quantity: number | null
+          ref_order_id: string | null
+          security_code: string | null
+          session: string | null
+          side: string | null
+          status: string | null
+          trade_date: string | null
+          trade_report_type: string | null
+          trade_time: string | null
+          trader_dealer_id: string | null
+          uploaded_at: string
+          value: number | null
+        }
+        Insert: {
+          action?: string | null
+          asset_class?: string | null
+          board?: string | null
+          boid?: string | null
+          category?: string | null
+          client_code?: string | null
+          compulsory_spot?: string | null
+          created_at?: string
+          exec_id?: string | null
+          file_name?: string | null
+          fill_type?: string | null
+          id?: string
+          isin?: string | null
+          order_id?: string | null
+          owner_dealer_id?: string | null
+          price?: number | null
+          quantity?: number | null
+          ref_order_id?: string | null
+          security_code?: string | null
+          session?: string | null
+          side?: string | null
+          status?: string | null
+          trade_date?: string | null
+          trade_report_type?: string | null
+          trade_time?: string | null
+          trader_dealer_id?: string | null
+          uploaded_at?: string
+          value?: number | null
+        }
+        Update: {
+          action?: string | null
+          asset_class?: string | null
+          board?: string | null
+          boid?: string | null
+          category?: string | null
+          client_code?: string | null
+          compulsory_spot?: string | null
+          created_at?: string
+          exec_id?: string | null
+          file_name?: string | null
+          fill_type?: string | null
+          id?: string
+          isin?: string | null
+          order_id?: string | null
+          owner_dealer_id?: string | null
+          price?: number | null
+          quantity?: number | null
+          ref_order_id?: string | null
+          security_code?: string | null
+          session?: string | null
+          side?: string | null
+          status?: string | null
+          trade_date?: string | null
+          trade_report_type?: string | null
+          trade_time?: string | null
+          trader_dealer_id?: string | null
+          uploaded_at?: string
+          value?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
