@@ -137,6 +137,96 @@ export type Database = {
         }
         Relationships: []
       }
+      portfolio_custom_fields: {
+        Row: {
+          created_at: string
+          field_name: string
+          field_type: string
+          id: string
+          options: Json | null
+        }
+        Insert: {
+          created_at?: string
+          field_name: string
+          field_type?: string
+          id?: string
+          options?: Json | null
+        }
+        Update: {
+          created_at?: string
+          field_name?: string
+          field_type?: string
+          id?: string
+          options?: Json | null
+        }
+        Relationships: []
+      }
+      portfolio_field_values: {
+        Row: {
+          created_at: string
+          field_id: string
+          id: string
+          portfolio_id: string
+          value: string | null
+        }
+        Insert: {
+          created_at?: string
+          field_id: string
+          id?: string
+          portfolio_id: string
+          value?: string | null
+        }
+        Update: {
+          created_at?: string
+          field_id?: string
+          id?: string
+          portfolio_id?: string
+          value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "portfolio_field_values_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "portfolio_custom_fields"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "portfolio_field_values_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      portfolios: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          investor_code: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          investor_code: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          investor_code?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       securities: {
         Row: {
           audited_pe: number | null

@@ -12,7 +12,8 @@ import {
   Wallet,
   TrendingUp,
   History,
-  Landmark
+  Landmark,
+  Briefcase
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ const navigation = [
   { name: "Stock Exchange Data", href: "/stock-exchange", icon: TrendingUp },
   { name: "Trade History", href: "/trade-history", icon: History },
   { name: "Securities", href: "/securities", icon: Landmark },
+  { name: "Portfolio", href: "/portfolio", icon: Briefcase },
   { name: "Compliance Reports", href: "/reports", icon: FileText },
   { name: "Post-Report Activity", href: "/activity", icon: Activity },
   { name: "Employees", href: "/employees", icon: Users },
