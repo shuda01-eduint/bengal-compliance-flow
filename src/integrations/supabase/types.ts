@@ -86,6 +86,57 @@ export type Database = {
         }
         Relationships: []
       }
+      holdings: {
+        Row: {
+          avg_cost: number | null
+          boid: string | null
+          created_at: string
+          id: string
+          investor_code: string
+          investor_name: string | null
+          ledger_balance: number | null
+          market_value: number | null
+          rm_email: string | null
+          saleable: number | null
+          total_cost: number | null
+          total_stock: number | null
+          trading_code: string
+          updated_at: string
+        }
+        Insert: {
+          avg_cost?: number | null
+          boid?: string | null
+          created_at?: string
+          id?: string
+          investor_code: string
+          investor_name?: string | null
+          ledger_balance?: number | null
+          market_value?: number | null
+          rm_email?: string | null
+          saleable?: number | null
+          total_cost?: number | null
+          total_stock?: number | null
+          trading_code: string
+          updated_at?: string
+        }
+        Update: {
+          avg_cost?: number | null
+          boid?: string | null
+          created_at?: string
+          id?: string
+          investor_code?: string
+          investor_name?: string | null
+          ledger_balance?: number | null
+          market_value?: number | null
+          rm_email?: string | null
+          saleable?: number | null
+          total_cost?: number | null
+          total_stock?: number | null
+          trading_code?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       securities: {
         Row: {
           audited_pe: number | null
