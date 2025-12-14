@@ -163,29 +163,70 @@ export const DepositsWithdrawalsTable = () => {
         return;
       }
 
-      // Map Excel columns to database fields
-      const mappedRecords = jsonData.map((row: any) => ({
-        investor_code: String(
-          row["Investor Code"] || row["investor_code"] || row["InvCode"] || ""
-        ).trim(),
-        investor_name:
-          row["Investor Name"] || row["investor_name"] || row["Name"] || null,
-        transaction_type: String(
+      // Log first row to help debug column names
+      console.log("Excel columns found:", Object.keys(jsonData[0] as object));
+      console.log("First row sample:", jsonData[0]);
+
+      // Map Excel columns to database fields with flexible column name matching
+      const mappedRecords = jsonData.map((row: any) => {
+        // Find investor code - check various possible column names
+        const investorCode = String(
+          row["Investor Code"] || 
+          row["investor_code"] || 
+          row["InvCode"] || 
+          row["Inv Code"] ||
+          row["Client Code"] ||
+          row["client_code"] ||
+          row["Code"] ||
+          ""
+        ).trim();
+
+        // Find transaction type
+        const transactionType = String(
           row["Transaction Type"] ||
             row["transaction_type"] ||
             row["Type"] ||
+            row["Trans Type"] ||
+            row["TransType"] ||
             ""
-        ).trim(),
-        amount: parseNumber(row["Amount"] || row["amount"] || 0),
-        transaction_date:
+        ).trim();
+
+        // Parse amount - handle various formats
+        const rawAmount = row["Amount"] || row["amount"] || row["Amt"] || 0;
+        const amount = parseNumber(rawAmount);
+
+        // Find date
+        let transactionDate = 
           row["Transaction Date"] ||
           row["transaction_date"] ||
           row["Date"] ||
-          format(new Date(), "yyyy-MM-dd"),
-        remarks: row["Remarks"] || row["remarks"] || row["Notes"] || null,
-        rm_email:
-          row["RM Email"] || row["rm_email"] || row["RM_Email"] || null,
-      }));
+          row["Trans Date"] ||
+          row["TransDate"] ||
+          null;
+        
+        // Handle Excel date serial numbers
+        if (typeof transactionDate === "number") {
+          const excelDate = XLSX.SSF.parse_date_code(transactionDate);
+          if (excelDate) {
+            transactionDate = `${excelDate.y}-${String(excelDate.m).padStart(2, '0')}-${String(excelDate.d).padStart(2, '0')}`;
+          }
+        }
+
+        return {
+          investor_code: investorCode,
+          investor_name:
+            row["Investor Name"] || row["investor_name"] || row["Name"] || row["Client Name"] || null,
+          transaction_type: transactionType,
+          amount: amount,
+          transaction_date: transactionDate || format(new Date(), "yyyy-MM-dd"),
+          remarks: row["Remarks"] || row["remarks"] || row["Notes"] || row["Comment"] || null,
+          rm_email:
+            row["RM Email"] || row["rm_email"] || row["RM_Email"] || row["RM"] || null,
+        };
+      });
+
+      console.log("Mapped records sample:", mappedRecords[0]);
+
 
       // Validate records
       const { valid, errors } = validateRecords(
