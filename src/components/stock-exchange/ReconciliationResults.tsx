@@ -4,12 +4,30 @@ import { Badge } from "@/components/ui/badge";
 import { AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react";
 
 interface ParsedTrade {
-  inv_code: string;
-  scrip: string;
+  action: string;
+  status: string;
+  isin: string;
+  asset_class: string;
+  order_id: string;
+  ref_order_id: string;
+  side: "BUY" | "SELL";
+  boid: string;
+  security_code: string;
+  board: string;
+  date: string;
+  time: string;
   quantity: number;
-  rate: number;
+  price: number;
   value: number;
-  trade_type: "BUY" | "SELL";
+  exec_id: string;
+  session: string;
+  fill_type: string;
+  category: string;
+  compulsory_spot: string;
+  client_code: string;
+  trader_dealer_id: string;
+  owner_dealer_id: string;
+  trade_report_type: string;
 }
 
 interface ReconciliationResult {
