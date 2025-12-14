@@ -13,11 +13,14 @@ import {
   TrendingUp,
   History,
   Landmark,
-  Briefcase
+  Briefcase,
+  LogOut
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface SidebarProps {
   className?: string;
@@ -41,7 +44,13 @@ const navigation = [
 
 export function Sidebar({ className }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const { signOut, user } = useAuth();
+  const navigate = useNavigate();
 
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/auth");
+  };
   return (
     <aside
       className={cn(
@@ -89,8 +98,20 @@ export function Sidebar({ className }: SidebarProps) {
           ))}
         </nav>
 
-        {/* Collapse Toggle */}
-        <div className="border-t border-sidebar-border p-3">
+        {/* User & Logout */}
+        <div className="border-t border-sidebar-border p-3 space-y-2">
+          {!collapsed && user && (
+            <div className="px-3 py-2 text-xs text-muted-foreground truncate">
+              {user.email}
+            </div>
+          )}
+          <button
+            onClick={handleSignOut}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/20"
+          >
+            <LogOut className="h-4 w-4" />
+            {!collapsed && <span>Sign Out</span>}
+          </button>
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent/80"

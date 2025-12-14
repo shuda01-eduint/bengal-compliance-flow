@@ -3,6 +3,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index";
 import ReportsPage from "./pages/ReportsPage";
 import ActivityPage from "./pages/ActivityPage";
@@ -16,6 +18,7 @@ import StockExchangeDataPage from "./pages/StockExchangeDataPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
 import SecuritiesPage from "./pages/SecuritiesPage";
 import PortfolioPage from "./pages/PortfolioPage";
+import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -26,22 +29,25 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/reports" element={<ReportsPage />} />
-          <Route path="/activity" element={<ActivityPage />} />
-          <Route path="/employees" element={<EmployeesPage />} />
-          <Route path="/departments" element={<DepartmentsPage />} />
-          <Route path="/rules" element={<RulesPage />} />
-          <Route path="/notifications" element={<NotificationsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/admin/balances" element={<AdminBalancesPage />} />
-          <Route path="/stock-exchange" element={<StockExchangeDataPage />} />
-          <Route path="/trade-history" element={<TradeHistoryPage />} />
-          <Route path="/securities" element={<SecuritiesPage />} />
-          <Route path="/portfolio" element={<PortfolioPage />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <AuthProvider>
+          <Routes>
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
+            <Route path="/activity" element={<ProtectedRoute><ActivityPage /></ProtectedRoute>} />
+            <Route path="/employees" element={<ProtectedRoute><EmployeesPage /></ProtectedRoute>} />
+            <Route path="/departments" element={<ProtectedRoute><DepartmentsPage /></ProtectedRoute>} />
+            <Route path="/rules" element={<ProtectedRoute><RulesPage /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+            <Route path="/admin/balances" element={<ProtectedRoute><AdminBalancesPage /></ProtectedRoute>} />
+            <Route path="/stock-exchange" element={<ProtectedRoute><StockExchangeDataPage /></ProtectedRoute>} />
+            <Route path="/trade-history" element={<ProtectedRoute><TradeHistoryPage /></ProtectedRoute>} />
+            <Route path="/securities" element={<ProtectedRoute><SecuritiesPage /></ProtectedRoute>} />
+            <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
