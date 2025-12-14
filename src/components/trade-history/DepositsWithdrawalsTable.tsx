@@ -171,6 +171,8 @@ export const DepositsWithdrawalsTable = () => {
       const mappedRecords = jsonData.map((row: any) => {
         // Find investor code - check various possible column names
         const investorCode = String(
+          row["Inv. Code"] ||
+          row["Inv.Code"] ||
           row["Investor Code"] || 
           row["investor_code"] || 
           row["InvCode"] || 
@@ -181,19 +183,50 @@ export const DepositsWithdrawalsTable = () => {
           ""
         ).trim();
 
-        // Find transaction type
-        const transactionType = String(
+        // Find transaction type - map Receipt/Payment to Deposit/Withdrawal
+        let rawType = String(
+          row["Tr. Type"] ||
+          row["Tr.Type"] ||
           row["Transaction Type"] ||
-            row["transaction_type"] ||
-            row["Type"] ||
-            row["Trans Type"] ||
-            row["TransType"] ||
-            ""
+          row["transaction_type"] ||
+          row["Type"] ||
+          row["Trans Type"] ||
+          row["TransType"] ||
+          ""
         ).trim();
+        
+        // Normalize transaction type
+        let transactionType = rawType;
+        if (rawType.toLowerCase() === "receipt") {
+          transactionType = "Deposit";
+        } else if (rawType.toLowerCase() === "payment") {
+          transactionType = "Withdrawal";
+        }
 
-        // Parse amount - handle various formats
-        const rawAmount = row["Amount"] || row["amount"] || row["Amt"] || 0;
-        const amount = parseNumber(rawAmount);
+        // Parse amount - handle Debit/Credit columns
+        const debit = parseNumber(row["Debit"] || row["debit"] || 0);
+        const credit = parseNumber(row["Credit"] || row["credit"] || 0);
+        const rawAmount = row["Amount"] || row["amount"] || row["Amt"];
+        
+        // Use Credit for deposits (Receipt), Debit for withdrawals (Payment)
+        // If Amount column exists, use it; otherwise derive from Debit/Credit
+        let amount: number;
+        if (rawAmount !== undefined && rawAmount !== null) {
+          amount = parseNumber(rawAmount);
+        } else {
+          // Credit is for receipts (deposits), Debit is for payments (withdrawals)
+          amount = credit > 0 ? credit : debit;
+        }
+
+        // Find investor name
+        const investorName = 
+          row["Inv. Name"] ||
+          row["Inv.Name"] ||
+          row["Investor Name"] || 
+          row["investor_name"] || 
+          row["Name"] || 
+          row["Client Name"] || 
+          null;
 
         // Find date
         let transactionDate = 
@@ -212,14 +245,23 @@ export const DepositsWithdrawalsTable = () => {
           }
         }
 
+        // Build remarks from multiple possible fields
+        const remarks = 
+          row["Descriptions"] ||
+          row["Description"] ||
+          row["Remarks"] || 
+          row["remarks"] || 
+          row["Notes"] || 
+          row["Comment"] || 
+          null;
+
         return {
           investor_code: investorCode,
-          investor_name:
-            row["Investor Name"] || row["investor_name"] || row["Name"] || row["Client Name"] || null,
-          transaction_type: transactionType,
+          investor_name: investorName,
+          transaction_type: transactionType || "Deposit",
           amount: amount,
           transaction_date: transactionDate || format(new Date(), "yyyy-MM-dd"),
-          remarks: row["Remarks"] || row["remarks"] || row["Notes"] || row["Comment"] || null,
+          remarks: remarks,
           rm_email:
             row["RM Email"] || row["rm_email"] || row["RM_Email"] || row["RM"] || null,
         };
