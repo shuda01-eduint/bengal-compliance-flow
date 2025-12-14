@@ -33,13 +33,43 @@ const AdminBalancesPage = () => {
   const { data: clients, isLoading, error } = useQuery({
     queryKey: ['clients'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .order('rm_name', { ascending: true });
+      // Fetch all clients - using range to bypass 1000 limit
+      type Client = {
+        id: string;
+        inv_code: string;
+        investor_name: string;
+        ledger_balance: number;
+        accrued_interest: number;
+        current_liabilities: number;
+        market_value: number;
+        equity: number;
+        rm_name: string;
+        rm_email: string | null;
+        status: string;
+        created_at: string;
+        updated_at: string;
+      };
       
-      if (error) throw error;
-      return data;
+      let allClients: Client[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      
+      while (true) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('*')
+          .order('rm_name', { ascending: true })
+          .range(from, from + batchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allClients = [...allClients, ...data];
+        if (data.length < batchSize) break;
+        from += batchSize;
+      }
+      
+      return allClients;
     },
   });
 
