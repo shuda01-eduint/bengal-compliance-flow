@@ -155,6 +155,8 @@ export function TradeHistoryTable() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [hideZeroValues, setHideZeroValues] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const { toast } = useToast();
 
   // Debounce search input
@@ -193,7 +195,7 @@ export function TradeHistoryTable() {
   // Fetch trades with server-side filtering
   useEffect(() => {
     fetchTrades();
-  }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, currentPage, pageSize]);
+  }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, currentPage, pageSize, hideZeroValues, statusFilter]);
 
   const fetchFileNames = async () => {
     const { data } = await supabase
@@ -248,6 +250,16 @@ export function TradeHistoryTable() {
         query = query.lte("trade_date", toStr);
       }
 
+      // Apply zero-value filter
+      if (hideZeroValues) {
+        query = query.gt("value", 0);
+      }
+
+      // Apply status filter
+      if (statusFilter !== "all") {
+        query = query.eq("status", statusFilter);
+      }
+
       // Apply pagination
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
@@ -281,9 +293,11 @@ export function TradeHistoryTable() {
     setSearchInput("");
     setSearchTerm("");
     setSideFilter("all");
+    setStatusFilter("all");
     setDateFrom(undefined);
     setDateTo(undefined);
     setSelectedFile("all");
+    setHideZeroValues(true);
     setCurrentPage(1);
   };
 
@@ -483,7 +497,7 @@ export function TradeHistoryTable() {
             />
           </div>
 
-          <Select value={sideFilter} onValueChange={setSideFilter}>
+          <Select value={sideFilter} onValueChange={(v) => { setSideFilter(v); setCurrentPage(1); }}>
             <SelectTrigger>
               <SelectValue placeholder="Side" />
             </SelectTrigger>
@@ -494,7 +508,20 @@ export function TradeHistoryTable() {
             </SelectContent>
           </Select>
 
-          <Select value={selectedFile} onValueChange={setSelectedFile}>
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger>
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="FILLED">Filled</SelectItem>
+              <SelectItem value="PARTIAL">Partial</SelectItem>
+              <SelectItem value="EXPIRED">Expired</SelectItem>
+              <SelectItem value="CANCELLED">Cancelled</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={selectedFile} onValueChange={(v) => { setSelectedFile(v); setCurrentPage(1); }}>
             <SelectTrigger>
               <SelectValue placeholder="File" />
             </SelectTrigger>
@@ -516,7 +543,7 @@ export function TradeHistoryTable() {
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={dateFrom} onSelect={setDateFrom} className="pointer-events-auto" />
+              <Calendar mode="single" selected={dateFrom} onSelect={(d) => { setDateFrom(d); setCurrentPage(1); }} className="pointer-events-auto" />
             </PopoverContent>
           </Popover>
 
@@ -528,9 +555,23 @@ export function TradeHistoryTable() {
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={dateTo} onSelect={setDateTo} className="pointer-events-auto" />
+              <Calendar mode="single" selected={dateTo} onSelect={(d) => { setDateTo(d); setCurrentPage(1); }} className="pointer-events-auto" />
             </PopoverContent>
           </Popover>
+        </div>
+
+        {/* Additional Filters Row */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Checkbox 
+              id="hideZeroValues" 
+              checked={hideZeroValues} 
+              onCheckedChange={(checked) => { setHideZeroValues(checked === true); setCurrentPage(1); }}
+            />
+            <label htmlFor="hideZeroValues" className="text-sm cursor-pointer">
+              Hide zero-value trades (expired/cancelled)
+            </label>
+          </div>
         </div>
 
         <div className="flex items-center justify-between">
