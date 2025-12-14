@@ -27,7 +27,7 @@ const DepartmentsPage = () => {
             
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
               <Users className="h-4 w-4" />
-              <span>{dept.count} employees</span>
+              <span>{dept.employeeCount} employees</span>
             </div>
 
             <div className="pt-4 border-t border-border">
