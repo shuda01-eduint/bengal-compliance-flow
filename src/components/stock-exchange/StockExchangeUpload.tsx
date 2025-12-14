@@ -56,11 +56,14 @@ export function StockExchangeUpload() {
   const [parsedTrades, setParsedTrades] = useState<ParsedTrade[]>([]);
   const [results, setResults] = useState<ReconciliationResult[]>([]);
   const [parseStatus, setParseStatus] = useState<"idle" | "parsed" | "reconciled">("idle");
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const saveToDatabase = async (trades: ParsedTrade[], fileName: string) => {
     setSaving(true);
+    setProgress({ current: 0, total: trades.length });
+    
     try {
       const tradeRecords = trades.map(trade => ({
         action: trade.action,
@@ -90,8 +93,21 @@ export function StockExchangeUpload() {
         file_name: fileName,
       }));
 
-      const { error } = await supabase.from('trade_history').insert(tradeRecords);
-      if (error) throw error;
+      // Insert in batches of 500 to avoid Supabase limits
+      const batchSize = 500;
+      let inserted = 0;
+      
+      for (let i = 0; i < tradeRecords.length; i += batchSize) {
+        const batch = tradeRecords.slice(i, i + batchSize);
+        const { error } = await supabase.from('trade_history').insert(batch);
+        if (error) throw error;
+        
+        inserted += batch.length;
+        setProgress({ current: inserted, total: tradeRecords.length });
+        
+        // Yield to keep UI responsive
+        await new Promise(resolve => requestAnimationFrame(resolve));
+      }
 
       toast({
         title: "Trades saved",
@@ -106,6 +122,7 @@ export function StockExchangeUpload() {
       });
     } finally {
       setSaving(false);
+      setProgress(null);
     }
   };
 
@@ -179,12 +196,16 @@ export function StockExchangeUpload() {
     chunkSize = 500
   ): Promise<R[]> => {
     const results: R[] = [];
+    const total = items.length;
+    
     for (let i = 0; i < items.length; i += chunkSize) {
       const chunk = items.slice(i, i + chunkSize);
       for (const item of chunk) {
         const result = processor(item);
         if (result) results.push(result);
       }
+      // Update progress
+      setProgress({ current: Math.min(i + chunkSize, total), total });
       // Yield to the main thread to keep UI responsive
       await new Promise(resolve => requestAnimationFrame(resolve));
     }
@@ -194,16 +215,16 @@ export function StockExchangeUpload() {
   const parseExcelFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
     
+    setProgress({ current: 0, total: 100 }); // Initial progress
+    
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: 'array' });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet);
     
-    // Debug: Log first row to see column headers
+    console.log('Total rows to parse:', jsonData.length);
     if (jsonData.length > 0) {
-      console.log('CSV/Excel Headers:', Object.keys(jsonData[0]));
-      console.log('First row sample:', jsonData[0]);
-      console.log('Total rows:', jsonData.length);
+      console.log('Headers:', Object.keys(jsonData[0]));
     }
     
     return processInChunks(jsonData, parseRowToTrade);
@@ -424,10 +445,26 @@ export function StockExchangeUpload() {
             )}
           </div>
 
+          {/* Progress indicator */}
+          {progress && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm text-muted-foreground">
+                <span>{parsing ? 'Parsing' : 'Saving'}...</span>
+                <span>{progress.current.toLocaleString()} / {progress.total.toLocaleString()}</span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div 
+                  className="bg-primary h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-3">
             <Button
               onClick={handleParseFile}
-              disabled={!file || parsing}
+              disabled={!file || parsing || saving}
               className="btn-gradient-gold text-primary-foreground"
             >
               {parsing ? (
@@ -445,7 +482,7 @@ export function StockExchangeUpload() {
             
             <Button
               onClick={runReconciliation}
-              disabled={parseStatus !== "parsed" || reconciling}
+              disabled={parseStatus !== "parsed" || reconciling || saving}
               variant="outline"
             >
               {reconciling ? (
