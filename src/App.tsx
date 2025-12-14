@@ -11,6 +11,7 @@ import DepartmentsPage from "./pages/DepartmentsPage";
 import RulesPage from "./pages/RulesPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import SettingsPage from "./pages/SettingsPage";
+import AdminBalancesPage from "./pages/AdminBalancesPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +31,7 @@ const App = () => (
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/admin/balances" element={<AdminBalancesPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
