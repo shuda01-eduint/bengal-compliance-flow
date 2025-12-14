@@ -14,7 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      clients: {
+        Row: {
+          accrued_interest: number
+          created_at: string
+          current_liabilities: number
+          equity: number
+          id: string
+          inv_code: string
+          investor_name: string
+          ledger_balance: number
+          market_value: number
+          rm_email: string | null
+          rm_name: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          accrued_interest?: number
+          created_at?: string
+          current_liabilities?: number
+          equity?: number
+          id?: string
+          inv_code: string
+          investor_name: string
+          ledger_balance?: number
+          market_value?: number
+          rm_email?: string | null
+          rm_name: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          accrued_interest?: number
+          created_at?: string
+          current_liabilities?: number
+          equity?: number
+          id?: string
+          inv_code?: string
+          investor_name?: string
+          ledger_balance?: number
+          market_value?: number
+          rm_email?: string | null
+          rm_name?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
