@@ -228,20 +228,53 @@ export const DepositsWithdrawalsTable = () => {
           row["Client Name"] || 
           null;
 
-        // Find date
-        let transactionDate = 
+        // Find date - check many possible column names
+        let transactionDate: string | null = null;
+        const rawDate = 
           row["Transaction Date"] ||
           row["transaction_date"] ||
+          row["Trans. Date"] ||
+          row["Trans.Date"] ||
+          row["Tr. Date"] ||
+          row["Tr.Date"] ||
           row["Date"] ||
           row["Trans Date"] ||
           row["TransDate"] ||
+          row["ValueDate"] ||
+          row["Value Date"] ||
+          row["Entry Date"] ||
           null;
         
-        // Handle Excel date serial numbers
-        if (typeof transactionDate === "number") {
-          const excelDate = XLSX.SSF.parse_date_code(transactionDate);
-          if (excelDate) {
-            transactionDate = `${excelDate.y}-${String(excelDate.m).padStart(2, '0')}-${String(excelDate.d).padStart(2, '0')}`;
+        if (rawDate !== null && rawDate !== undefined) {
+          // Handle Excel date serial numbers
+          if (typeof rawDate === "number") {
+            const excelDate = XLSX.SSF.parse_date_code(rawDate);
+            if (excelDate) {
+              transactionDate = `${excelDate.y}-${String(excelDate.m).padStart(2, '0')}-${String(excelDate.d).padStart(2, '0')}`;
+            }
+          } else if (typeof rawDate === "string") {
+            // Try to parse string dates in various formats
+            const dateStr = rawDate.trim();
+            
+            // Try DD/MM/YYYY or DD-MM-YYYY format
+            const ddmmyyyy = dateStr.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+            if (ddmmyyyy) {
+              transactionDate = `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+            }
+            // Try YYYY-MM-DD format (already correct)
+            else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+              transactionDate = dateStr;
+            }
+            // Try MM/DD/YYYY format
+            else {
+              const mmddyyyy = dateStr.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+              if (mmddyyyy) {
+                // Assume DD/MM/YYYY for non-US locales
+                transactionDate = `${mmddyyyy[3]}-${mmddyyyy[2].padStart(2, '0')}-${mmddyyyy[1].padStart(2, '0')}`;
+              }
+            }
+          } else if (rawDate instanceof Date) {
+            transactionDate = format(rawDate, "yyyy-MM-dd");
           }
         }
 
