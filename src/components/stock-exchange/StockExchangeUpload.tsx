@@ -172,6 +172,25 @@ export function StockExchangeUpload() {
     };
   };
 
+  // Process rows in chunks to prevent UI blocking
+  const processInChunks = async <T, R>(
+    items: T[],
+    processor: (item: T) => R | null,
+    chunkSize = 500
+  ): Promise<R[]> => {
+    const results: R[] = [];
+    for (let i = 0; i < items.length; i += chunkSize) {
+      const chunk = items.slice(i, i + chunkSize);
+      for (const item of chunk) {
+        const result = processor(item);
+        if (result) results.push(result);
+      }
+      // Yield to the main thread to keep UI responsive
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    return results;
+  };
+
   const parseExcelFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
     
@@ -180,12 +199,7 @@ export function StockExchangeUpload() {
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet);
     
-    const trades: ParsedTrade[] = [];
-    for (const row of jsonData) {
-      const trade = parseRowToTrade(row);
-      if (trade) trades.push(trade);
-    }
-    return trades;
+    return processInChunks(jsonData, parseRowToTrade);
   };
 
   const parseHtmlFile = async (): Promise<ParsedTrade[]> => {
