@@ -1,5 +1,5 @@
 import { MainLayout } from "@/components/layout/MainLayout";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { ImportClientsDialog } from "@/components/admin/ImportClientsDialog";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('en-BD', {
@@ -25,6 +26,7 @@ const formatCurrency = (value: number) => {
 };
 
 const AdminBalancesPage = () => {
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRM, setSelectedRM] = useState("all");
 
@@ -115,11 +117,20 @@ const AdminBalancesPage = () => {
     );
   }
 
+  const handleImportComplete = () => {
+    queryClient.invalidateQueries({ queryKey: ['clients'] });
+  };
+
   return (
     <MainLayout 
       title="Admin Balances" 
       subtitle="Client portfolio overview by Relationship Manager"
     >
+      {/* Header with Import Button */}
+      <div className="flex justify-end mb-6">
+        <ImportClientsDialog onImportComplete={handleImportComplete} />
+      </div>
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="glass-card rounded-xl p-5">
