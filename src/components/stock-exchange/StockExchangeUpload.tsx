@@ -112,12 +112,12 @@ export function StockExchangeUpload() {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
-      const validExtensions = ['.html', '.htm', '.xlsx', '.xls'];
+      const validExtensions = ['.html', '.htm', '.xlsx', '.xls', '.csv'];
       const hasValidExt = validExtensions.some(ext => selectedFile.name.toLowerCase().endsWith(ext));
       if (!hasValidExt) {
         toast({
           title: "Invalid file type",
-          description: "Please upload an HTML or Excel file from the stock exchange",
+          description: "Please upload an HTML, Excel, or CSV file from the stock exchange",
           variant: "destructive",
         });
         return;
@@ -243,8 +243,9 @@ export function StockExchangeUpload() {
 
     setParsing(true);
     try {
-      const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
-      const trades = isExcel ? await parseExcelFile() : await parseHtmlFile();
+      const fileName = file.name.toLowerCase();
+      const isExcelOrCsv = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv');
+      const trades = isExcelOrCsv ? await parseExcelFile() : await parseHtmlFile();
 
       if (trades.length === 0) {
         toast({
@@ -389,7 +390,7 @@ export function StockExchangeUpload() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".html,.htm,.xlsx,.xls"
+              accept=".html,.htm,.xlsx,.xls,.csv"
               onChange={handleFileSelect}
               className="hidden"
             />
@@ -410,7 +411,7 @@ export function StockExchangeUpload() {
                   Click to upload or drag and drop
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  HTML or Excel files
+                  HTML, Excel, or CSV files
                 </p>
               </div>
             )}
