@@ -199,6 +199,13 @@ export function StockExchangeUpload() {
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet);
     
+    // Debug: Log first row to see column headers
+    if (jsonData.length > 0) {
+      console.log('CSV/Excel Headers:', Object.keys(jsonData[0]));
+      console.log('First row sample:', jsonData[0]);
+      console.log('Total rows:', jsonData.length);
+    }
+    
     return processInChunks(jsonData, parseRowToTrade);
   };
 
