@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon, Search, Filter, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { CalendarIcon, Search, Filter, Loader2, ChevronLeft, ChevronRight, Settings2, Plus, Trash2, Calculator } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,11 +36,111 @@ interface TradeRecord {
   price: number | null;
   value: number | null;
   trade_date: string | null;
+  trade_time: string | null;
   file_name: string | null;
   uploaded_at: string;
+  order_id: string | null;
+  exec_id: string | null;
+  isin: string | null;
+  board: string | null;
+  session: string | null;
+  fill_type: string | null;
+  category: string | null;
+  boid: string | null;
+  trader_dealer_id: string | null;
+  owner_dealer_id: string | null;
 }
 
+interface ColumnConfig {
+  key: string;
+  label: string;
+  defaultVisible: boolean;
+  type: 'string' | 'number' | 'currency' | 'date' | 'badge';
+}
+
+interface CustomColumn {
+  id: string;
+  name: string;
+  formula: string;
+}
+
+const BASE_COLUMNS: ColumnConfig[] = [
+  { key: "trade_date", label: "Date", defaultVisible: true, type: 'date' },
+  { key: "trade_time", label: "Time", defaultVisible: false, type: 'string' },
+  { key: "client_code", label: "Client Code", defaultVisible: true, type: 'string' },
+  { key: "security_code", label: "Security", defaultVisible: true, type: 'string' },
+  { key: "side", label: "Side", defaultVisible: true, type: 'badge' },
+  { key: "quantity", label: "Quantity", defaultVisible: true, type: 'number' },
+  { key: "price", label: "Price", defaultVisible: true, type: 'number' },
+  { key: "value", label: "Value", defaultVisible: true, type: 'currency' },
+  { key: "action", label: "Action", defaultVisible: true, type: 'badge' },
+  { key: "status", label: "Status", defaultVisible: false, type: 'string' },
+  { key: "order_id", label: "Order ID", defaultVisible: false, type: 'string' },
+  { key: "exec_id", label: "Exec ID", defaultVisible: false, type: 'string' },
+  { key: "isin", label: "ISIN", defaultVisible: false, type: 'string' },
+  { key: "board", label: "Board", defaultVisible: false, type: 'string' },
+  { key: "session", label: "Session", defaultVisible: false, type: 'string' },
+  { key: "fill_type", label: "Fill Type", defaultVisible: false, type: 'string' },
+  { key: "category", label: "Category", defaultVisible: false, type: 'string' },
+  { key: "boid", label: "BOID", defaultVisible: false, type: 'string' },
+  { key: "trader_dealer_id", label: "Trader ID", defaultVisible: false, type: 'string' },
+  { key: "owner_dealer_id", label: "Owner ID", defaultVisible: false, type: 'string' },
+  { key: "file_name", label: "File", defaultVisible: true, type: 'string' },
+];
+
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+
+// Safe formula evaluator
+const evaluateFormula = (formula: string, trade: TradeRecord): string | number => {
+  try {
+    // Replace field references with actual values
+    let expression = formula;
+    
+    // Available fields for formulas
+    const fields: Record<string, number | string | null> = {
+      quantity: trade.quantity,
+      price: trade.price,
+      value: trade.value,
+      side: trade.side,
+    };
+
+    // Replace field names with values
+    Object.entries(fields).forEach(([key, val]) => {
+      const regex = new RegExp(`\\b${key}\\b`, 'gi');
+      if (typeof val === 'number') {
+        expression = expression.replace(regex, String(val || 0));
+      } else if (typeof val === 'string') {
+        expression = expression.replace(regex, `"${val}"`);
+      } else {
+        expression = expression.replace(regex, '0');
+      }
+    });
+
+    // Support common functions
+    expression = expression.replace(/ABS\(/gi, 'Math.abs(');
+    expression = expression.replace(/ROUND\(/gi, 'Math.round(');
+    expression = expression.replace(/FLOOR\(/gi, 'Math.floor(');
+    expression = expression.replace(/CEIL\(/gi, 'Math.ceil(');
+    expression = expression.replace(/MIN\(/gi, 'Math.min(');
+    expression = expression.replace(/MAX\(/gi, 'Math.max(');
+    expression = expression.replace(/POW\(/gi, 'Math.pow(');
+    expression = expression.replace(/SQRT\(/gi, 'Math.sqrt(');
+
+    // Support IF statements: IF(condition, trueVal, falseVal)
+    expression = expression.replace(/IF\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)/gi, '($1 ? $2 : $3)');
+
+    // Validate - only allow safe characters
+    if (!/^[\d\s\+\-\*\/\(\)\.\,\?\:\<\>\=\!\&\|\"Math\.absroundflooceimaxinpowsqrt]+$/i.test(expression)) {
+      return 'Invalid';
+    }
+
+    // Evaluate
+    const result = new Function(`return ${expression}`)();
+    return typeof result === 'number' ? (isNaN(result) ? 0 : result) : result;
+  } catch (e) {
+    return 'Error';
+  }
+};
 
 export function TradeHistoryTable() {
   const [trades, setTrades] = useState<TradeRecord[]>([]);
@@ -43,6 +155,25 @@ export function TradeHistoryTable() {
   const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const { toast } = useToast();
+
+  // Column customization
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(
+    BASE_COLUMNS.filter(c => c.defaultVisible).map(c => c.key)
+  );
+
+  // Custom formula columns
+  const [customColumns, setCustomColumns] = useState<CustomColumn[]>(() => {
+    const saved = localStorage.getItem('tradeHistory_customColumns');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [newColumnName, setNewColumnName] = useState("");
+  const [newColumnFormula, setNewColumnFormula] = useState("");
+  const [formulaDialogOpen, setFormulaDialogOpen] = useState(false);
+
+  // Save custom columns to localStorage
+  useEffect(() => {
+    localStorage.setItem('tradeHistory_customColumns', JSON.stringify(customColumns));
+  }, [customColumns]);
 
   useEffect(() => {
     fetchTrades();
@@ -74,7 +205,7 @@ export function TradeHistoryTable() {
     try {
       const { data, error } = await supabase
         .from("trade_history")
-        .select("id, action, status, side, security_code, client_code, quantity, price, value, trade_date, file_name, uploaded_at")
+        .select("*")
         .order("uploaded_at", { ascending: false });
 
       if (error) throw error;
@@ -116,7 +247,6 @@ export function TradeHistoryTable() {
     return filteredTrades.slice(start, start + pageSize);
   }, [filteredTrades, currentPage, pageSize]);
 
-  // Reset to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, pageSize]);
@@ -153,13 +283,165 @@ export function TradeHistoryTable() {
     setCurrentPage(Math.max(1, Math.min(page, totalPages)));
   };
 
+  const toggleColumn = (key: string) => {
+    setVisibleColumns(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  const addCustomColumn = () => {
+    if (!newColumnName.trim() || !newColumnFormula.trim()) {
+      toast({ title: "Error", description: "Name and formula are required", variant: "destructive" });
+      return;
+    }
+    
+    const newCol: CustomColumn = {
+      id: `custom_${Date.now()}`,
+      name: newColumnName.trim(),
+      formula: newColumnFormula.trim(),
+    };
+    
+    setCustomColumns(prev => [...prev, newCol]);
+    setNewColumnName("");
+    setNewColumnFormula("");
+    setFormulaDialogOpen(false);
+    toast({ title: "Column added", description: `Custom column "${newCol.name}" created` });
+  };
+
+  const removeCustomColumn = (id: string) => {
+    setCustomColumns(prev => prev.filter(c => c.id !== id));
+  };
+
+  const renderCellValue = (trade: TradeRecord, column: ColumnConfig) => {
+    const value = trade[column.key as keyof TradeRecord];
+    
+    switch (column.type) {
+      case 'date':
+        return formatTradeDate(value as string | null);
+      case 'currency':
+        return formatCurrency(value as number | null);
+      case 'number':
+        return value !== null ? Number(value).toLocaleString() : "-";
+      case 'badge':
+        if (!value) return "-";
+        const isSide = column.key === 'side';
+        return (
+          <Badge 
+            variant={isSide && value === "BUY" ? "default" : isSide ? "destructive" : "outline"} 
+            className="text-xs"
+          >
+            {String(value)}
+          </Badge>
+        );
+      default:
+        return value !== null ? String(value) : "-";
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Filter className="h-5 w-5" />
-          Trade History
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Filter className="h-5 w-5" />
+            Trade History
+          </CardTitle>
+          <div className="flex gap-2">
+            {/* Add Formula Column */}
+            <Dialog open={formulaDialogOpen} onOpenChange={setFormulaDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Calculator className="h-4 w-4 mr-2" />
+                  Add Formula
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add Custom Formula Column</DialogTitle>
+                  <DialogDescription>
+                    Create a calculated column using formulas. Available fields: quantity, price, value, side
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Column Name</Label>
+                    <Input
+                      placeholder="e.g., Commission"
+                      value={newColumnName}
+                      onChange={(e) => setNewColumnName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Formula</Label>
+                    <Textarea
+                      placeholder="e.g., value * 0.0015"
+                      value={newColumnFormula}
+                      onChange={(e) => setNewColumnFormula(e.target.value)}
+                      rows={3}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Examples: <br />
+                      • Commission: <code>value * 0.0015</code><br />
+                      • Avg Price: <code>value / quantity</code><br />
+                      • With condition: <code>IF(side == "BUY", value * 1.01, value * 0.99)</code><br />
+                      • Functions: ABS(), ROUND(), MIN(), MAX(), SQRT()
+                    </p>
+                  </div>
+                  
+                  {customColumns.length > 0 && (
+                    <div className="space-y-2">
+                      <Label>Existing Custom Columns</Label>
+                      <div className="space-y-1">
+                        {customColumns.map(col => (
+                          <div key={col.id} className="flex items-center justify-between text-sm bg-secondary/50 rounded px-2 py-1">
+                            <span>{col.name}: <code className="text-xs">{col.formula}</code></span>
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeCustomColumn(col.id)}>
+                              <Trash2 className="h-3 w-3 text-destructive" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setFormulaDialogOpen(false)}>Cancel</Button>
+                  <Button onClick={addCustomColumn}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Column
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Column Settings */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Settings2 className="h-4 w-4 mr-2" />
+                  Columns
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 max-h-80 overflow-y-auto" align="end">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium mb-3">Visible Columns</p>
+                  {BASE_COLUMNS.map(column => (
+                    <div key={column.key} className="flex items-center gap-2">
+                      <Checkbox
+                        id={column.key}
+                        checked={visibleColumns.includes(column.key)}
+                        onCheckedChange={() => toggleColumn(column.key)}
+                      />
+                      <label htmlFor={column.key} className="text-sm cursor-pointer">
+                        {column.label}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Filters */}
@@ -229,7 +511,7 @@ export function TradeHistoryTable() {
             Clear Filters
           </Button>
           <span className="text-sm text-muted-foreground">
-            Showing {paginatedTrades.length} of {filteredTrades.length} trades
+            Showing {paginatedTrades.length} of {filteredTrades.length} trades (Total: {totalCount.toLocaleString()})
           </span>
         </div>
 
@@ -243,46 +525,51 @@ export function TradeHistoryTable() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Client Code</TableHead>
-                  <TableHead>Security</TableHead>
-                  <TableHead>Side</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
-                  <TableHead className="text-right">Value</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>File</TableHead>
+                  {BASE_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(column => (
+                    <TableHead key={column.key} className={column.type === 'number' || column.type === 'currency' ? 'text-right' : ''}>
+                      {column.label}
+                    </TableHead>
+                  ))}
+                  {customColumns.map(col => (
+                    <TableHead key={col.id} className="text-right bg-primary/5">
+                      <div className="flex items-center gap-1 justify-end">
+                        <Calculator className="h-3 w-3" />
+                        {col.name}
+                      </div>
+                    </TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {paginatedTrades.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={visibleColumns.length + customColumns.length} className="text-center py-8 text-muted-foreground">
                       No trades found
                     </TableCell>
                   </TableRow>
                 ) : (
                   paginatedTrades.map((trade) => (
                     <TableRow key={trade.id}>
-                      <TableCell className="whitespace-nowrap">{formatTradeDate(trade.trade_date)}</TableCell>
-                      <TableCell className="font-medium">{trade.client_code || "-"}</TableCell>
-                      <TableCell>{trade.security_code || "-"}</TableCell>
-                      <TableCell>
-                        <Badge variant={trade.side === "BUY" ? "default" : "destructive"} className="text-xs">
-                          {trade.side || "-"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">{trade.quantity?.toLocaleString() || "-"}</TableCell>
-                      <TableCell className="text-right">{trade.price?.toFixed(2) || "-"}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(trade.value)}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">
-                          {trade.action || "-"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="max-w-[150px] truncate text-xs text-muted-foreground">
-                        {trade.file_name || "-"}
-                      </TableCell>
+                      {BASE_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(column => (
+                        <TableCell 
+                          key={column.key} 
+                          className={cn(
+                            "whitespace-nowrap",
+                            (column.type === 'number' || column.type === 'currency') && 'text-right',
+                            column.key === 'file_name' && 'max-w-[150px] truncate text-xs text-muted-foreground'
+                          )}
+                        >
+                          {renderCellValue(trade, column)}
+                        </TableCell>
+                      ))}
+                      {customColumns.map(col => {
+                        const result = evaluateFormula(col.formula, trade);
+                        return (
+                          <TableCell key={col.id} className="text-right bg-primary/5 font-mono text-sm">
+                            {typeof result === 'number' ? result.toLocaleString(undefined, { maximumFractionDigits: 2 }) : result}
+                          </TableCell>
+                        );
+                      })}
                     </TableRow>
                   ))
                 )}
