@@ -7,12 +7,30 @@ import { supabase } from "@/integrations/supabase/client";
 import { ReconciliationResults } from "./ReconciliationResults";
 
 interface ParsedTrade {
-  inv_code: string;
-  scrip: string;
+  action: string;
+  status: string;
+  isin: string;
+  asset_class: string;
+  order_id: string;
+  ref_order_id: string;
+  side: "BUY" | "SELL";
+  boid: string;
+  security_code: string;
+  board: string;
+  date: string;
+  time: string;
   quantity: number;
-  rate: number;
+  price: number;
   value: number;
-  trade_type: "BUY" | "SELL";
+  exec_id: string;
+  session: string;
+  fill_type: string;
+  category: string;
+  compulsory_spot: string;
+  client_code: string;
+  trader_dealer_id: string;
+  owner_dealer_id: string;
+  trade_report_type: string;
 }
 
 interface ReconciliationResult {
@@ -66,7 +84,7 @@ export function StockExchangeUpload() {
       const parser = new DOMParser();
       const doc = parser.parseFromString(content, 'text/html');
       
-      // Parse trade data from HTML tables
+      // Parse trade data from HTML tables (DSE/CSE format)
       const trades: ParsedTrade[] = [];
       const tables = doc.querySelectorAll('table');
       
@@ -76,23 +94,60 @@ export function StockExchangeUpload() {
           if (index === 0) return; // Skip header row
           
           const cells = row.querySelectorAll('td');
-          if (cells.length >= 5) {
-            // Try to extract trade data - adjust selectors based on actual HTML structure
-            const invCode = cells[0]?.textContent?.trim() || '';
-            const scrip = cells[1]?.textContent?.trim() || '';
-            const quantity = parseFloat(cells[2]?.textContent?.replace(/,/g, '') || '0');
-            const rate = parseFloat(cells[3]?.textContent?.replace(/,/g, '') || '0');
-            const value = parseFloat(cells[4]?.textContent?.replace(/,/g, '') || '0');
-            const tradeType = cells[5]?.textContent?.trim()?.toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
+          // DSE/CSE format has 24 columns
+          if (cells.length >= 20) {
+            const action = cells[0]?.textContent?.trim() || '';
+            const status = cells[1]?.textContent?.trim() || '';
+            const isin = cells[2]?.textContent?.trim() || '';
+            const assetClass = cells[3]?.textContent?.trim() || '';
+            const orderId = cells[4]?.textContent?.trim() || '';
+            const refOrderId = cells[5]?.textContent?.trim() || '';
+            const sideRaw = cells[6]?.textContent?.trim()?.toUpperCase() || '';
+            const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
+            const boid = cells[7]?.textContent?.trim() || '';
+            const securityCode = cells[8]?.textContent?.trim() || '';
+            const board = cells[9]?.textContent?.trim() || '';
+            const date = cells[10]?.textContent?.trim() || '';
+            const time = cells[11]?.textContent?.trim() || '';
+            const quantity = parseFloat(cells[12]?.textContent?.replace(/,/g, '') || '0');
+            const price = parseFloat(cells[13]?.textContent?.replace(/,/g, '') || '0');
+            const value = parseFloat(cells[14]?.textContent?.replace(/,/g, '') || '0');
+            const execId = cells[15]?.textContent?.trim() || '';
+            const session = cells[16]?.textContent?.trim() || '';
+            const fillType = cells[17]?.textContent?.trim() || '';
+            const category = cells[18]?.textContent?.trim() || '';
+            const compulsorySpot = cells[19]?.textContent?.trim() || '';
+            const clientCode = cells[20]?.textContent?.trim() || '';
+            const traderDealerId = cells[21]?.textContent?.trim() || '';
+            const ownerDealerId = cells[22]?.textContent?.trim() || '';
+            const tradeReportType = cells[23]?.textContent?.trim() || '';
             
-            if (invCode && scrip && !isNaN(quantity)) {
+            if (clientCode && securityCode) {
               trades.push({
-                inv_code: invCode,
-                scrip,
+                action,
+                status,
+                isin,
+                asset_class: assetClass,
+                order_id: orderId,
+                ref_order_id: refOrderId,
+                side,
+                boid,
+                security_code: securityCode,
+                board,
+                date,
+                time,
                 quantity,
-                rate,
-                value: value || quantity * rate,
-                trade_type: tradeType as "BUY" | "SELL",
+                price,
+                value: value || quantity * price,
+                exec_id: execId,
+                session,
+                fill_type: fillType,
+                category,
+                compulsory_spot: compulsorySpot,
+                client_code: clientCode,
+                trader_dealer_id: traderDealerId,
+                owner_dealer_id: ownerDealerId,
+                trade_report_type: tradeReportType,
               });
             }
           }
@@ -133,7 +188,7 @@ export function StockExchangeUpload() {
     setReconciling(true);
     try {
       // Get unique client codes from parsed trades
-      const uniqueCodes = [...new Set(parsedTrades.map(t => t.inv_code))];
+      const uniqueCodes = [...new Set(parsedTrades.map(t => t.client_code))];
       
       // Fetch client data from database
       const { data: clients, error } = await supabase
@@ -148,18 +203,18 @@ export function StockExchangeUpload() {
 
       // Group trades by client code
       const tradesByClient = parsedTrades.reduce((acc, trade) => {
-        if (!acc[trade.inv_code]) {
-          acc[trade.inv_code] = [];
+        if (!acc[trade.client_code]) {
+          acc[trade.client_code] = [];
         }
-        acc[trade.inv_code].push(trade);
+        acc[trade.client_code].push(trade);
         return acc;
       }, {} as Record<string, ParsedTrade[]>);
 
       // Generate reconciliation results
-      const reconciliationResults: ReconciliationResult[] = Object.entries(tradesByClient).map(([invCode, trades]) => {
-        const client = clientMap.get(invCode);
-        const totalBuy = trades.filter(t => t.trade_type === 'BUY').reduce((sum, t) => sum + t.value, 0);
-        const totalSell = trades.filter(t => t.trade_type === 'SELL').reduce((sum, t) => sum + t.value, 0);
+      const reconciliationResults: ReconciliationResult[] = Object.entries(tradesByClient).map(([clientCode, trades]) => {
+        const client = clientMap.get(clientCode);
+        const totalBuy = trades.filter(t => t.side === 'BUY').reduce((sum, t) => sum + t.value, 0);
+        const totalSell = trades.filter(t => t.side === 'SELL').reduce((sum, t) => sum + t.value, 0);
         const netValue = totalSell - totalBuy;
         
         const issues: string[] = [];
@@ -181,7 +236,7 @@ export function StockExchangeUpload() {
         }
 
         return {
-          inv_code: invCode,
+          inv_code: clientCode,
           investor_name: client?.investor_name || 'Unknown',
           rm_name: client?.rm_name || 'Unknown',
           trades,
@@ -323,19 +378,19 @@ export function StockExchangeUpload() {
               <div className="bg-muted/50 rounded-lg p-3">
                 <p className="text-sm text-muted-foreground">Buy Orders</p>
                 <p className="text-2xl font-bold text-green-500">
-                  {parsedTrades.filter(t => t.trade_type === 'BUY').length}
+                  {parsedTrades.filter(t => t.side === 'BUY').length}
                 </p>
               </div>
               <div className="bg-muted/50 rounded-lg p-3">
                 <p className="text-sm text-muted-foreground">Sell Orders</p>
                 <p className="text-2xl font-bold text-red-500">
-                  {parsedTrades.filter(t => t.trade_type === 'SELL').length}
+                  {parsedTrades.filter(t => t.side === 'SELL').length}
                 </p>
               </div>
               <div className="bg-muted/50 rounded-lg p-3">
                 <p className="text-sm text-muted-foreground">Unique Clients</p>
                 <p className="text-2xl font-bold">
-                  {new Set(parsedTrades.map(t => t.inv_code)).size}
+                  {new Set(parsedTrades.map(t => t.client_code)).size}
                 </p>
               </div>
             </div>
