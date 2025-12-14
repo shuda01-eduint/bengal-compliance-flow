@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import * as XLSX from "xlsx";
+import { SecurityRecordSchema, sanitizeString } from "@/lib/validation-schemas";
 
 interface Security {
   id: string;
@@ -179,45 +180,55 @@ export function SecuritiesTable() {
         "Sector": "sector",
       };
 
-      const records: any[] = [];
+      const validRecords: any[] = [];
+      const validationErrors: string[] = [];
       const chunkSize = 500;
 
       for (let i = 1; i < jsonData.length; i++) {
         const row = jsonData[i];
         if (!row || row.length === 0) continue;
 
-        const record: any = {};
+        const rawRecord: Record<string, unknown> = {};
         headers.forEach((header: string, index: number) => {
           const dbColumn = columnMap[header];
           if (dbColumn) {
             let value = row[index];
             if (typeof value === "string") {
-              value = value.trim();
+              value = sanitizeString(value);
             }
             
             // Handle numeric fields
             if (["close_price", "volume", "audited_pe", "eps", "total_securities", 
                  "director_percent", "govt_percent", "institute_percent", 
                  "foreign_percent", "public_percent"].includes(dbColumn)) {
-              const numVal = parseFloat(value);
-              record[dbColumn] = isNaN(numVal) ? null : numVal;
+              const numVal = parseFloat(String(value || ''));
+              rawRecord[dbColumn] = isNaN(numVal) ? null : numVal;
             } else {
-              record[dbColumn] = value || null;
+              rawRecord[dbColumn] = value || null;
             }
           }
         });
 
-        if (record.trading_code) {
-          records.push(record);
+        // Validate using zod schema
+        const result = SecurityRecordSchema.safeParse(rawRecord);
+        
+        if (result.success) {
+          validRecords.push(result.data);
+        } else if (validationErrors.length < 10) {
+          validationErrors.push(`Row ${i}: ${result.error.errors.map(e => e.message).join(', ')}`);
         }
+      }
+
+      if (validationErrors.length > 0) {
+        console.warn('Validation warnings:', validationErrors);
       }
 
       // Clear existing data before import
       await supabase.from("securities").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
       // Insert in chunks
-      for (let i = 0; i < records.length; i += chunkSize) {
-        const chunk = records.slice(i, i + chunkSize);
+      for (let i = 0; i < validRecords.length; i += chunkSize) {
+        const chunk = validRecords.slice(i, i + chunkSize);
         const { error } = await supabase.from("securities").insert(chunk);
         if (error) throw error;
 
@@ -227,7 +238,7 @@ export function SecuritiesTable() {
 
       toast({
         title: "Import Successful",
-        description: `Imported ${records.length} securities`,
+        description: `Imported ${validRecords.length} securities`,
       });
 
       fetchSecurities();

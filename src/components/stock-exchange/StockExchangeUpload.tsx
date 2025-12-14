@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ReconciliationResults } from "./ReconciliationResults";
 import * as XLSX from "xlsx";
-
+import { TradeRecordSchema, sanitizeString } from "@/lib/validation-schemas";
 interface ParsedTrade {
   action: string;
   status: string;
@@ -65,45 +65,63 @@ export function StockExchangeUpload() {
     setProgress({ current: 0, total: trades.length });
     
     try {
-      const tradeRecords = trades.map(trade => ({
-        action: trade.action,
-        status: trade.status,
-        isin: trade.isin,
-        asset_class: trade.asset_class,
-        order_id: trade.order_id,
-        ref_order_id: trade.ref_order_id,
-        side: trade.side,
-        boid: trade.boid,
-        security_code: trade.security_code,
-        board: trade.board,
-        trade_date: trade.date,
-        trade_time: trade.time,
-        quantity: trade.quantity,
-        price: trade.price,
-        value: trade.value,
-        exec_id: trade.exec_id,
-        session: trade.session,
-        fill_type: trade.fill_type,
-        category: trade.category,
-        compulsory_spot: trade.compulsory_spot,
-        client_code: trade.client_code,
-        trader_dealer_id: trade.trader_dealer_id,
-        owner_dealer_id: trade.owner_dealer_id,
-        trade_report_type: trade.trade_report_type,
-        file_name: fileName,
-      }));
+      // Validate and sanitize trade records before insert
+      const validRecords: any[] = [];
+      const validationErrors: string[] = [];
+      
+      for (let i = 0; i < trades.length; i++) {
+        const trade = trades[i];
+        const rawRecord = {
+          action: sanitizeString(trade.action),
+          status: sanitizeString(trade.status),
+          isin: sanitizeString(trade.isin),
+          asset_class: sanitizeString(trade.asset_class),
+          order_id: sanitizeString(trade.order_id),
+          ref_order_id: sanitizeString(trade.ref_order_id),
+          side: trade.side,
+          boid: sanitizeString(trade.boid),
+          security_code: sanitizeString(trade.security_code),
+          board: sanitizeString(trade.board),
+          trade_date: sanitizeString(trade.date),
+          trade_time: sanitizeString(trade.time),
+          quantity: trade.quantity,
+          price: trade.price,
+          value: trade.value,
+          exec_id: sanitizeString(trade.exec_id),
+          session: sanitizeString(trade.session),
+          fill_type: sanitizeString(trade.fill_type),
+          category: sanitizeString(trade.category),
+          compulsory_spot: sanitizeString(trade.compulsory_spot),
+          client_code: sanitizeString(trade.client_code),
+          trader_dealer_id: sanitizeString(trade.trader_dealer_id),
+          owner_dealer_id: sanitizeString(trade.owner_dealer_id),
+          trade_report_type: sanitizeString(trade.trade_report_type),
+          file_name: sanitizeString(fileName),
+        };
+        
+        const result = TradeRecordSchema.safeParse(rawRecord);
+        if (result.success) {
+          validRecords.push(result.data);
+        } else if (validationErrors.length < 10) {
+          validationErrors.push(`Trade ${i + 1}: ${result.error.errors.map(e => e.message).join(', ')}`);
+        }
+      }
+      
+      if (validationErrors.length > 0) {
+        console.warn('Trade validation warnings:', validationErrors);
+      }
 
       // Insert in batches of 500 to avoid Supabase limits
       const batchSize = 500;
       let inserted = 0;
       
-      for (let i = 0; i < tradeRecords.length; i += batchSize) {
-        const batch = tradeRecords.slice(i, i + batchSize);
+      for (let i = 0; i < validRecords.length; i += batchSize) {
+        const batch = validRecords.slice(i, i + batchSize);
         const { error } = await supabase.from('trade_history').insert(batch);
         if (error) throw error;
         
         inserted += batch.length;
-        setProgress({ current: inserted, total: tradeRecords.length });
+        setProgress({ current: inserted, total: validRecords.length });
         
         // Yield to keep UI responsive
         await new Promise(resolve => requestAnimationFrame(resolve));
@@ -111,7 +129,7 @@ export function StockExchangeUpload() {
 
       toast({
         title: "Trades saved",
-        description: `${trades.length} trades stored for audit trail`,
+        description: `${validRecords.length} trades stored for audit trail`,
       });
     } catch (error) {
       console.error('Error saving trades:', error);

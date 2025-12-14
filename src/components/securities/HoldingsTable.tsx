@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Upload, Search, RefreshCw, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import * as XLSX from "xlsx";
+import { HoldingRecordSchema, sanitizeString } from "@/lib/validation-schemas";
 
 interface Holding {
   id: string;
@@ -148,29 +149,35 @@ export function HoldingsTable() {
         "Ledger Balance": "ledger_balance",
       };
 
-      const records: any[] = [];
+      const validRecords: any[] = [];
+      const validationErrors: string[] = [];
       const chunkSize = 500;
 
       for (let i = 1; i < jsonData.length; i++) {
         const row = jsonData[i];
         if (!row || row.length === 0) continue;
 
-        const record: any = {};
+        const rawRecord: Record<string, unknown> = {};
         headers.forEach((header: string, index: number) => {
           const dbColumn = columnMap[header];
           if (dbColumn) {
             const value = row[index];
             
             if (["total_stock", "saleable", "avg_cost", "total_cost", "market_value", "ledger_balance"].includes(dbColumn)) {
-              record[dbColumn] = parseNumericValue(value);
+              rawRecord[dbColumn] = parseNumericValue(value);
             } else {
-              record[dbColumn] = value?.toString().trim() || null;
+              rawRecord[dbColumn] = typeof value === 'string' ? sanitizeString(value) : (value?.toString().trim() || null);
             }
           }
         });
 
-        if (record.trading_code && record.investor_code) {
-          records.push(record);
+        // Validate using zod schema
+        const result = HoldingRecordSchema.safeParse(rawRecord);
+        
+        if (result.success) {
+          validRecords.push(result.data);
+        } else if (validationErrors.length < 10) {
+          validationErrors.push(`Row ${i}: ${result.error.errors.map(e => e.message).join(', ')}`);
         }
 
         // Yield to UI periodically during parsing
@@ -179,13 +186,17 @@ export function HoldingsTable() {
         }
       }
 
+      if (validationErrors.length > 0) {
+        console.warn('Validation warnings:', validationErrors);
+      }
+
       // Clear existing data before import
       await supabase.from("holdings").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
       // Insert in chunks with UI yields
       let inserted = 0;
-      for (let i = 0; i < records.length; i += chunkSize) {
-        const chunk = records.slice(i, i + chunkSize);
+      for (let i = 0; i < validRecords.length; i += chunkSize) {
+        const chunk = validRecords.slice(i, i + chunkSize);
         const { error } = await supabase.from("holdings").insert(chunk);
         if (error) throw error;
         

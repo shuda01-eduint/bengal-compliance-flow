@@ -9,6 +9,7 @@ import { Search, Upload, ChevronDown, ChevronRight, Users, Loader2 } from "lucid
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import * as XLSX from "xlsx";
+import { AgentCodeRecordSchema, sanitizeString } from "@/lib/validation-schemas";
 
 interface AgentCode {
   id: string;
@@ -125,22 +126,43 @@ export function AgentCodesTable() {
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet);
 
-      const records = jsonData
-        .map((row) => ({
-          investor_code: String(row["Investor codes"] || row["investor_code"] || ""),
-          agent_id: String(row["Agent ID"] || row["agent_id"] || ""),
-          rm_id: String(row["RM ID"] || row["rm_id"] || ""),
-        }))
-        .filter((r) => r.investor_code && r.agent_id && r.rm_id);
+      const validRecords: Array<{ investor_code: string; agent_id: string; rm_id: string }> = [];
+      const validationErrors: string[] = [];
 
-      if (records.length === 0) {
+      for (let i = 0; i < jsonData.length; i++) {
+        const row = jsonData[i];
+        const rawRecord = {
+          investor_code: sanitizeString(String(row["Investor codes"] || row["investor_code"] || "")),
+          agent_id: sanitizeString(String(row["Agent ID"] || row["agent_id"] || "")),
+          rm_id: sanitizeString(String(row["RM ID"] || row["rm_id"] || "")),
+        };
+
+        // Validate using zod schema
+        const result = AgentCodeRecordSchema.safeParse(rawRecord);
+        
+        if (result.success) {
+          validRecords.push({
+            investor_code: result.data.investor_code,
+            agent_id: result.data.agent_id,
+            rm_id: result.data.rm_id,
+          });
+        } else if (validationErrors.length < 10) {
+          validationErrors.push(`Row ${i + 1}: ${result.error.errors.map(e => e.message).join(', ')}`);
+        }
+      }
+
+      if (validRecords.length === 0) {
         throw new Error("No valid records found in file");
+      }
+
+      if (validationErrors.length > 0) {
+        console.warn('Validation warnings:', validationErrors);
       }
 
       // Insert in batches
       const batchSize = 500;
-      for (let i = 0; i < records.length; i += batchSize) {
-        const batch = records.slice(i, i + batchSize);
+      for (let i = 0; i < validRecords.length; i += batchSize) {
+        const batch = validRecords.slice(i, i + batchSize);
         const { error } = await supabase.from("agent_codes").upsert(batch, {
           onConflict: "investor_code,agent_id",
         });
@@ -149,7 +171,7 @@ export function AgentCodesTable() {
 
       toast({
         title: "Upload successful",
-        description: `${records.length} agent codes imported`,
+        description: `${validRecords.length} agent codes imported`,
       });
 
       fetchAgentCodes();
