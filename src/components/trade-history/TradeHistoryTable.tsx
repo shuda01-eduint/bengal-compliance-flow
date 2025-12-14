@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon, Search, Filter, Loader2, Download } from "lucide-react";
+import { CalendarIcon, Search, Filter, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -28,6 +28,8 @@ interface TradeRecord {
   uploaded_at: string;
 }
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+
 export function TradeHistoryTable() {
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,11 +39,15 @@ export function TradeHistoryTable() {
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [fileNames, setFileNames] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalCount, setTotalCount] = useState(0);
   const { toast } = useToast();
 
   useEffect(() => {
     fetchTrades();
     fetchFileNames();
+    fetchTotalCount();
   }, []);
 
   const fetchFileNames = async () => {
@@ -56,16 +62,20 @@ export function TradeHistoryTable() {
     }
   };
 
+  const fetchTotalCount = async () => {
+    const { count } = await supabase
+      .from("trade_history")
+      .select("*", { count: "exact", head: true });
+    setTotalCount(count || 0);
+  };
+
   const fetchTrades = async () => {
     setLoading(true);
     try {
-      let query = supabase
+      const { data, error } = await supabase
         .from("trade_history")
         .select("id, action, status, side, security_code, client_code, quantity, price, value, trade_date, file_name, uploaded_at")
-        .order("uploaded_at", { ascending: false })
-        .limit(500);
-
-      const { data, error } = await query;
+        .order("uploaded_at", { ascending: false });
 
       if (error) throw error;
       setTrades(data || []);
@@ -81,22 +91,35 @@ export function TradeHistoryTable() {
     }
   };
 
-  const filteredTrades = trades.filter((trade) => {
-    const matchesSearch =
-      !searchTerm ||
-      trade.client_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      trade.security_code?.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredTrades = useMemo(() => {
+    return trades.filter((trade) => {
+      const matchesSearch =
+        !searchTerm ||
+        trade.client_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        trade.security_code?.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesSide = sideFilter === "all" || trade.side === sideFilter;
+      const matchesSide = sideFilter === "all" || trade.side === sideFilter;
+      const matchesFile = selectedFile === "all" || trade.file_name === selectedFile;
 
-    const matchesFile = selectedFile === "all" || trade.file_name === selectedFile;
+      const tradeDate = trade.trade_date ? new Date(trade.trade_date.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3")) : null;
+      const matchesDateFrom = !dateFrom || (tradeDate && tradeDate >= dateFrom);
+      const matchesDateTo = !dateTo || (tradeDate && tradeDate <= dateTo);
 
-    const tradeDate = trade.trade_date ? new Date(trade.trade_date.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3")) : null;
-    const matchesDateFrom = !dateFrom || (tradeDate && tradeDate >= dateFrom);
-    const matchesDateTo = !dateTo || (tradeDate && tradeDate <= dateTo);
+      return matchesSearch && matchesSide && matchesFile && matchesDateFrom && matchesDateTo;
+    });
+  }, [trades, searchTerm, sideFilter, selectedFile, dateFrom, dateTo]);
 
-    return matchesSearch && matchesSide && matchesFile && matchesDateFrom && matchesDateTo;
-  });
+  const totalPages = Math.ceil(filteredTrades.length / pageSize);
+  
+  const paginatedTrades = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredTrades.slice(start, start + pageSize);
+  }, [filteredTrades, currentPage, pageSize]);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, pageSize]);
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -104,6 +127,7 @@ export function TradeHistoryTable() {
     setDateFrom(undefined);
     setDateTo(undefined);
     setSelectedFile("all");
+    setCurrentPage(1);
   };
 
   const formatCurrency = (value: number | null) => {
@@ -123,6 +147,10 @@ export function TradeHistoryTable() {
     } catch {
       return dateStr;
     }
+  };
+
+  const goToPage = (page: number) => {
+    setCurrentPage(Math.max(1, Math.min(page, totalPages)));
   };
 
   return (
@@ -201,7 +229,7 @@ export function TradeHistoryTable() {
             Clear Filters
           </Button>
           <span className="text-sm text-muted-foreground">
-            Showing {filteredTrades.length} of {trades.length} trades
+            Showing {paginatedTrades.length} of {filteredTrades.length} trades
           </span>
         </div>
 
@@ -227,14 +255,14 @@ export function TradeHistoryTable() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredTrades.length === 0 ? (
+                {paginatedTrades.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                       No trades found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredTrades.map((trade) => (
+                  paginatedTrades.map((trade) => (
                     <TableRow key={trade.id}>
                       <TableCell className="whitespace-nowrap">{formatTradeDate(trade.trade_date)}</TableCell>
                       <TableCell className="font-medium">{trade.client_code || "-"}</TableCell>
@@ -260,6 +288,51 @@ export function TradeHistoryTable() {
                 )}
               </TableBody>
             </Table>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {!loading && filteredTrades.length > 0 && (
+          <div className="flex items-center justify-between pt-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Rows per page:</span>
+              <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                <SelectTrigger className="w-[70px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                Page {currentPage} of {totalPages || 1}
+              </span>
+              <div className="flex gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </CardContent>
