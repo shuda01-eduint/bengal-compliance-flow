@@ -11,7 +11,8 @@ import {
   ChevronRight,
   Wallet,
   TrendingUp,
-  History
+  History,
+  Landmark
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ const navigation = [
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
   { name: "Stock Exchange Data", href: "/stock-exchange", icon: TrendingUp },
   { name: "Trade History", href: "/trade-history", icon: History },
+  { name: "Securities", href: "/securities", icon: Landmark },
   { name: "Compliance Reports", href: "/reports", icon: FileText },
   { name: "Post-Report Activity", href: "/activity", icon: Activity },
   { name: "Employees", href: "/employees", icon: Users },
