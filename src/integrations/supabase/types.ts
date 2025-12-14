@@ -86,6 +86,45 @@ export type Database = {
         }
         Relationships: []
       }
+      deposits_withdrawals: {
+        Row: {
+          amount: number
+          created_at: string
+          id: string
+          investor_code: string
+          investor_name: string | null
+          remarks: string | null
+          rm_email: string | null
+          transaction_date: string
+          transaction_type: string
+          uploaded_at: string
+        }
+        Insert: {
+          amount?: number
+          created_at?: string
+          id?: string
+          investor_code: string
+          investor_name?: string | null
+          remarks?: string | null
+          rm_email?: string | null
+          transaction_date?: string
+          transaction_type: string
+          uploaded_at?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          id?: string
+          investor_code?: string
+          investor_name?: string | null
+          remarks?: string | null
+          rm_email?: string | null
+          transaction_date?: string
+          transaction_type?: string
+          uploaded_at?: string
+        }
+        Relationships: []
+      }
       holdings: {
         Row: {
           avg_cost: number | null
