@@ -1,9 +1,10 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { EmployeeCard } from "@/components/employees/EmployeeCard";
 import { EmployeeFilters } from "@/components/employees/EmployeeFilters";
+import { EmployeeAgentCodes } from "@/components/employees/EmployeeAgentCodes";
 import { employees } from "@/data/employees";
 import { useState, useMemo } from "react";
-import { Mail, Phone, MapPin, User } from "lucide-react";
+import { Mail, Phone, MapPin, User, Users } from "lucide-react";
 
 const EmployeesPage = () => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -60,6 +61,9 @@ const EmployeesPage = () => {
                   Location
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Agent Codes
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Contact
                 </th>
               </tr>
@@ -83,6 +87,9 @@ const EmployeesPage = () => {
                   </td>
                   <td className="px-6 py-4 text-sm text-muted-foreground">
                     {employee.location}
+                  </td>
+                  <td className="px-6 py-4">
+                    <EmployeeAgentCodes employeeId={employee.id} compact />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-4">

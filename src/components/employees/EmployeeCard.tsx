@@ -1,6 +1,7 @@
 import { Employee } from "@/data/employees";
 import { Mail, Phone, MapPin, User } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EmployeeAgentCodes } from "./EmployeeAgentCodes";
 
 interface EmployeeCardProps {
   employee: Employee;
@@ -46,6 +47,8 @@ export function EmployeeCard({ employee, index }: EmployeeCardProps) {
           Reports to: <span className="text-foreground">{employee.reportingTo}</span>
         </p>
       </div>
+
+      <EmployeeAgentCodes employeeId={employee.id} />
     </div>
   );
 }

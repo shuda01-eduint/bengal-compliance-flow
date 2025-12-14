@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ImportClientsDialog } from "@/components/admin/ImportClientsDialog";
+import { useAgentCodes, getAgentCodesGroupedByRM } from "@/hooks/useAgentCodes";
+import { employees } from "@/data/employees";
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('en-BD', {
@@ -78,6 +80,22 @@ const AdminBalancesPage = () => {
     const rms = [...new Set(clients.map(c => c.rm_name))];
     return rms.sort();
   }, [clients]);
+
+  const { data: agentCodes } = useAgentCodes();
+  
+  const agentCodesByRM = useMemo(() => {
+    if (!agentCodes) return {};
+    return getAgentCodesGroupedByRM(agentCodes);
+  }, [agentCodes]);
+
+  // Map employee names to their IDs for agent code lookup
+  const employeeNameToId = useMemo(() => {
+    const map: Record<string, string> = {};
+    employees.forEach(emp => {
+      map[emp.name] = emp.id;
+    });
+    return map;
+  }, []);
 
   const rmSummary = useMemo(() => {
     if (!clients) return [];
@@ -229,36 +247,53 @@ const AdminBalancesPage = () => {
               <TableRow className="border-border hover:bg-transparent">
                 <TableHead className="text-muted-foreground">Relationship Manager</TableHead>
                 <TableHead className="text-muted-foreground text-right">Clients</TableHead>
+                <TableHead className="text-muted-foreground text-right">Agent Codes</TableHead>
                 <TableHead className="text-muted-foreground text-right">Total Equity</TableHead>
                 <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
                 <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rmSummary.map((rm) => (
-                <TableRow key={rm.rm_name} className="border-border hover:bg-secondary/30">
-                  <TableCell>
-                    <div>
-                      <p className="font-medium text-foreground">{rm.rm_name}</p>
-                      {rm.rm_email && (
-                        <p className="text-xs text-muted-foreground">{rm.rm_email}</p>
+              {rmSummary.map((rm) => {
+                const rmEmployeeId = employeeNameToId[rm.rm_name];
+                const rmAgentData = rmEmployeeId ? agentCodesByRM[rmEmployeeId] : null;
+                const agentCount = rmAgentData ? Object.keys(rmAgentData.agents).length : 0;
+                const investorCount = rmAgentData ? rmAgentData.totalInvestors : 0;
+
+                return (
+                  <TableRow key={rm.rm_name} className="border-border hover:bg-secondary/30">
+                    <TableCell>
+                      <div>
+                        <p className="font-medium text-foreground">{rm.rm_name}</p>
+                        {rm.rm_email && (
+                          <p className="text-xs text-muted-foreground">{rm.rm_email}</p>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Badge variant="secondary">{rm.client_count}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {agentCount > 0 ? (
+                        <Badge variant="outline" className="text-xs">
+                          {agentCount} agents · {investorCount} codes
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
                       )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Badge variant="secondary">{rm.client_count}</Badge>
-                  </TableCell>
-                  <TableCell className="text-right text-success font-medium">
-                    {formatCurrency(rm.total_equity)}
-                  </TableCell>
-                  <TableCell className="text-right text-foreground">
-                    {formatCurrency(rm.total_market_value)}
-                  </TableCell>
-                  <TableCell className="text-right text-foreground">
-                    {formatCurrency(rm.total_ledger)}
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell className="text-right text-success font-medium">
+                      {formatCurrency(rm.total_equity)}
+                    </TableCell>
+                    <TableCell className="text-right text-foreground">
+                      {formatCurrency(rm.total_market_value)}
+                    </TableCell>
+                    <TableCell className="text-right text-foreground">
+                      {formatCurrency(rm.total_ledger)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
