@@ -2,7 +2,8 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PortfolioList } from "@/components/portfolio/PortfolioList";
 import { CustomFieldsManager } from "@/components/portfolio/CustomFieldsManager";
-import { Briefcase, Settings2 } from "lucide-react";
+import { PortfolioReports } from "@/components/portfolio/PortfolioReports";
+import { Briefcase, Settings2, FileBarChart } from "lucide-react";
 
 const PortfolioPage = () => {
   return (
@@ -18,6 +19,10 @@ const PortfolioPage = () => {
               <Settings2 className="h-4 w-4 mr-2" />
               Custom Fields
             </TabsTrigger>
+            <TabsTrigger value="reports" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <FileBarChart className="h-4 w-4 mr-2" />
+              Reports
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="portfolios">
@@ -26,6 +31,10 @@ const PortfolioPage = () => {
 
           <TabsContent value="custom-fields">
             <CustomFieldsManager />
+          </TabsContent>
+
+          <TabsContent value="reports">
+            <PortfolioReports />
           </TabsContent>
         </Tabs>
       </div>
