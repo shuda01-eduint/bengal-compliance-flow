@@ -5,6 +5,7 @@ import { Upload, FileText, CheckCircle2, AlertCircle, Loader2 } from "lucide-rea
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ReconciliationResults } from "./ReconciliationResults";
+import * as XLSX from "xlsx";
 
 interface ParsedTrade {
   action: string;
@@ -60,10 +61,12 @@ export function StockExchangeUpload() {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
-      if (!selectedFile.name.endsWith('.html') && !selectedFile.name.endsWith('.htm')) {
+      const validExtensions = ['.html', '.htm', '.xlsx', '.xls'];
+      const hasValidExt = validExtensions.some(ext => selectedFile.name.toLowerCase().endsWith(ext));
+      if (!hasValidExt) {
         toast({
           title: "Invalid file type",
-          description: "Please upload an HTML file from the stock exchange",
+          description: "Please upload an HTML or Excel file from the stock exchange",
           variant: "destructive",
         });
         return;
@@ -75,89 +78,113 @@ export function StockExchangeUpload() {
     }
   };
 
-  const parseHtmlFile = async () => {
+  const parseRowToTrade = (row: Record<string, unknown>): ParsedTrade | null => {
+    const getString = (key: string) => String(row[key] ?? '').trim();
+    const getNumber = (key: string) => {
+      const val = row[key];
+      if (typeof val === 'number') return val;
+      return parseFloat(String(val ?? '0').replace(/,/g, '')) || 0;
+    };
+
+    const sideRaw = getString('Side').toUpperCase();
+    const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
+    const clientCode = getString('ClientCode');
+    const securityCode = getString('SecurityCode');
+
+    if (!clientCode || !securityCode) return null;
+
+    return {
+      action: getString('Action'),
+      status: getString('Status'),
+      isin: getString('ISIN'),
+      asset_class: getString('AssetClass'),
+      order_id: getString('OrderID'),
+      ref_order_id: getString('RefOrderID'),
+      side,
+      boid: getString('BOID'),
+      security_code: securityCode,
+      board: getString('Board'),
+      date: getString('Date'),
+      time: getString('Time'),
+      quantity: getNumber('Quantity'),
+      price: getNumber('Price'),
+      value: getNumber('Value') || getNumber('Quantity') * getNumber('Price'),
+      exec_id: getString('ExecID'),
+      session: getString('Session'),
+      fill_type: getString('FillType'),
+      category: getString('Category'),
+      compulsory_spot: getString('CompulsorySpot'),
+      client_code: clientCode,
+      trader_dealer_id: getString('TraderDealerID'),
+      owner_dealer_id: getString('OwnerDealerID'),
+      trade_report_type: getString('TradeReportType'),
+    };
+  };
+
+  const parseExcelFile = async (): Promise<ParsedTrade[]> => {
+    if (!file) return [];
+    
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+    const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet);
+    
+    const trades: ParsedTrade[] = [];
+    for (const row of jsonData) {
+      const trade = parseRowToTrade(row);
+      if (trade) trades.push(trade);
+    }
+    return trades;
+  };
+
+  const parseHtmlFile = async (): Promise<ParsedTrade[]> => {
+    if (!file) return [];
+    
+    const content = await file.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(content, 'text/html');
+    
+    const trades: ParsedTrade[] = [];
+    const tables = doc.querySelectorAll('table');
+    
+    tables.forEach(table => {
+      const rows = table.querySelectorAll('tr');
+      const headers: string[] = [];
+      
+      rows.forEach((row, index) => {
+        const cells = row.querySelectorAll('th, td');
+        if (index === 0) {
+          cells.forEach(cell => headers.push(cell.textContent?.trim() || ''));
+          return;
+        }
+        
+        if (cells.length >= 20) {
+          const rowObj: Record<string, unknown> = {};
+          cells.forEach((cell, i) => {
+            if (headers[i]) {
+              rowObj[headers[i]] = cell.textContent?.trim() || '';
+            }
+          });
+          const trade = parseRowToTrade(rowObj);
+          if (trade) trades.push(trade);
+        }
+      });
+    });
+    return trades;
+  };
+
+  const handleParseFile = async () => {
     if (!file) return;
 
     setParsing(true);
     try {
-      const content = await file.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(content, 'text/html');
-      
-      // Parse trade data from HTML tables (DSE/CSE format)
-      const trades: ParsedTrade[] = [];
-      const tables = doc.querySelectorAll('table');
-      
-      tables.forEach(table => {
-        const rows = table.querySelectorAll('tr');
-        rows.forEach((row, index) => {
-          if (index === 0) return; // Skip header row
-          
-          const cells = row.querySelectorAll('td');
-          // DSE/CSE format has 24 columns
-          if (cells.length >= 20) {
-            const action = cells[0]?.textContent?.trim() || '';
-            const status = cells[1]?.textContent?.trim() || '';
-            const isin = cells[2]?.textContent?.trim() || '';
-            const assetClass = cells[3]?.textContent?.trim() || '';
-            const orderId = cells[4]?.textContent?.trim() || '';
-            const refOrderId = cells[5]?.textContent?.trim() || '';
-            const sideRaw = cells[6]?.textContent?.trim()?.toUpperCase() || '';
-            const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
-            const boid = cells[7]?.textContent?.trim() || '';
-            const securityCode = cells[8]?.textContent?.trim() || '';
-            const board = cells[9]?.textContent?.trim() || '';
-            const date = cells[10]?.textContent?.trim() || '';
-            const time = cells[11]?.textContent?.trim() || '';
-            const quantity = parseFloat(cells[12]?.textContent?.replace(/,/g, '') || '0');
-            const price = parseFloat(cells[13]?.textContent?.replace(/,/g, '') || '0');
-            const value = parseFloat(cells[14]?.textContent?.replace(/,/g, '') || '0');
-            const execId = cells[15]?.textContent?.trim() || '';
-            const session = cells[16]?.textContent?.trim() || '';
-            const fillType = cells[17]?.textContent?.trim() || '';
-            const category = cells[18]?.textContent?.trim() || '';
-            const compulsorySpot = cells[19]?.textContent?.trim() || '';
-            const clientCode = cells[20]?.textContent?.trim() || '';
-            const traderDealerId = cells[21]?.textContent?.trim() || '';
-            const ownerDealerId = cells[22]?.textContent?.trim() || '';
-            const tradeReportType = cells[23]?.textContent?.trim() || '';
-            
-            if (clientCode && securityCode) {
-              trades.push({
-                action,
-                status,
-                isin,
-                asset_class: assetClass,
-                order_id: orderId,
-                ref_order_id: refOrderId,
-                side,
-                boid,
-                security_code: securityCode,
-                board,
-                date,
-                time,
-                quantity,
-                price,
-                value: value || quantity * price,
-                exec_id: execId,
-                session,
-                fill_type: fillType,
-                category,
-                compulsory_spot: compulsorySpot,
-                client_code: clientCode,
-                trader_dealer_id: traderDealerId,
-                owner_dealer_id: ownerDealerId,
-                trade_report_type: tradeReportType,
-              });
-            }
-          }
-        });
-      });
+      const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
+      const trades = isExcel ? await parseExcelFile() : await parseHtmlFile();
 
       if (trades.length === 0) {
         toast({
           title: "No trade data found",
-          description: "Could not parse trade data from the HTML file. Please check the file format.",
+          description: "Could not parse trade data from the file. Please check the file format.",
           variant: "destructive",
         });
         setParsing(false);
@@ -171,10 +198,10 @@ export function StockExchangeUpload() {
         description: `Found ${trades.length} trades from the file`,
       });
     } catch (error) {
-      console.error('Error parsing HTML:', error);
+      console.error('Error parsing file:', error);
       toast({
         title: "Parse error",
-        description: "Failed to parse the HTML file",
+        description: "Failed to parse the file",
         variant: "destructive",
       });
     } finally {
@@ -282,7 +309,7 @@ export function StockExchangeUpload() {
             Upload Stock Exchange File
           </CardTitle>
           <CardDescription>
-            Upload the daily HTML file from DSE or CSE to perform compliance checks and balance reconciliation
+            Upload the daily HTML or Excel file from DSE or CSE to perform compliance checks and balance reconciliation
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -293,7 +320,7 @@ export function StockExchangeUpload() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".html,.htm"
+              accept=".html,.htm,.xlsx,.xls"
               onChange={handleFileSelect}
               className="hidden"
             />
@@ -314,7 +341,7 @@ export function StockExchangeUpload() {
                   Click to upload or drag and drop
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  HTML files only
+                  HTML or Excel files
                 </p>
               </div>
             )}
@@ -322,7 +349,7 @@ export function StockExchangeUpload() {
 
           <div className="flex gap-3">
             <Button
-              onClick={parseHtmlFile}
+              onClick={handleParseFile}
               disabled={!file || parsing}
               className="btn-gradient-gold text-primary-foreground"
             >
