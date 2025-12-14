@@ -6,18 +6,7 @@ import { Upload, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from "xlsx";
-
-interface ClientRecord {
-  inv_code: string;
-  investor_name: string;
-  ledger_balance: number;
-  accrued_interest: number;
-  current_liabilities: number;
-  market_value: number;
-  equity: number;
-  rm_name: string;
-  status: string;
-}
+import { ClientRecordSchema, sanitizeString, type ClientRecord } from "@/lib/validation-schemas";
 
 interface ImportClientsDialogProps {
   onImportComplete: () => void;
@@ -58,30 +47,38 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
       const worksheet = workbook.Sheets[sheetName];
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as unknown[][];
 
-      // Parse rows (skip header)
+      // Parse and validate rows (skip header)
       const clients: ClientRecord[] = [];
+      const validationErrors: string[] = [];
+      
       for (let i = 1; i < jsonData.length; i++) {
         const row = jsonData[i] as (string | number | undefined)[];
         if (!row || row.length < 10) continue;
         
-        const invCode = String(row[1] || "").trim();
-        const investorName = String(row[2] || "").trim();
-        const rmName = String(row[8] || "General").trim();
-        const status = String(row[9] || "Active").trim();
-
-        if (!invCode || !investorName) continue;
-
-        clients.push({
-          inv_code: invCode,
-          investor_name: investorName,
+        const rawRecord = {
+          inv_code: sanitizeString(String(row[1] || "")),
+          investor_name: sanitizeString(String(row[2] || "")),
           ledger_balance: parseNumber(row[3]),
           accrued_interest: parseNumber(row[4]),
           current_liabilities: parseNumber(row[5]),
           market_value: parseNumber(row[6]),
           equity: parseNumber(row[7]),
-          rm_name: rmName || "General",
-          status: status || "Active",
-        });
+          rm_name: sanitizeString(String(row[8] || "General")),
+          status: sanitizeString(String(row[9] || "Active")),
+        };
+
+        // Validate using zod schema
+        const result = ClientRecordSchema.safeParse(rawRecord);
+        
+        if (result.success) {
+          clients.push(result.data);
+        } else if (validationErrors.length < 10) {
+          validationErrors.push(`Row ${i}: ${result.error.errors.map(e => e.message).join(', ')}`);
+        }
+      }
+      
+      if (validationErrors.length > 0) {
+        console.warn('Validation warnings:', validationErrors);
       }
 
       console.log(`Parsed ${clients.length} clients from Excel`);
