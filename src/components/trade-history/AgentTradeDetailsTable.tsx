@@ -61,17 +61,17 @@ export function AgentTradeDetailsTable() {
     }
   });
 
-  // Get unique RM Names for dropdown (using rm_name column)
+  // Get unique RM Names for dropdown (using rm_name column, storing rm_id as value)
   const rmOptions = useMemo(() => {
     if (!tradeDetails) return [];
     const rmMap = new Map<string, string>();
     tradeDetails.forEach(d => {
-      if (d.rm_name && !rmMap.has(d.rm_name)) {
-        rmMap.set(d.rm_name, d.rm_id);
+      if (d.rm_name && d.rm_id && !rmMap.has(d.rm_id)) {
+        rmMap.set(d.rm_id, d.rm_name);
       }
     });
     return Array.from(rmMap.entries())
-      .map(([name, id]) => ({ name, id }))
+      .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [tradeDetails]);
 
@@ -80,7 +80,7 @@ export function AgentTradeDetailsTable() {
     if (!tradeDetails) return [];
     let filtered = tradeDetails;
     if (selectedRmId !== "all") {
-      filtered = filtered.filter(d => d.rm_name === selectedRmId || d.rm_id === selectedRmId);
+      filtered = filtered.filter(d => d.rm_id === selectedRmId);
     }
     const unique = [...new Set(filtered.map(d => d.agent_id))];
     return unique.sort();
@@ -351,7 +351,7 @@ export function AgentTradeDetailsTable() {
             <SelectContent>
               <SelectItem value="all">All RMs</SelectItem>
               {rmOptions.map(rm => (
-                <SelectItem key={rm.name} value={rm.name}>{rm.name}</SelectItem>
+                <SelectItem key={rm.id} value={rm.id}>{rm.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
