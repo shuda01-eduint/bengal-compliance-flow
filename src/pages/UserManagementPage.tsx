@@ -20,9 +20,11 @@ interface Profile {
   created_at: string;
 }
 
+type AppRole = "admin" | "rm" | "user" | "department_head" | "branch_manager";
+
 interface UserRole {
   user_id: string;
-  role: "admin" | "rm" | "user";
+  role: AppRole;
 }
 
 export default function UserManagementPage() {
@@ -81,14 +83,14 @@ export default function UserManagementPage() {
   });
 
   const roleMutation = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: "admin" | "rm" | "user" }) => {
+    mutationFn: async ({ userId, role }: { userId: string; role: AppRole }) => {
       // First delete existing role
       await supabase.from("user_roles").delete().eq("user_id", userId);
       
-      // Then insert new role
+      // Then insert new role - cast to any to handle new enum values not yet in generated types
       const { error } = await supabase
         .from("user_roles")
-        .insert({ user_id: userId, role });
+        .insert({ user_id: userId, role: role as any });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -107,7 +109,7 @@ export default function UserManagementPage() {
     },
   });
 
-  const getUserRole = (userId: string): "admin" | "rm" | "user" => {
+  const getUserRole = (userId: string): AppRole => {
     const role = userRoles?.find(r => r.user_id === userId);
     return role?.role ?? "user";
   };
@@ -235,13 +237,15 @@ export default function UserManagementPage() {
                         <TableCell>
                           <Select 
                             value={getUserRole(profile.id)} 
-                            onValueChange={(role) => roleMutation.mutate({ userId: profile.id, role: role as "admin" | "rm" | "user" })}
+                            onValueChange={(role) => roleMutation.mutate({ userId: profile.id, role: role as AppRole })}
                           >
-                            <SelectTrigger className="w-[120px]">
+                            <SelectTrigger className="w-[150px]">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="admin">Admin</SelectItem>
+                              <SelectItem value="department_head">Department Head</SelectItem>
+                              <SelectItem value="branch_manager">Branch Manager</SelectItem>
                               <SelectItem value="rm">RM</SelectItem>
                               <SelectItem value="user">User</SelectItem>
                             </SelectContent>
