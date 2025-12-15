@@ -273,6 +273,161 @@ export type Database = {
           transport_allowance?: number | null
           updated_at?: string
         }
+        Relationships: [
+          {
+            foreignKeyName: "employee_salaries_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["employee_id"]
+          },
+        ]
+      }
+      employees: {
+        Row: {
+          bank_account: string | null
+          blood_group: string | null
+          branch: string
+          category: string | null
+          corporate_phone: string | null
+          created_at: string
+          date_of_birth: string | null
+          date_of_confirmation: string | null
+          date_of_promotion: string | null
+          department: string
+          designation: string
+          email: string
+          employee_id: string
+          employment_category: string | null
+          employment_status: string | null
+          father_name: string | null
+          functional_designation: string | null
+          gender: string | null
+          highest_degree: string | null
+          id: string
+          increment_date: string | null
+          joining_date: string
+          manager: string | null
+          marital_status: string | null
+          mother_name: string | null
+          name: string
+          nationality: string | null
+          nid_number: string | null
+          old_email: string | null
+          passport_number: string | null
+          performance_2019: string | null
+          performance_2020: string | null
+          permanent_address: string | null
+          personal_phone: string | null
+          present_address: string | null
+          release_date: string | null
+          religion: string | null
+          serial_number: number | null
+          service_date: number | null
+          service_month: number | null
+          service_year: number | null
+          spouse_name: string | null
+          status: string
+          tin_number: string | null
+          upay_number: string | null
+          updated_at: string
+        }
+        Insert: {
+          bank_account?: string | null
+          blood_group?: string | null
+          branch: string
+          category?: string | null
+          corporate_phone?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          date_of_confirmation?: string | null
+          date_of_promotion?: string | null
+          department: string
+          designation: string
+          email: string
+          employee_id: string
+          employment_category?: string | null
+          employment_status?: string | null
+          father_name?: string | null
+          functional_designation?: string | null
+          gender?: string | null
+          highest_degree?: string | null
+          id?: string
+          increment_date?: string | null
+          joining_date: string
+          manager?: string | null
+          marital_status?: string | null
+          mother_name?: string | null
+          name: string
+          nationality?: string | null
+          nid_number?: string | null
+          old_email?: string | null
+          passport_number?: string | null
+          performance_2019?: string | null
+          performance_2020?: string | null
+          permanent_address?: string | null
+          personal_phone?: string | null
+          present_address?: string | null
+          release_date?: string | null
+          religion?: string | null
+          serial_number?: number | null
+          service_date?: number | null
+          service_month?: number | null
+          service_year?: number | null
+          spouse_name?: string | null
+          status?: string
+          tin_number?: string | null
+          upay_number?: string | null
+          updated_at?: string
+        }
+        Update: {
+          bank_account?: string | null
+          blood_group?: string | null
+          branch?: string
+          category?: string | null
+          corporate_phone?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          date_of_confirmation?: string | null
+          date_of_promotion?: string | null
+          department?: string
+          designation?: string
+          email?: string
+          employee_id?: string
+          employment_category?: string | null
+          employment_status?: string | null
+          father_name?: string | null
+          functional_designation?: string | null
+          gender?: string | null
+          highest_degree?: string | null
+          id?: string
+          increment_date?: string | null
+          joining_date?: string
+          manager?: string | null
+          marital_status?: string | null
+          mother_name?: string | null
+          name?: string
+          nationality?: string | null
+          nid_number?: string | null
+          old_email?: string | null
+          passport_number?: string | null
+          performance_2019?: string | null
+          performance_2020?: string | null
+          permanent_address?: string | null
+          personal_phone?: string | null
+          present_address?: string | null
+          release_date?: string | null
+          religion?: string | null
+          serial_number?: number | null
+          service_date?: number | null
+          service_month?: number | null
+          service_year?: number | null
+          spouse_name?: string | null
+          status?: string
+          tin_number?: string | null
+          upay_number?: string | null
+          updated_at?: string
+        }
         Relationships: []
       }
       holdings: {
