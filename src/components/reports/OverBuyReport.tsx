@@ -59,6 +59,7 @@ interface ClientOverBuyData {
   // Deposits/Withdrawals
   total_deposits: number;
   total_withdrawals: number;
+  net_deposit: number;
   adjusted_balance: number;
   // Aggregated trade data
   net_buy: number;
@@ -105,6 +106,7 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { key: "equity", label: "Equity", visible: false },
   { key: "total_deposits", label: "Deposits", visible: true },
   { key: "total_withdrawals", label: "Withdrawals", visible: true },
+  { key: "net_deposit", label: "Net Deposit", visible: true },
   { key: "adjusted_balance", label: "Adjusted Balance", visible: true },
   { key: "net_buy", label: "Net Buy", visible: true },
   { key: "net_sell", label: "Net Sell", visible: true },
@@ -142,6 +144,7 @@ const evaluateFormula = (formula: string, data: ClientOverBuyData): string | num
       // Deposits/Withdrawals
       deposits: data.total_deposits,
       withdrawals: data.total_withdrawals,
+      net_deposit: data.net_deposit,
       adjusted_balance: data.adjusted_balance,
       
       // Aggregated trade data
@@ -479,7 +482,8 @@ export function OverBuyReport() {
         const ledger_balance = Number(client.ledger_balance) || 0;
         const total_deposits = tx.deposits;
         const total_withdrawals = tx.withdrawals;
-        const adjusted_balance = ledger_balance + total_deposits - total_withdrawals;
+        const net_deposit = total_deposits - total_withdrawals;
+        const adjusted_balance = ledger_balance + net_deposit;
         const net_buy = tradeData?.buy || 0;
         const net_sell = tradeData?.sell || 0;
         const net_position = net_buy - net_sell;
@@ -534,6 +538,7 @@ export function OverBuyReport() {
           interest_rate: Number(investor?.interest_rate) || 0,
           total_deposits,
           total_withdrawals,
+          net_deposit,
           adjusted_balance,
           net_buy,
           net_sell,
