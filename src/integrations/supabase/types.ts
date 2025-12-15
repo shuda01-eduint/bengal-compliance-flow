@@ -38,6 +38,72 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_trade_details: {
+        Row: {
+          agent_id: string
+          ait: number | null
+          cdbl_charge: number | null
+          comm_associates_portion: number | null
+          commission_rate: number | null
+          comp_portion_gross_comm: number | null
+          company_profit: number | null
+          created_at: string
+          gross_commission: number | null
+          id: string
+          investor_code: string
+          laga_howla: number | null
+          net_commission: number | null
+          net_commission_without_ait_cdbl: number | null
+          rm_id: string
+          rm_name: string | null
+          turnover: number | null
+          upload_month: string | null
+          uploaded_at: string
+        }
+        Insert: {
+          agent_id: string
+          ait?: number | null
+          cdbl_charge?: number | null
+          comm_associates_portion?: number | null
+          commission_rate?: number | null
+          comp_portion_gross_comm?: number | null
+          company_profit?: number | null
+          created_at?: string
+          gross_commission?: number | null
+          id?: string
+          investor_code: string
+          laga_howla?: number | null
+          net_commission?: number | null
+          net_commission_without_ait_cdbl?: number | null
+          rm_id: string
+          rm_name?: string | null
+          turnover?: number | null
+          upload_month?: string | null
+          uploaded_at?: string
+        }
+        Update: {
+          agent_id?: string
+          ait?: number | null
+          cdbl_charge?: number | null
+          comm_associates_portion?: number | null
+          commission_rate?: number | null
+          comp_portion_gross_comm?: number | null
+          company_profit?: number | null
+          created_at?: string
+          gross_commission?: number | null
+          id?: string
+          investor_code?: string
+          laga_howla?: number | null
+          net_commission?: number | null
+          net_commission_without_ait_cdbl?: number | null
+          rm_id?: string
+          rm_name?: string | null
+          turnover?: number | null
+          upload_month?: string | null
+          uploaded_at?: string
+        }
+        Relationships: []
+      }
       clients: {
         Row: {
           accrued_interest: number
