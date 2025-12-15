@@ -165,9 +165,15 @@ export function StockExchangeUpload() {
   };
 
   const parseRowToTrade = (row: Record<string, unknown>): ParsedTrade | null => {
-    const getString = (key: string) => String(row[key] ?? '').trim();
+    // Create case-insensitive getter (XML attributes may vary in case)
+    const rowLower: Record<string, unknown> = {};
+    for (const key of Object.keys(row)) {
+      rowLower[key.toLowerCase()] = row[key];
+    }
+    
+    const getString = (key: string) => String(rowLower[key.toLowerCase()] ?? row[key] ?? '').trim();
     const getNumber = (key: string) => {
-      const val = row[key];
+      const val = rowLower[key.toLowerCase()] ?? row[key];
       if (typeof val === 'number') return val;
       return parseFloat(String(val ?? '0').replace(/,/g, '')) || 0;
     };
@@ -177,7 +183,10 @@ export function StockExchangeUpload() {
     const clientCode = getString('ClientCode');
     const securityCode = getString('SecurityCode');
 
-    if (!clientCode || !securityCode) return null;
+    if (!clientCode || !securityCode) {
+      console.log('Missing required fields:', { clientCode, securityCode, row: Object.keys(row).slice(0, 5) });
+      return null;
+    }
 
     return {
       action: getString('Action'),
