@@ -362,11 +362,55 @@ export function StockExchangeUpload() {
         if (trade) trades.push(trade);
       }
     } else {
-      // Fallback: Try other common XML structures
+      // Fallback: Try other common XML structures (like <Trades><Detail .../> format)
       console.log('No Row elements found, trying alternative structures...');
-      const allElements = doc.documentElement.children;
       console.log('Root element:', doc.documentElement.tagName);
-      console.log('Child elements:', Array.from(allElements).map(el => el.tagName).slice(0, 10));
+      
+      // Look for Detail elements (common stock exchange format)
+      const detailElements = doc.getElementsByTagName('Detail');
+      console.log('Found Detail elements:', detailElements.length);
+      
+      if (detailElements.length > 0) {
+        for (let i = 0; i < detailElements.length; i++) {
+          const element = detailElements[i];
+          const rowData: Record<string, unknown> = {};
+          
+          // Extract all attributes as trade data
+          for (let j = 0; j < element.attributes.length; j++) {
+            const attr = element.attributes[j];
+            rowData[attr.name] = attr.value;
+          }
+          
+          if (i < 3) {
+            console.log(`Detail ${i} attributes:`, rowData);
+          }
+          
+          const trade = parseRowToTrade(rowData);
+          if (trade) trades.push(trade);
+        }
+      } else {
+        // Try generic Trade, Record, Item elements
+        const tradeElements = doc.querySelectorAll('Trade, trade, Record, record, Item, item');
+        tradeElements.forEach(element => {
+          const rowData: Record<string, unknown> = {};
+          
+          // Get attributes
+          Array.from(element.attributes).forEach(attr => {
+            rowData[attr.name] = attr.value;
+          });
+          
+          // Get child element text content
+          element.childNodes.forEach(node => {
+            if (node.nodeType === 1) {
+              const el = node as Element;
+              rowData[el.tagName] = el.textContent?.trim() || '';
+            }
+          });
+          
+          const trade = parseRowToTrade(rowData);
+          if (trade) trades.push(trade);
+        });
+      }
     }
     
     console.log('Total parsed XML trades:', trades.length);
