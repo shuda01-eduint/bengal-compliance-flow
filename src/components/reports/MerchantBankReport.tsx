@@ -10,11 +10,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Search, Download, RefreshCw, Building2, CalendarIcon, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Search, Download, RefreshCw, Building2, CalendarIcon, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Settings, Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
+
+interface MerchantBank {
+  id: string;
+  prefix: string;
+  bank_name: string;
+  description: string | null;
+}
 
 interface MerchantCodeData {
   client_code: string;
@@ -39,17 +48,10 @@ interface MerchantBankData {
   total_trades: number;
 }
 
-// Map prefixes to bank names - can be configured
-const BANK_NAMES: Record<string, string> = {
-  CL: "Community Bank Investment",
-  CM: "Commercial Merchant Bank",
-  CN: "Central National Bank",
-  N: "National Bank",
-};
-
 export function MerchantBankReport() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<MerchantBankData[]>([]);
+  const [merchantBanks, setMerchantBanks] = useState<MerchantBank[]>([]);
   const [search, setSearch] = useState("");
   const [selectedBank, setSelectedBank] = useState<string>("all");
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
@@ -57,10 +59,31 @@ export function MerchantBankReport() {
   const [expandedBanks, setExpandedBanks] = useState<Set<string>>(new Set());
   const [sortColumn, setSortColumn] = useState<string>("net_value");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  
+  // Settings dialog state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editingBank, setEditingBank] = useState<MerchantBank | null>(null);
+  const [newBank, setNewBank] = useState({ prefix: "", bank_name: "", description: "" });
+  const [savingBank, setSavingBank] = useState(false);
+
+  // Fetch merchant bank mappings from database
+  const fetchMerchantBanks = async () => {
+    const { data, error } = await supabase
+      .from("merchant_banks")
+      .select("*")
+      .order("prefix");
+    
+    if (!error && data) {
+      setMerchantBanks(data);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
     try {
+      // Fetch bank mappings first
+      await fetchMerchantBanks();
+      
       // Get all client codes that exist in clients table
       const { data: existingClients } = await supabase
         .from("clients")
@@ -157,13 +180,18 @@ export function MerchantBankReport() {
         }
       });
 
+      // Get bank names from database
+      const { data: dbBanks } = await supabase.from("merchant_banks").select("prefix, bank_name");
+      const bankNames: Record<string, string> = {};
+      dbBanks?.forEach(b => { bankNames[b.prefix] = b.bank_name; });
+
       // Convert to array format
       const result: MerchantBankData[] = [];
       bankMap.forEach((codesMap, prefix) => {
         const codes = Array.from(codesMap.values());
         result.push({
           prefix,
-          bank_name: BANK_NAMES[prefix] || `Bank ${prefix}`,
+          bank_name: bankNames[prefix] || `Bank ${prefix}`,
           codes,
           total_buy: codes.reduce((sum, c) => sum + c.buy_value, 0),
           total_sell: codes.reduce((sum, c) => sum + c.sell_value, 0),
@@ -187,6 +215,88 @@ export function MerchantBankReport() {
   useEffect(() => {
     fetchData();
   }, [startDate, endDate]);
+
+  // Bank management functions
+  const handleSaveBank = async () => {
+    if (!newBank.prefix || !newBank.bank_name) {
+      toast.error("Prefix and Bank Name are required");
+      return;
+    }
+    
+    setSavingBank(true);
+    try {
+      if (editingBank) {
+        // Update existing
+        const { error } = await supabase
+          .from("merchant_banks")
+          .update({ 
+            bank_name: newBank.bank_name, 
+            description: newBank.description || null 
+          })
+          .eq("id", editingBank.id);
+        
+        if (error) throw error;
+        toast.success("Bank updated successfully");
+      } else {
+        // Insert new
+        const { error } = await supabase
+          .from("merchant_banks")
+          .insert({ 
+            prefix: newBank.prefix.toUpperCase(), 
+            bank_name: newBank.bank_name, 
+            description: newBank.description || null 
+          });
+        
+        if (error) {
+          if (error.code === "23505") {
+            toast.error("A bank with this prefix already exists");
+          } else {
+            throw error;
+          }
+          return;
+        }
+        toast.success("Bank added successfully");
+      }
+      
+      setNewBank({ prefix: "", bank_name: "", description: "" });
+      setEditingBank(null);
+      await fetchMerchantBanks();
+      await fetchData();
+    } catch (error) {
+      console.error("Error saving bank:", error);
+      toast.error("Failed to save bank");
+    } finally {
+      setSavingBank(false);
+    }
+  };
+
+  const handleDeleteBank = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this bank mapping?")) return;
+    
+    try {
+      const { error } = await supabase
+        .from("merchant_banks")
+        .delete()
+        .eq("id", id);
+      
+      if (error) throw error;
+      toast.success("Bank deleted successfully");
+      await fetchMerchantBanks();
+      await fetchData();
+    } catch (error) {
+      console.error("Error deleting bank:", error);
+      toast.error("Failed to delete bank");
+    }
+  };
+
+  const handleEditBank = (bank: MerchantBank) => {
+    setEditingBank(bank);
+    setNewBank({ 
+      prefix: bank.prefix, 
+      bank_name: bank.bank_name, 
+      description: bank.description || "" 
+    });
+  };
 
   const bankOptions = useMemo(() => {
     return data.map(d => ({ prefix: d.prefix, name: d.bank_name }));
@@ -299,28 +409,154 @@ export function MerchantBankReport() {
   };
 
   return (
-    <Card className="glass-card">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="text-xl flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-primary" />
-            Merchant Bank Report
-          </CardTitle>
-          <p className="text-sm text-muted-foreground mt-1">
-            Trade summaries for merchant bank accounts by prefix
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchData} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExport} disabled={loading}>
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-        </div>
-      </CardHeader>
+    <>
+      {/* Settings Dialog */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Manage Merchant Banks
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {/* Add/Edit Form */}
+            <Card>
+              <CardContent className="pt-4">
+                <h4 className="font-medium mb-3">{editingBank ? "Edit Bank" : "Add New Bank"}</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <Label>Prefix</Label>
+                    <Input
+                      value={newBank.prefix}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, prefix: e.target.value.toUpperCase() }))}
+                      placeholder="e.g., CL"
+                      disabled={!!editingBank}
+                      maxLength={10}
+                    />
+                  </div>
+                  <div>
+                    <Label>Bank Name</Label>
+                    <Input
+                      value={newBank.bank_name}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, bank_name: e.target.value }))}
+                      placeholder="e.g., Community Bank"
+                    />
+                  </div>
+                  <div>
+                    <Label>Description</Label>
+                    <Input
+                      value={newBank.description}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, description: e.target.value }))}
+                      placeholder="Optional notes"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <Button onClick={handleSaveBank} disabled={savingBank} size="sm">
+                    {savingBank ? "Saving..." : editingBank ? "Update" : "Add Bank"}
+                  </Button>
+                  {editingBank && (
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => {
+                        setEditingBank(null);
+                        setNewBank({ prefix: "", bank_name: "", description: "" });
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Existing Banks List */}
+            <div className="rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Prefix</TableHead>
+                    <TableHead>Bank Name</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="w-[100px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {merchantBanks.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground py-4">
+                        No banks configured
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    merchantBanks.map((bank) => (
+                      <TableRow key={bank.id}>
+                        <TableCell className="font-mono font-bold">{bank.prefix}</TableCell>
+                        <TableCell>{bank.bank_name}</TableCell>
+                        <TableCell className="text-muted-foreground">{bank.description || "-"}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => handleEditBank(bank)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-destructive"
+                              onClick={() => handleDeleteBank(bank.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSettingsOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Card className="glass-card">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-xl flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              Merchant Bank Report
+            </CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Trade summaries for merchant bank accounts by prefix
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+              <Settings className="h-4 w-4 mr-2" />
+              Settings
+            </Button>
+            <Button variant="outline" size="sm" onClick={fetchData} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={loading}>
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </div>
+        </CardHeader>
       <CardContent className="space-y-4">
         {/* Summary Stats */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
@@ -549,6 +785,7 @@ export function MerchantBankReport() {
           </div>
         )}
       </CardContent>
-    </Card>
+      </Card>
+    </>
   );
 }
