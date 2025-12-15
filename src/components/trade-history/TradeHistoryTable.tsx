@@ -229,10 +229,13 @@ export function TradeHistoryTable() {
   const fetchTrades = async () => {
     setLoading(true);
     try {
-      // Build query with server-side filtering
+      const hasFilters = searchTerm || sideFilter !== "all" || selectedFile !== "all" || 
+                         dateFrom || dateTo || statusFilter !== "all";
+      
+      // Only request count when filters are applied (smaller result set)
       let query = supabase
         .from("trade_history")
-        .select("*", { count: "exact" });
+        .select("*", hasFilters ? { count: "exact" } : { count: "planned" });
 
       // Apply search filter (server-side)
       if (searchTerm) {
@@ -269,7 +272,7 @@ export function TradeHistoryTable() {
         query = query.eq("status", statusFilter);
       }
 
-      // Apply pagination
+      // Apply pagination - fetch limited records
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
 
@@ -280,8 +283,12 @@ export function TradeHistoryTable() {
       if (error) throw error;
       
       setTrades(data || []);
-      if (count !== null) {
+      // Only update count when we have filters (otherwise show page info only)
+      if (hasFilters && count !== null) {
         setFilteredCount(count);
+      } else if (!hasFilters) {
+        // For unfiltered view, estimate count based on whether we got a full page
+        setFilteredCount(data?.length === pageSize ? pageSize * 10 : data?.length || 0);
       }
     } catch (error) {
       console.error("Error fetching trades:", error);
