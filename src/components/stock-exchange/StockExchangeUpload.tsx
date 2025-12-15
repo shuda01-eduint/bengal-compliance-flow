@@ -147,12 +147,12 @@ export function StockExchangeUpload() {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
-      const validExtensions = ['.html', '.htm', '.xlsx', '.xls', '.csv'];
+      const validExtensions = ['.html', '.htm', '.xlsx', '.xls', '.csv', '.xml'];
       const hasValidExt = validExtensions.some(ext => selectedFile.name.toLowerCase().endsWith(ext));
       if (!hasValidExt) {
         toast({
           title: "Invalid file type",
-          description: "Please upload an HTML, Excel, or CSV file from the stock exchange",
+          description: "Please upload an HTML, Excel, CSV, or XML file from the stock exchange",
           variant: "destructive",
         });
         return;
@@ -284,6 +284,80 @@ export function StockExchangeUpload() {
     return trades;
   };
 
+  const parseXmlFile = async (): Promise<ParsedTrade[]> => {
+    if (!file) return [];
+    
+    const content = await file.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(content, 'text/xml');
+    
+    const trades: ParsedTrade[] = [];
+    
+    // Try common XML structures for trade data
+    const tradeElements = doc.querySelectorAll('Trade, trade, Row, row, Record, record, Item, item');
+    
+    tradeElements.forEach(element => {
+      const getValue = (tagNames: string[]): string => {
+        for (const tag of tagNames) {
+          const el = element.querySelector(tag);
+          if (el?.textContent) return el.textContent.trim();
+          // Also check attributes
+          const attr = element.getAttribute(tag) || element.getAttribute(tag.toLowerCase());
+          if (attr) return attr.trim();
+        }
+        return '';
+      };
+      
+      const getNumber = (tagNames: string[]): number => {
+        const val = getValue(tagNames);
+        return parseFloat(val.replace(/,/g, '')) || 0;
+      };
+
+      const clientCode = getValue(['ClientCode', 'clientCode', 'client_code', 'InvestorCode', 'investor_code']);
+      const securityCode = getValue(['SecurityCode', 'securityCode', 'security_code', 'Symbol', 'symbol']);
+      
+      if (!clientCode || !securityCode) return;
+
+      const sideRaw = getValue(['Side', 'side', 'Type', 'type']).toUpperCase();
+      const side: "BUY" | "SELL" = sideRaw === 'S' || sideRaw === 'SELL' ? 'SELL' : 'BUY';
+
+      const trade: ParsedTrade = {
+        action: getValue(['Action', 'action']),
+        status: getValue(['Status', 'status']),
+        isin: getValue(['ISIN', 'isin', 'Isin']),
+        asset_class: getValue(['AssetClass', 'assetClass', 'asset_class']),
+        order_id: getValue(['OrderID', 'orderId', 'order_id', 'OrderId']),
+        ref_order_id: getValue(['RefOrderID', 'refOrderId', 'ref_order_id']),
+        side,
+        boid: getValue(['BOID', 'boid', 'BoId']),
+        security_code: securityCode,
+        board: getValue(['Board', 'board']),
+        date: getValue(['Date', 'date', 'TradeDate', 'trade_date']),
+        time: getValue(['Time', 'time', 'TradeTime', 'trade_time']),
+        quantity: getNumber(['Quantity', 'quantity', 'Qty', 'qty']),
+        price: getNumber(['Price', 'price']),
+        value: getNumber(['Value', 'value', 'Amount', 'amount']),
+        exec_id: getValue(['ExecID', 'execId', 'exec_id']),
+        session: getValue(['Session', 'session']),
+        fill_type: getValue(['FillType', 'fillType', 'fill_type']),
+        category: getValue(['Category', 'category']),
+        compulsory_spot: getValue(['CompulsorySpot', 'compulsorySpot', 'compulsory_spot']),
+        client_code: clientCode,
+        trader_dealer_id: getValue(['TraderDealerID', 'traderDealerId', 'trader_dealer_id']),
+        owner_dealer_id: getValue(['OwnerDealerID', 'ownerDealerId', 'owner_dealer_id']),
+        trade_report_type: getValue(['TradeReportType', 'tradeReportType', 'trade_report_type']),
+      };
+
+      if (!trade.value && trade.quantity && trade.price) {
+        trade.value = trade.quantity * trade.price;
+      }
+
+      trades.push(trade);
+    });
+    
+    return trades;
+  };
+
   const handleParseFile = async () => {
     if (!file) return;
 
@@ -291,7 +365,8 @@ export function StockExchangeUpload() {
     try {
       const fileName = file.name.toLowerCase();
       const isExcelOrCsv = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv');
-      const trades = isExcelOrCsv ? await parseExcelFile() : await parseHtmlFile();
+      const isXml = fileName.endsWith('.xml');
+      const trades = isExcelOrCsv ? await parseExcelFile() : isXml ? await parseXmlFile() : await parseHtmlFile();
 
       if (trades.length === 0) {
         toast({
@@ -425,7 +500,7 @@ export function StockExchangeUpload() {
             Upload Stock Exchange File
           </CardTitle>
           <CardDescription>
-            Upload the daily HTML or Excel file from DSE or CSE to perform compliance checks and balance reconciliation
+            Upload the daily HTML, Excel, CSV, or XML file from DSE or CSE to perform compliance checks and balance reconciliation
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -436,7 +511,7 @@ export function StockExchangeUpload() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".html,.htm,.xlsx,.xls,.csv"
+              accept=".html,.htm,.xlsx,.xls,.csv,.xml"
               onChange={handleFileSelect}
               className="hidden"
             />
@@ -457,7 +532,7 @@ export function StockExchangeUpload() {
                   Click to upload or drag and drop
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  HTML, Excel, or CSV files
+                  HTML, Excel, CSV, or XML files
                 </p>
               </div>
             )}
