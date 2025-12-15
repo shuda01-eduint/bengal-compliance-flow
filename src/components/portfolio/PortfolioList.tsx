@@ -33,6 +33,7 @@ interface ClientData {
 
 interface PortfolioWithClient extends Portfolio {
   client: ClientData | null;
+  costValue: number;
 }
 
 interface CustomField {
@@ -72,13 +73,28 @@ export function PortfolioList() {
         .in("inv_code", investorCodes);
       if (clientsError) throw clientsError;
 
+      // Fetch holdings data to calculate total cost per investor
+      const { data: holdingsData, error: holdingsError } = await supabase
+        .from("holdings")
+        .select("investor_code, total_cost")
+        .in("investor_code", investorCodes);
+      if (holdingsError) throw holdingsError;
+
+      // Calculate total cost per investor
+      const costMap = new Map<string, number>();
+      holdingsData?.forEach(h => {
+        const current = costMap.get(h.investor_code) || 0;
+        costMap.set(h.investor_code, current + (h.total_cost || 0));
+      });
+
       // Create lookup map
       const clientMap = new Map(clientsData?.map(c => [c.inv_code, c]) || []);
 
-      // Merge portfolio with client data
+      // Merge portfolio with client data and cost value
       return portfolioData.map(p => ({
         ...p,
-        client: clientMap.get(p.investor_code) || null
+        client: clientMap.get(p.investor_code) || null,
+        costValue: costMap.get(p.investor_code) || 0
       })) as PortfolioWithClient[];
     }
   });
@@ -330,8 +346,8 @@ export function PortfolioList() {
                     <TableCell className="text-right font-mono text-foreground">
                       {formatCurrency(portfolio.client?.market_value)}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-muted-foreground">
-                      -
+                    <TableCell className="text-right font-mono text-foreground">
+                      {formatCurrency(portfolio.costValue)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-foreground">
                       {formatCurrency(portfolio.client?.equity)}
