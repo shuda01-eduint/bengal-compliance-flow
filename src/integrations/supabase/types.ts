@@ -209,6 +209,72 @@ export type Database = {
         }
         Relationships: []
       }
+      employee_salaries: {
+        Row: {
+          bank_account: string | null
+          basic_salary: number | null
+          created_at: string
+          effective_from: string | null
+          effective_to: string | null
+          employee_id: string
+          gross_salary: number | null
+          house_rent: number | null
+          id: string
+          is_current: boolean | null
+          medical_allowance: number | null
+          net_salary: number | null
+          other_allowance: number | null
+          other_deduction: number | null
+          payment_method: string | null
+          pf_deduction: number | null
+          tax_deduction: number | null
+          transport_allowance: number | null
+          updated_at: string
+        }
+        Insert: {
+          bank_account?: string | null
+          basic_salary?: number | null
+          created_at?: string
+          effective_from?: string | null
+          effective_to?: string | null
+          employee_id: string
+          gross_salary?: number | null
+          house_rent?: number | null
+          id?: string
+          is_current?: boolean | null
+          medical_allowance?: number | null
+          net_salary?: number | null
+          other_allowance?: number | null
+          other_deduction?: number | null
+          payment_method?: string | null
+          pf_deduction?: number | null
+          tax_deduction?: number | null
+          transport_allowance?: number | null
+          updated_at?: string
+        }
+        Update: {
+          bank_account?: string | null
+          basic_salary?: number | null
+          created_at?: string
+          effective_from?: string | null
+          effective_to?: string | null
+          employee_id?: string
+          gross_salary?: number | null
+          house_rent?: number | null
+          id?: string
+          is_current?: boolean | null
+          medical_allowance?: number | null
+          net_salary?: number | null
+          other_allowance?: number | null
+          other_deduction?: number | null
+          payment_method?: string | null
+          pf_deduction?: number | null
+          tax_deduction?: number | null
+          transport_allowance?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       holdings: {
         Row: {
           avg_cost: number | null
