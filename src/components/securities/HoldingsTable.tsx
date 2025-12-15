@@ -133,56 +133,124 @@ export function HoldingsTable() {
         throw new Error("File is empty or has no data rows");
       }
 
-      const headers = jsonData[0].map((h: any) => h?.toString().trim());
+      const headers = jsonData[0].map((h: any) => h?.toString().trim().toLowerCase());
       
-      // Map CSV columns to database columns
-      const columnMap: Record<string, string> = {
-        "Stock As On Date Instrumentwise": "trading_code",
-        "Investor Code": "investor_code",
-        "BOID": "boid",
-        "Investor Name": "investor_name",
-        "TotalStock": "total_stock",
-        "Saleable": "saleable",
-        "AvgCost": "avg_cost",
-        "Total Cost": "total_cost",
-        "Total M.V.": "market_value",
-        "Ledger Balance": "ledger_balance",
-      };
+      // Detect format: Instrument-grouped format or flat CSV
+      const isInstrumentFormat = headers.includes("investor code") && 
+        jsonData.some(row => row[0]?.toString().startsWith("Instrument Name :"));
 
       const validRecords: any[] = [];
       const validationErrors: string[] = [];
       const chunkSize = 500;
 
-      for (let i = 1; i < jsonData.length; i++) {
-        const row = jsonData[i];
-        if (!row || row.length === 0) continue;
-
-        const rawRecord: Record<string, unknown> = {};
-        headers.forEach((header: string, index: number) => {
-          const dbColumn = columnMap[header];
-          if (dbColumn) {
-            const value = row[index];
-            
-            if (["total_stock", "saleable", "avg_cost", "total_cost", "market_value", "ledger_balance"].includes(dbColumn)) {
-              rawRecord[dbColumn] = parseNumericValue(value);
-            } else {
-              rawRecord[dbColumn] = typeof value === 'string' ? sanitizeString(value) : (value?.toString().trim() || null);
-            }
-          }
-        });
-
-        // Validate using zod schema
-        const result = HoldingRecordSchema.safeParse(rawRecord);
+      if (isInstrumentFormat) {
+        // Parse instrument-grouped format (Excel with "Instrument Name :" rows)
+        let currentTradingCode: string | null = null;
         
-        if (result.success) {
-          validRecords.push(result.data);
-        } else if (validationErrors.length < 10) {
-          validationErrors.push(`Row ${i}: ${result.error.errors.map(e => e.message).join(', ')}`);
-        }
+        // Find column indices
+        const colIndices = {
+          investor_code: headers.indexOf("investor code"),
+          boid: headers.indexOf("boid"),
+          investor_name: headers.indexOf("investor name"),
+          total_stock: headers.indexOf("totalstock"),
+          saleable: headers.indexOf("saleable"),
+          avg_cost: headers.indexOf("avgcost"),
+          total_cost: headers.indexOf("total cost"),
+          market_value: headers.indexOf("total m.v."),
+          ledger_balance: headers.indexOf("ledger balance"),
+        };
 
-        // Yield to UI periodically during parsing
-        if (i % 1000 === 0) {
-          await new Promise((resolve) => requestAnimationFrame(resolve));
+        for (let i = 1; i < jsonData.length; i++) {
+          const row = jsonData[i];
+          if (!row || row.length === 0) continue;
+
+          const firstCell = row[0]?.toString().trim() || "";
+          
+          // Check for instrument name row
+          if (firstCell.startsWith("Instrument Name :")) {
+            currentTradingCode = firstCell.replace("Instrument Name :", "").trim();
+            continue;
+          }
+
+          // Skip total/summary rows
+          if (firstCell === "Total" || firstCell === "") continue;
+
+          // Skip if no trading code set yet
+          if (!currentTradingCode) continue;
+
+          const investorCode = row[colIndices.investor_code]?.toString().trim();
+          if (!investorCode) continue;
+
+          const rawRecord: Record<string, unknown> = {
+            trading_code: currentTradingCode,
+            investor_code: investorCode,
+            boid: colIndices.boid >= 0 ? (row[colIndices.boid]?.toString().trim() || null) : null,
+            investor_name: colIndices.investor_name >= 0 ? sanitizeString(row[colIndices.investor_name]?.toString() || "") : null,
+            total_stock: colIndices.total_stock >= 0 ? parseNumericValue(row[colIndices.total_stock]) : null,
+            saleable: colIndices.saleable >= 0 ? parseNumericValue(row[colIndices.saleable]) : null,
+            avg_cost: colIndices.avg_cost >= 0 ? parseNumericValue(row[colIndices.avg_cost]) : null,
+            total_cost: colIndices.total_cost >= 0 ? parseNumericValue(row[colIndices.total_cost]) : null,
+            market_value: colIndices.market_value >= 0 ? parseNumericValue(row[colIndices.market_value]) : null,
+            ledger_balance: colIndices.ledger_balance >= 0 ? parseNumericValue(row[colIndices.ledger_balance]) : null,
+          };
+
+          const result = HoldingRecordSchema.safeParse(rawRecord);
+          if (result.success) {
+            validRecords.push(result.data);
+          } else if (validationErrors.length < 10) {
+            validationErrors.push(`Row ${i}: ${result.error.errors.map(e => e.message).join(', ')}`);
+          }
+
+          if (i % 1000 === 0) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+        }
+      } else {
+        // Parse flat CSV format (original logic)
+        const columnMap: Record<string, string> = {
+          "stock as on date instrumentwise": "trading_code",
+          "trading code": "trading_code",
+          "investor code": "investor_code",
+          "boid": "boid",
+          "investor name": "investor_name",
+          "totalstock": "total_stock",
+          "total stock": "total_stock",
+          "saleable": "saleable",
+          "avgcost": "avg_cost",
+          "avg cost": "avg_cost",
+          "total cost": "total_cost",
+          "total m.v.": "market_value",
+          "market value": "market_value",
+          "ledger balance": "ledger_balance",
+        };
+
+        for (let i = 1; i < jsonData.length; i++) {
+          const row = jsonData[i];
+          if (!row || row.length === 0) continue;
+
+          const rawRecord: Record<string, unknown> = {};
+          headers.forEach((header: string, index: number) => {
+            const dbColumn = columnMap[header];
+            if (dbColumn) {
+              const value = row[index];
+              if (["total_stock", "saleable", "avg_cost", "total_cost", "market_value", "ledger_balance"].includes(dbColumn)) {
+                rawRecord[dbColumn] = parseNumericValue(value);
+              } else {
+                rawRecord[dbColumn] = typeof value === 'string' ? sanitizeString(value) : (value?.toString().trim() || null);
+              }
+            }
+          });
+
+          const result = HoldingRecordSchema.safeParse(rawRecord);
+          if (result.success) {
+            validRecords.push(result.data);
+          } else if (validationErrors.length < 10) {
+            validationErrors.push(`Row ${i}: ${result.error.errors.map(e => e.message).join(', ')}`);
+          }
+
+          if (i % 1000 === 0) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
         }
       }
 
