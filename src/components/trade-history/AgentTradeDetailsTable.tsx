@@ -61,18 +61,26 @@ export function AgentTradeDetailsTable() {
     }
   });
 
-  // Get unique RM IDs and Agent IDs for dropdowns
-  const rmIds = useMemo(() => {
+  // Get unique RM Names for dropdown (using rm_name column)
+  const rmOptions = useMemo(() => {
     if (!tradeDetails) return [];
-    const unique = [...new Set(tradeDetails.map(d => d.rm_id))];
-    return unique.sort();
+    const rmMap = new Map<string, string>();
+    tradeDetails.forEach(d => {
+      if (d.rm_name && !rmMap.has(d.rm_name)) {
+        rmMap.set(d.rm_name, d.rm_id);
+      }
+    });
+    return Array.from(rmMap.entries())
+      .map(([name, id]) => ({ name, id }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [tradeDetails]);
 
+  // Get unique Agent IDs for dropdown (filtered by selected RM if applicable)
   const agentIds = useMemo(() => {
     if (!tradeDetails) return [];
     let filtered = tradeDetails;
     if (selectedRmId !== "all") {
-      filtered = filtered.filter(d => d.rm_id === selectedRmId);
+      filtered = filtered.filter(d => d.rm_name === selectedRmId || d.rm_id === selectedRmId);
     }
     const unique = [...new Set(filtered.map(d => d.agent_id))];
     return unique.sort();
@@ -337,13 +345,13 @@ export function AgentTradeDetailsTable() {
             </div>
           </div>
           <Select value={selectedRmId} onValueChange={(v) => { setSelectedRmId(v); setSelectedAgentId("all"); }}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by RM ID" />
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Filter by RM Name" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All RMs</SelectItem>
-              {rmIds.map(id => (
-                <SelectItem key={id} value={id}>{id}</SelectItem>
+              {rmOptions.map(rm => (
+                <SelectItem key={rm.name} value={rm.name}>{rm.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
