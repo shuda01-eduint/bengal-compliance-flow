@@ -293,68 +293,70 @@ export function StockExchangeUpload() {
     
     const trades: ParsedTrade[] = [];
     
-    // Try common XML structures for trade data
-    const tradeElements = doc.querySelectorAll('Trade, trade, Row, row, Record, record, Item, item');
+    // Handle Excel XML format (SpreadsheetML)
+    const rows = doc.querySelectorAll('Row, ss\\:Row, row');
     
-    tradeElements.forEach(element => {
-      const getValue = (tagNames: string[]): string => {
-        for (const tag of tagNames) {
-          const el = element.querySelector(tag);
-          if (el?.textContent) return el.textContent.trim();
-          // Also check attributes
-          const attr = element.getAttribute(tag) || element.getAttribute(tag.toLowerCase());
-          if (attr) return attr.trim();
-        }
-        return '';
-      };
+    if (rows.length > 0) {
+      // First row is typically headers
+      const headerRow = rows[0];
+      const headerCells = headerRow.querySelectorAll('Cell, ss\\:Cell, cell');
+      const headers: string[] = [];
       
-      const getNumber = (tagNames: string[]): number => {
-        const val = getValue(tagNames);
-        return parseFloat(val.replace(/,/g, '')) || 0;
-      };
-
-      const clientCode = getValue(['ClientCode', 'clientCode', 'client_code', 'InvestorCode', 'investor_code']);
-      const securityCode = getValue(['SecurityCode', 'securityCode', 'security_code', 'Symbol', 'symbol']);
+      headerCells.forEach(cell => {
+        const data = cell.querySelector('Data, ss\\:Data, data');
+        headers.push(data?.textContent?.trim() || '');
+      });
       
-      if (!clientCode || !securityCode) return;
-
-      const sideRaw = getValue(['Side', 'side', 'Type', 'type']).toUpperCase();
-      const side: "BUY" | "SELL" = sideRaw === 'S' || sideRaw === 'SELL' ? 'SELL' : 'BUY';
-
-      const trade: ParsedTrade = {
-        action: getValue(['Action', 'action']),
-        status: getValue(['Status', 'status']),
-        isin: getValue(['ISIN', 'isin', 'Isin']),
-        asset_class: getValue(['AssetClass', 'assetClass', 'asset_class']),
-        order_id: getValue(['OrderID', 'orderId', 'order_id', 'OrderId']),
-        ref_order_id: getValue(['RefOrderID', 'refOrderId', 'ref_order_id']),
-        side,
-        boid: getValue(['BOID', 'boid', 'BoId']),
-        security_code: securityCode,
-        board: getValue(['Board', 'board']),
-        date: getValue(['Date', 'date', 'TradeDate', 'trade_date']),
-        time: getValue(['Time', 'time', 'TradeTime', 'trade_time']),
-        quantity: getNumber(['Quantity', 'quantity', 'Qty', 'qty']),
-        price: getNumber(['Price', 'price']),
-        value: getNumber(['Value', 'value', 'Amount', 'amount']),
-        exec_id: getValue(['ExecID', 'execId', 'exec_id']),
-        session: getValue(['Session', 'session']),
-        fill_type: getValue(['FillType', 'fillType', 'fill_type']),
-        category: getValue(['Category', 'category']),
-        compulsory_spot: getValue(['CompulsorySpot', 'compulsorySpot', 'compulsory_spot']),
-        client_code: clientCode,
-        trader_dealer_id: getValue(['TraderDealerID', 'traderDealerId', 'trader_dealer_id']),
-        owner_dealer_id: getValue(['OwnerDealerID', 'ownerDealerId', 'owner_dealer_id']),
-        trade_report_type: getValue(['TradeReportType', 'tradeReportType', 'trade_report_type']),
-      };
-
-      if (!trade.value && trade.quantity && trade.price) {
-        trade.value = trade.quantity * trade.price;
+      console.log('XML Headers found:', headers);
+      
+      // Process data rows (skip header row)
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const cells = row.querySelectorAll('Cell, ss\\:Cell, cell');
+        const rowData: Record<string, unknown> = {};
+        
+        cells.forEach((cell, idx) => {
+          // Handle ss:Index attribute for sparse cells
+          const indexAttr = cell.getAttribute('ss:Index') || cell.getAttribute('Index');
+          const cellIndex = indexAttr ? parseInt(indexAttr) - 1 : idx;
+          
+          const data = cell.querySelector('Data, ss\\:Data, data');
+          const value = data?.textContent?.trim() || '';
+          
+          if (headers[cellIndex]) {
+            rowData[headers[cellIndex]] = value;
+          }
+        });
+        
+        const trade = parseRowToTrade(rowData);
+        if (trade) trades.push(trade);
       }
-
-      trades.push(trade);
-    });
+    } else {
+      // Fallback: Try other common XML structures
+      const tradeElements = doc.querySelectorAll('Trade, trade, Record, record, Item, item');
+      
+      tradeElements.forEach(element => {
+        const rowData: Record<string, unknown> = {};
+        
+        // Get all child elements as columns
+        element.childNodes.forEach(node => {
+          if (node.nodeType === 1) { // Element node
+            const el = node as Element;
+            rowData[el.tagName] = el.textContent?.trim() || '';
+          }
+        });
+        
+        // Also check attributes
+        Array.from(element.attributes).forEach(attr => {
+          rowData[attr.name] = attr.value;
+        });
+        
+        const trade = parseRowToTrade(rowData);
+        if (trade) trades.push(trade);
+      });
+    }
     
+    console.log('Parsed XML trades:', trades.length);
     return trades;
   };
 
