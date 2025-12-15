@@ -198,23 +198,32 @@ export function TradeHistoryTable() {
   }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, currentPage, pageSize, hideZeroValues, statusFilter]);
 
   const fetchFileNames = async () => {
-    const { data } = await supabase
-      .from("trade_history")
-      .select("file_name")
-      .not("file_name", "is", null)
-      .limit(1000);
-    
-    if (data) {
-      const unique = [...new Set(data.map(d => d.file_name).filter(Boolean))] as string[];
-      setFileNames(unique);
+    try {
+      // Use distinct file names from recent uploads only to avoid timeout
+      const { data, error } = await supabase
+        .from("trade_history")
+        .select("file_name")
+        .not("file_name", "is", null)
+        .order("uploaded_at", { ascending: false })
+        .limit(500);
+      
+      if (error) {
+        console.error("Error fetching file names:", error);
+        return;
+      }
+      
+      if (data) {
+        const unique = [...new Set(data.map(d => d.file_name).filter(Boolean))] as string[];
+        setFileNames(unique);
+      }
+    } catch (error) {
+      console.error("Error fetching file names:", error);
     }
   };
 
   const fetchTotalCount = async () => {
-    const { count } = await supabase
-      .from("trade_history")
-      .select("*", { count: "exact", head: true });
-    setTotalCount(count || 0);
+    // Skip count for initial load - will be set when fetching trades with filters
+    setTotalCount(0);
   };
 
   const fetchTrades = async () => {
