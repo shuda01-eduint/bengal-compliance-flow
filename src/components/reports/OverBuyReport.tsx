@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "@/components/ui/calendar";
-import { Search, Download, AlertTriangle, CheckCircle, RefreshCw, Plus, Settings2, Trash2, HelpCircle, CalendarIcon } from "lucide-react";
+import { Search, Download, AlertTriangle, CheckCircle, RefreshCw, Plus, Settings2, Trash2, HelpCircle, CalendarIcon, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -312,6 +312,8 @@ export function OverBuyReport() {
 
   const [newFieldDialog, setNewFieldDialog] = useState(false);
   const [helpDialog, setHelpDialog] = useState(false);
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [newField, setNewField] = useState<Partial<CustomField>>({
     name: "",
     formula: "",
@@ -617,8 +619,54 @@ export function OverBuyReport() {
       result = result.filter((d) => d.is_violation);
     }
 
+    // Apply sorting
+    if (sortColumn) {
+      result = [...result].sort((a, b) => {
+        let aVal: any = a[sortColumn as keyof ClientOverBuyData];
+        let bVal: any = b[sortColumn as keyof ClientOverBuyData];
+        
+        // Handle custom fields
+        if (sortColumn.startsWith("custom_")) {
+          const field = customFields.find(f => f.id === sortColumn);
+          if (field) {
+            aVal = evaluateFormula(field.formula, a);
+            bVal = evaluateFormula(field.formula, b);
+          }
+        }
+        
+        // Handle null/undefined
+        if (aVal == null) aVal = "";
+        if (bVal == null) bVal = "";
+        
+        // Compare based on type
+        if (typeof aVal === "number" && typeof bVal === "number") {
+          return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
+        }
+        if (typeof aVal === "boolean" && typeof bVal === "boolean") {
+          return sortDirection === "asc" 
+            ? (aVal === bVal ? 0 : aVal ? 1 : -1)
+            : (aVal === bVal ? 0 : aVal ? -1 : 1);
+        }
+        
+        const strA = String(aVal).toLowerCase();
+        const strB = String(bVal).toLowerCase();
+        return sortDirection === "asc" 
+          ? strA.localeCompare(strB) 
+          : strB.localeCompare(strA);
+      });
+    }
+
     return result;
-  }, [data, search, selectedRm, showViolationsOnly]);
+  }, [data, search, selectedRm, showViolationsOnly, sortColumn, sortDirection, customFields]);
+
+  const handleSort = (columnKey: string) => {
+    if (sortColumn === columnKey) {
+      setSortDirection(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(columnKey);
+      setSortDirection("asc");
+    }
+  };
 
   const stats = useMemo(() => {
     const violations = filteredData.filter((d) => d.is_violation);
@@ -1080,14 +1128,35 @@ export function OverBuyReport() {
           <Table>
             <TableHeader>
               <TableRow>
-                {visibleColumns.map((col) => (
-                  <TableHead 
-                    key={col.key}
-                    className={["ledger_balance", "market_value", "equity", "total_deposits", "total_withdrawals", "net_deposit", "adjusted_balance", "net_buy", "net_sell", "net_position", "trade_count", "unique_securities_traded", "violation_amount"].includes(col.key) || col.isCustom ? "text-right" : col.key === "is_violation" ? "text-center" : ""}
-                  >
-                    {col.label}
-                  </TableHead>
-                ))}
+                {visibleColumns.map((col) => {
+                  const isRightAlign = ["ledger_balance", "market_value", "equity", "total_deposits", "total_withdrawals", "net_deposit", "adjusted_balance", "net_buy", "net_sell", "net_position", "trade_count", "unique_securities_traded", "violation_amount"].includes(col.key) || col.isCustom;
+                  const isCenterAlign = col.key === "is_violation";
+                  const isSorted = sortColumn === col.key;
+                  
+                  return (
+                    <TableHead 
+                      key={col.key}
+                      className={cn(
+                        "cursor-pointer select-none hover:bg-muted/50 transition-colors",
+                        isRightAlign ? "text-right" : isCenterAlign ? "text-center" : ""
+                      )}
+                      onClick={() => handleSort(col.key)}
+                    >
+                      <div className={cn("flex items-center gap-1", isRightAlign ? "justify-end" : isCenterAlign ? "justify-center" : "")}>
+                        {col.label}
+                        {isSorted ? (
+                          sortDirection === "asc" ? (
+                            <ArrowUp className="h-3 w-3" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3 opacity-30" />
+                        )}
+                      </div>
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             </TableHeader>
             <TableBody>
