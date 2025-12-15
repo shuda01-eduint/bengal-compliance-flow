@@ -49,6 +49,9 @@ interface TradeRecord {
   boid: string | null;
   trader_dealer_id: string | null;
   owner_dealer_id: string | null;
+  // Investor data from join
+  brokerage_commission: number | null;
+  interest_rate: number | null;
 }
 
 interface ColumnConfig {
@@ -96,12 +99,14 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     // Replace field references with actual values
     let expression = formula;
     
-    // Available fields for formulas
+    // Available fields for formulas (including investor data)
     const fields: Record<string, number | string | null> = {
       quantity: trade.quantity,
       price: trade.price,
       value: trade.value,
       side: trade.side,
+      brokerage_commission: trade.brokerage_commission,
+      interest_rate: trade.interest_rate,
     };
 
     // Replace field names with values
@@ -232,7 +237,7 @@ export function TradeHistoryTable() {
       const hasFilters = searchTerm || sideFilter !== "all" || selectedFile !== "all" || 
                          dateFrom || dateTo || statusFilter !== "all";
       
-      // Only request count when filters are applied (smaller result set)
+      // First fetch trades
       let query = supabase
         .from("trade_history")
         .select("*", hasFilters ? { count: "exact" } : { count: "planned" });
@@ -282,7 +287,36 @@ export function TradeHistoryTable() {
 
       if (error) throw error;
       
-      setTrades(data || []);
+      // Get unique client codes from trades to fetch investor data
+      const clientCodes = [...new Set((data || []).map(t => t.client_code).filter(Boolean))];
+      
+      // Fetch investor data for commission rates
+      let investorMap: Record<string, { brokerage_commission: number | null; interest_rate: number | null }> = {};
+      if (clientCodes.length > 0) {
+        const { data: investors } = await supabase
+          .from("investors")
+          .select("investor_code, brokerage_commission, interest_rate")
+          .in("investor_code", clientCodes);
+        
+        if (investors) {
+          investorMap = investors.reduce((acc, inv) => {
+            acc[inv.investor_code] = {
+              brokerage_commission: inv.brokerage_commission,
+              interest_rate: inv.interest_rate,
+            };
+            return acc;
+          }, {} as typeof investorMap);
+        }
+      }
+      
+      // Transform data to include investor fields
+      const transformedData = (data || []).map((trade: any) => ({
+        ...trade,
+        brokerage_commission: trade.client_code ? investorMap[trade.client_code]?.brokerage_commission ?? null : null,
+        interest_rate: trade.client_code ? investorMap[trade.client_code]?.interest_rate ?? null : null,
+      }));
+      
+      setTrades(transformedData);
       // Only update count when we have filters (otherwise show page info only)
       if (hasFilters && count !== null) {
         setFilteredCount(count);
@@ -416,7 +450,7 @@ export function TradeHistoryTable() {
                 <DialogHeader>
                   <DialogTitle>Add Custom Formula Column</DialogTitle>
                   <DialogDescription>
-                    Create a calculated column using formulas. Available fields: quantity, price, value, side
+                    Create a calculated column using formulas. Available fields: quantity, price, value, side, brokerage_commission, interest_rate
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
@@ -438,7 +472,8 @@ export function TradeHistoryTable() {
                     />
                     <p className="text-xs text-muted-foreground">
                       Examples: <br />
-                      • Commission: <code>value * 0.0015</code><br />
+                      • Commission: <code>value * brokerage_commission / 100</code><br />
+                      • Interest: <code>value * interest_rate / 100</code><br />
                       • Avg Price: <code>value / quantity</code><br />
                       • With condition: <code>IF(side == "BUY", value * 1.01, value * 0.99)</code><br />
                       • Functions: ABS(), ROUND(), MIN(), MAX(), SQRT()
