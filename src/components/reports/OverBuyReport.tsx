@@ -7,7 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, Download, AlertTriangle, CheckCircle, RefreshCw } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Search, Download, AlertTriangle, CheckCircle, RefreshCw, Plus, Settings2, Trash2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
@@ -22,10 +26,94 @@ interface ClientOverBuyData {
   adjusted_balance: number;
   net_buy: number;
   net_sell: number;
-  net_position: number; // net_buy - net_sell
+  net_position: number;
   violation_amount: number;
   is_violation: boolean;
 }
+
+interface CustomField {
+  id: string;
+  name: string;
+  formula: string;
+  type: "number" | "boolean" | "text";
+}
+
+interface ColumnConfig {
+  key: string;
+  label: string;
+  visible: boolean;
+  isCustom?: boolean;
+}
+
+const STORAGE_KEY = "overbuy_report_preferences";
+
+const DEFAULT_COLUMNS: ColumnConfig[] = [
+  { key: "inv_code", label: "Code", visible: true },
+  { key: "investor_name", label: "Investor Name", visible: true },
+  { key: "rm_name", label: "RM", visible: true },
+  { key: "ledger_balance", label: "Ledger Balance", visible: true },
+  { key: "total_deposits", label: "Deposits", visible: true },
+  { key: "total_withdrawals", label: "Withdrawals", visible: true },
+  { key: "adjusted_balance", label: "Adjusted Balance", visible: true },
+  { key: "net_buy", label: "Net Buy", visible: true },
+  { key: "net_sell", label: "Net Sell", visible: true },
+  { key: "net_position", label: "Net Position", visible: true },
+  { key: "violation_amount", label: "Violation", visible: true },
+  { key: "is_violation", label: "Status", visible: true },
+];
+
+// Safe formula evaluator
+const evaluateFormula = (formula: string, data: ClientOverBuyData): string | number | boolean => {
+  try {
+    const variables: Record<string, number | boolean> = {
+      code: 0,
+      ledger_balance: data.ledger_balance,
+      deposits: data.total_deposits,
+      withdrawals: data.total_withdrawals,
+      adjusted_balance: data.adjusted_balance,
+      net_buy: data.net_buy,
+      net_sell: data.net_sell,
+      net_position: data.net_position,
+      violation_amount: data.violation_amount,
+      is_violation: data.is_violation ? 1 : 0,
+    };
+
+    let result = formula;
+    
+    // Handle IF statements: IF(condition, trueValue, falseValue)
+    const ifRegex = /IF\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi;
+    result = result.replace(ifRegex, (_, condition, trueVal, falseVal) => {
+      let evalCondition = condition;
+      Object.entries(variables).forEach(([key, val]) => {
+        evalCondition = evalCondition.replace(new RegExp(`\\b${key}\\b`, "gi"), String(val));
+      });
+      try {
+        const condResult = Function(`"use strict"; return (${evalCondition})`)();
+        return condResult ? trueVal.trim() : falseVal.trim();
+      } catch {
+        return "ERROR";
+      }
+    });
+
+    // Replace variable names with values
+    Object.entries(variables).forEach(([key, val]) => {
+      result = result.replace(new RegExp(`\\b${key}\\b`, "gi"), String(val));
+    });
+
+    // Support basic math functions
+    result = result.replace(/ABS\s*\(/gi, "Math.abs(");
+    result = result.replace(/MAX\s*\(/gi, "Math.max(");
+    result = result.replace(/MIN\s*\(/gi, "Math.min(");
+    result = result.replace(/ROUND\s*\(/gi, "Math.round(");
+
+    // Evaluate the expression
+    const evaluated = Function(`"use strict"; return (${result})`)();
+    return evaluated;
+  } catch (error) {
+    console.error("Formula evaluation error:", error);
+    return "ERROR";
+  }
+};
 
 export function OverBuyReport() {
   const [loading, setLoading] = useState(true);
@@ -33,32 +121,59 @@ export function OverBuyReport() {
   const [search, setSearch] = useState("");
   const [selectedRm, setSelectedRm] = useState<string>("all");
   const [showViolationsOnly, setShowViolationsOnly] = useState(false);
+  
+  // Custom fields and column visibility
+  const [columns, setColumns] = useState<ColumnConfig[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed.columns || DEFAULT_COLUMNS;
+    }
+    return DEFAULT_COLUMNS;
+  });
+  
+  const [customFields, setCustomFields] = useState<CustomField[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed.customFields || [];
+    }
+    return [];
+  });
+
+  const [newFieldDialog, setNewFieldDialog] = useState(false);
+  const [newField, setNewField] = useState<Partial<CustomField>>({
+    name: "",
+    formula: "",
+    type: "number",
+  });
+
+  // Save preferences to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ columns, customFields }));
+  }, [columns, customFields]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch clients
       const { data: clients, error: clientsError } = await supabase
         .from("clients")
         .select("inv_code, investor_name, rm_name, rm_email, ledger_balance");
 
       if (clientsError) throw clientsError;
 
-      // Fetch deposits/withdrawals
       const { data: transactions, error: txError } = await supabase
         .from("deposits_withdrawals")
         .select("investor_code, transaction_type, amount");
 
       if (txError) throw txError;
 
-      // Fetch trade history for buy/sell calculations
       const { data: trades, error: tradesError } = await supabase
         .from("trade_history")
         .select("client_code, side, value");
 
       if (tradesError) throw tradesError;
 
-      // Group deposits/withdrawals by investor_code
       const txByInvestor = new Map<string, { deposits: number; withdrawals: number }>();
       transactions?.forEach((tx) => {
         const current = txByInvestor.get(tx.investor_code) || { deposits: 0, withdrawals: 0 };
@@ -70,7 +185,6 @@ export function OverBuyReport() {
         txByInvestor.set(tx.investor_code, current);
       });
 
-      // Group trades by client_code
       const tradesByClient = new Map<string, { buy: number; sell: number }>();
       trades?.forEach((trade) => {
         if (!trade.client_code) return;
@@ -84,7 +198,6 @@ export function OverBuyReport() {
         tradesByClient.set(trade.client_code, current);
       });
 
-      // Combine data
       const combinedData: ClientOverBuyData[] = (clients || []).map((client) => {
         const tx = txByInvestor.get(client.inv_code) || { deposits: 0, withdrawals: 0 };
         const trades = tradesByClient.get(client.inv_code) || { buy: 0, sell: 0 };
@@ -129,13 +242,11 @@ export function OverBuyReport() {
     fetchData();
   }, []);
 
-  // Get unique RMs for filter
   const rmOptions = useMemo(() => {
     const unique = [...new Set(data.map((d) => d.rm_name).filter(Boolean))];
     return unique.sort();
   }, [data]);
 
-  // Filter data
   const filteredData = useMemo(() => {
     let result = data;
 
@@ -159,7 +270,6 @@ export function OverBuyReport() {
     return result;
   }, [data, search, selectedRm, showViolationsOnly]);
 
-  // Summary stats
   const stats = useMemo(() => {
     const violations = filteredData.filter((d) => d.is_violation);
     const totalViolationAmount = violations.reduce((sum, d) => sum + d.violation_amount, 0);
@@ -179,21 +289,68 @@ export function OverBuyReport() {
     }).format(value);
   };
 
+  const toggleColumnVisibility = (key: string) => {
+    setColumns(prev => prev.map(col => 
+      col.key === key ? { ...col, visible: !col.visible } : col
+    ));
+  };
+
+  const addCustomField = () => {
+    if (!newField.name || !newField.formula) {
+      toast.error("Please provide a name and formula");
+      return;
+    }
+
+    const fieldId = `custom_${Date.now()}`;
+    const field: CustomField = {
+      id: fieldId,
+      name: newField.name,
+      formula: newField.formula,
+      type: newField.type as "number" | "boolean" | "text",
+    };
+
+    setCustomFields(prev => [...prev, field]);
+    setColumns(prev => [...prev, { key: fieldId, label: newField.name, visible: true, isCustom: true }]);
+    setNewField({ name: "", formula: "", type: "number" });
+    setNewFieldDialog(false);
+    toast.success("Custom field added");
+  };
+
+  const removeCustomField = (fieldId: string) => {
+    setCustomFields(prev => prev.filter(f => f.id !== fieldId));
+    setColumns(prev => prev.filter(col => col.key !== fieldId));
+    toast.success("Custom field removed");
+  };
+
   const handleExport = () => {
-    const exportData = filteredData.map((d) => ({
-      "Inv Code": d.inv_code,
-      "Investor Name": d.investor_name,
-      "RM Name": d.rm_name,
-      "Ledger Balance": d.ledger_balance,
-      "Total Deposits": d.total_deposits,
-      "Total Withdrawals": d.total_withdrawals,
-      "Adjusted Balance": d.adjusted_balance,
-      "Net Buy": d.net_buy,
-      "Net Sell": d.net_sell,
-      "Net Position": d.net_position,
-      "Violation Amount": d.violation_amount,
-      "Status": d.is_violation ? "VIOLATION" : "OK",
-    }));
+    const visibleCols = columns.filter(c => c.visible);
+    const exportData = filteredData.map((d) => {
+      const row: Record<string, unknown> = {};
+      visibleCols.forEach(col => {
+        if (col.isCustom) {
+          const field = customFields.find(f => f.id === col.key);
+          if (field) {
+            row[col.label] = evaluateFormula(field.formula, d);
+          }
+        } else {
+          switch (col.key) {
+            case "inv_code": row[col.label] = d.inv_code; break;
+            case "investor_name": row[col.label] = d.investor_name; break;
+            case "rm_name": row[col.label] = d.rm_name; break;
+            case "ledger_balance": row[col.label] = d.ledger_balance; break;
+            case "total_deposits": row[col.label] = d.total_deposits; break;
+            case "total_withdrawals": row[col.label] = d.total_withdrawals; break;
+            case "adjusted_balance": row[col.label] = d.adjusted_balance; break;
+            case "net_buy": row[col.label] = d.net_buy; break;
+            case "net_sell": row[col.label] = d.net_sell; break;
+            case "net_position": row[col.label] = d.net_position; break;
+            case "violation_amount": row[col.label] = d.violation_amount; break;
+            case "is_violation": row[col.label] = d.is_violation ? "VIOLATION" : "OK"; break;
+          }
+        }
+      });
+      return row;
+    });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -201,6 +358,68 @@ export function OverBuyReport() {
     XLSX.writeFile(wb, `overbuy_report_${new Date().toISOString().split("T")[0]}.xlsx`);
     toast.success("Report exported successfully");
   };
+
+  const renderCellValue = (row: ClientOverBuyData, col: ColumnConfig) => {
+    if (col.isCustom) {
+      const field = customFields.find(f => f.id === col.key);
+      if (field) {
+        const value = evaluateFormula(field.formula, row);
+        if (field.type === "boolean") {
+          return value ? (
+            <Badge variant="default" className="bg-green-600">Yes</Badge>
+          ) : (
+            <Badge variant="outline">No</Badge>
+          );
+        }
+        if (field.type === "number" && typeof value === "number") {
+          return formatCurrency(value);
+        }
+        return String(value);
+      }
+      return "-";
+    }
+
+    switch (col.key) {
+      case "inv_code":
+        return <span className="font-mono text-sm">{row.inv_code}</span>;
+      case "investor_name":
+        return row.investor_name;
+      case "rm_name":
+        return row.rm_name;
+      case "ledger_balance":
+        return <span className="font-mono">{formatCurrency(row.ledger_balance)}</span>;
+      case "total_deposits":
+        return <span className="font-mono text-green-600">{formatCurrency(row.total_deposits)}</span>;
+      case "total_withdrawals":
+        return <span className="font-mono text-red-600">{formatCurrency(row.total_withdrawals)}</span>;
+      case "adjusted_balance":
+        return <span className="font-mono font-medium">{formatCurrency(row.adjusted_balance)}</span>;
+      case "net_buy":
+        return <span className="font-mono">{formatCurrency(row.net_buy)}</span>;
+      case "net_sell":
+        return <span className="font-mono">{formatCurrency(row.net_sell)}</span>;
+      case "net_position":
+        return <span className="font-mono font-medium">{formatCurrency(row.net_position)}</span>;
+      case "violation_amount":
+        return <span className="font-mono text-destructive font-bold">{row.is_violation ? formatCurrency(row.violation_amount) : "-"}</span>;
+      case "is_violation":
+        return row.is_violation ? (
+          <Badge variant="destructive" className="gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            Violation
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="gap-1 text-green-600 border-green-600">
+            <CheckCircle className="h-3 w-3" />
+            OK
+          </Badge>
+        );
+      default:
+        return "-";
+    }
+  };
+
+  const visibleColumns = columns.filter(c => c.visible);
 
   return (
     <Card className="glass-card">
@@ -215,6 +434,106 @@ export function OverBuyReport() {
           </p>
         </div>
         <div className="flex gap-2">
+          {/* Column Settings */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Settings2 className="h-4 w-4 mr-2" />
+                Columns
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72" align="end">
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm">Toggle Columns</h4>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {columns.map((col) => (
+                    <div key={col.key} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={col.key}
+                          checked={col.visible}
+                          onCheckedChange={() => toggleColumnVisibility(col.key)}
+                        />
+                        <Label htmlFor={col.key} className="text-sm cursor-pointer">
+                          {col.label}
+                        </Label>
+                      </div>
+                      {col.isCustom && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-destructive"
+                          onClick={() => removeCustomField(col.key)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Add Custom Field */}
+          <Dialog open={newFieldDialog} onOpenChange={setNewFieldDialog}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Field
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add Custom Field</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Field Name</Label>
+                  <Input
+                    value={newField.name}
+                    onChange={(e) => setNewField(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="e.g., Risk Score"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Formula</Label>
+                  <Input
+                    value={newField.formula}
+                    onChange={(e) => setNewField(prev => ({ ...prev, formula: e.target.value }))}
+                    placeholder="e.g., net_position / adjusted_balance * 100"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Available variables: ledger_balance, deposits, withdrawals, adjusted_balance, net_buy, net_sell, net_position, violation_amount, is_violation
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Functions: IF(condition, true, false), ABS(), MAX(), MIN(), ROUND()
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Output Type</Label>
+                  <Select
+                    value={newField.type}
+                    onValueChange={(v) => setNewField(prev => ({ ...prev, type: v as "number" | "boolean" | "text" }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="number">Number (Currency)</SelectItem>
+                      <SelectItem value="boolean">Yes/No</SelectItem>
+                      <SelectItem value="text">Text</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setNewFieldDialog(false)}>Cancel</Button>
+                <Button onClick={addCustomField}>Add Field</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <Button variant="outline" size="sm" onClick={fetchData} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
             Refresh
@@ -281,25 +600,21 @@ export function OverBuyReport() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Inv Code</TableHead>
-                <TableHead>Investor Name</TableHead>
-                <TableHead>RM</TableHead>
-                <TableHead className="text-right">Ledger Balance</TableHead>
-                <TableHead className="text-right">Deposits</TableHead>
-                <TableHead className="text-right">Withdrawals</TableHead>
-                <TableHead className="text-right">Adjusted Balance</TableHead>
-                <TableHead className="text-right">Net Buy</TableHead>
-                <TableHead className="text-right">Net Sell</TableHead>
-                <TableHead className="text-right">Net Position</TableHead>
-                <TableHead className="text-right">Violation</TableHead>
-                <TableHead className="text-center">Status</TableHead>
+                {visibleColumns.map((col) => (
+                  <TableHead 
+                    key={col.key}
+                    className={["ledger_balance", "total_deposits", "total_withdrawals", "adjusted_balance", "net_buy", "net_sell", "net_position", "violation_amount"].includes(col.key) || col.isCustom ? "text-right" : col.key === "is_violation" ? "text-center" : ""}
+                  >
+                    {col.label}
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 12 }).map((_, j) => (
+                    {visibleColumns.map((_, j) => (
                       <TableCell key={j}>
                         <Skeleton className="h-4 w-full" />
                       </TableCell>
@@ -308,7 +623,7 @@ export function OverBuyReport() {
                 ))
               ) : filteredData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={visibleColumns.length} className="text-center py-8 text-muted-foreground">
                     No data found
                   </TableCell>
                 </TableRow>
@@ -318,46 +633,14 @@ export function OverBuyReport() {
                     key={row.inv_code}
                     className={row.is_violation ? "bg-destructive/5" : ""}
                   >
-                    <TableCell className="font-mono text-sm">{row.inv_code}</TableCell>
-                    <TableCell>{row.investor_name}</TableCell>
-                    <TableCell>{row.rm_name}</TableCell>
-                    <TableCell className="text-right font-mono">
-                      {formatCurrency(row.ledger_balance)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-green-600">
-                      {formatCurrency(row.total_deposits)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-red-600">
-                      {formatCurrency(row.total_withdrawals)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono font-medium">
-                      {formatCurrency(row.adjusted_balance)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {formatCurrency(row.net_buy)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {formatCurrency(row.net_sell)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono font-medium">
-                      {formatCurrency(row.net_position)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-destructive font-bold">
-                      {row.is_violation ? formatCurrency(row.violation_amount) : "-"}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {row.is_violation ? (
-                        <Badge variant="destructive" className="gap-1">
-                          <AlertTriangle className="h-3 w-3" />
-                          Violation
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="gap-1 text-green-600 border-green-600">
-                          <CheckCircle className="h-3 w-3" />
-                          OK
-                        </Badge>
-                      )}
-                    </TableCell>
+                    {visibleColumns.map((col) => (
+                      <TableCell 
+                        key={col.key}
+                        className={["ledger_balance", "total_deposits", "total_withdrawals", "adjusted_balance", "net_buy", "net_sell", "net_position", "violation_amount"].includes(col.key) || col.isCustom ? "text-right" : col.key === "is_violation" ? "text-center" : ""}
+                      >
+                        {renderCellValue(row, col)}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))
               )}
