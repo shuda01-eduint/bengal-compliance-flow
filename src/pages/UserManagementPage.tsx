@@ -20,7 +20,7 @@ interface Profile {
   created_at: string;
 }
 
-type AppRole = "admin" | "rm" | "user" | "department_head" | "branch_manager";
+type AppRole = "admin" | "rm" | "user" | "department_head" | "branch_manager" | "agent";
 
 interface UserRole {
   user_id: string;
@@ -247,6 +247,7 @@ export default function UserManagementPage() {
                               <SelectItem value="department_head">Department Head</SelectItem>
                               <SelectItem value="branch_manager">Branch Manager</SelectItem>
                               <SelectItem value="rm">RM</SelectItem>
+                              <SelectItem value="agent">Agent</SelectItem>
                               <SelectItem value="user">User</SelectItem>
                             </SelectContent>
                           </Select>
