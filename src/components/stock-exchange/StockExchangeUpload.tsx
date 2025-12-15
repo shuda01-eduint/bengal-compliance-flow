@@ -288,75 +288,88 @@ export function StockExchangeUpload() {
     if (!file) return [];
     
     const content = await file.text();
+    console.log('XML content preview:', content.substring(0, 500));
+    
     const parser = new DOMParser();
     const doc = parser.parseFromString(content, 'text/xml');
     
+    // Check for parsing errors
+    const parseError = doc.querySelector('parsererror');
+    if (parseError) {
+      console.error('XML Parse Error:', parseError.textContent);
+      return [];
+    }
+    
     const trades: ParsedTrade[] = [];
     
-    // Handle Excel XML format (SpreadsheetML)
-    const rows = doc.querySelectorAll('Row, ss\\:Row, row');
+    // Try to find rows - handle various XML formats
+    // Excel XML uses Worksheet > Table > Row structure
+    let rows = doc.getElementsByTagName('Row');
+    console.log('Found Row elements:', rows.length);
+    
+    // If no rows found, try lowercase
+    if (rows.length === 0) {
+      rows = doc.getElementsByTagName('row');
+      console.log('Found row (lowercase) elements:', rows.length);
+    }
     
     if (rows.length > 0) {
       // First row is typically headers
       const headerRow = rows[0];
-      const headerCells = headerRow.querySelectorAll('Cell, ss\\:Cell, cell');
+      const headerCells = headerRow.getElementsByTagName('Cell');
       const headers: string[] = [];
       
-      headerCells.forEach(cell => {
-        const data = cell.querySelector('Data, ss\\:Data, data');
-        headers.push(data?.textContent?.trim() || '');
-      });
+      for (let i = 0; i < headerCells.length; i++) {
+        const cell = headerCells[i];
+        // Get Data element content
+        const dataEl = cell.getElementsByTagName('Data')[0];
+        const value = dataEl?.textContent?.trim() || '';
+        headers.push(value);
+      }
       
       console.log('XML Headers found:', headers);
       
       // Process data rows (skip header row)
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
-        const cells = row.querySelectorAll('Cell, ss\\:Cell, cell');
+        const cells = row.getElementsByTagName('Cell');
         const rowData: Record<string, unknown> = {};
         
-        cells.forEach((cell, idx) => {
-          // Handle ss:Index attribute for sparse cells
-          const indexAttr = cell.getAttribute('ss:Index') || cell.getAttribute('Index');
-          const cellIndex = indexAttr ? parseInt(indexAttr) - 1 : idx;
+        let currentIndex = 0;
+        for (let j = 0; j < cells.length; j++) {
+          const cell = cells[j];
           
-          const data = cell.querySelector('Data, ss\\:Data, data');
-          const value = data?.textContent?.trim() || '';
-          
-          if (headers[cellIndex]) {
-            rowData[headers[cellIndex]] = value;
+          // Handle ss:Index attribute for sparse cells (Excel skips empty cells)
+          const indexAttr = cell.getAttribute('ss:Index');
+          if (indexAttr) {
+            currentIndex = parseInt(indexAttr) - 1; // ss:Index is 1-based
           }
-        });
+          
+          const dataEl = cell.getElementsByTagName('Data')[0];
+          const value = dataEl?.textContent?.trim() || '';
+          
+          if (headers[currentIndex]) {
+            rowData[headers[currentIndex]] = value;
+          }
+          currentIndex++;
+        }
+        
+        if (i <= 3) {
+          console.log(`Row ${i} data:`, rowData);
+        }
         
         const trade = parseRowToTrade(rowData);
         if (trade) trades.push(trade);
       }
     } else {
       // Fallback: Try other common XML structures
-      const tradeElements = doc.querySelectorAll('Trade, trade, Record, record, Item, item');
-      
-      tradeElements.forEach(element => {
-        const rowData: Record<string, unknown> = {};
-        
-        // Get all child elements as columns
-        element.childNodes.forEach(node => {
-          if (node.nodeType === 1) { // Element node
-            const el = node as Element;
-            rowData[el.tagName] = el.textContent?.trim() || '';
-          }
-        });
-        
-        // Also check attributes
-        Array.from(element.attributes).forEach(attr => {
-          rowData[attr.name] = attr.value;
-        });
-        
-        const trade = parseRowToTrade(rowData);
-        if (trade) trades.push(trade);
-      });
+      console.log('No Row elements found, trying alternative structures...');
+      const allElements = doc.documentElement.children;
+      console.log('Root element:', doc.documentElement.tagName);
+      console.log('Child elements:', Array.from(allElements).map(el => el.tagName).slice(0, 10));
     }
     
-    console.log('Parsed XML trades:', trades.length);
+    console.log('Total parsed XML trades:', trades.length);
     return trades;
   };
 
