@@ -556,6 +556,33 @@ export type Database = {
         }
         Relationships: []
       }
+      merchant_banks: {
+        Row: {
+          bank_name: string
+          created_at: string
+          description: string | null
+          id: string
+          prefix: string
+          updated_at: string
+        }
+        Insert: {
+          bank_name: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          prefix: string
+          updated_at?: string
+        }
+        Update: {
+          bank_name?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          prefix?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       portfolio_custom_fields: {
         Row: {
           created_at: string
