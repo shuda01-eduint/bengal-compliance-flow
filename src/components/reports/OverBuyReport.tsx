@@ -12,8 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { Search, Download, AlertTriangle, CheckCircle, RefreshCw, Plus, Settings2, Trash2, HelpCircle } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { Search, Download, AlertTriangle, CheckCircle, RefreshCw, Plus, Settings2, Trash2, HelpCircle, CalendarIcon } from "lucide-react";
 import { toast } from "sonner";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 
 interface SecurityTrade {
@@ -278,6 +281,8 @@ export function OverBuyReport() {
   const [search, setSearch] = useState("");
   const [selectedRm, setSelectedRm] = useState<string>("all");
   const [showViolationsOnly, setShowViolationsOnly] = useState(false);
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
   
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -334,17 +339,35 @@ export function OverBuyReport() {
 
       if (investorsError) throw investorsError;
 
-      // Fetch deposits/withdrawals
-      const { data: transactions, error: txError } = await supabase
+      // Fetch deposits/withdrawals with date filter
+      let txQuery = supabase
         .from("deposits_withdrawals")
-        .select("investor_code, transaction_type, amount");
+        .select("investor_code, transaction_type, amount, transaction_date");
+      
+      if (startDate) {
+        txQuery = txQuery.gte("transaction_date", format(startDate, "yyyy-MM-dd"));
+      }
+      if (endDate) {
+        txQuery = txQuery.lte("transaction_date", format(endDate, "yyyy-MM-dd"));
+      }
+      
+      const { data: transactions, error: txError } = await txQuery;
 
       if (txError) throw txError;
 
-      // Fetch all trade history with full details
-      const { data: trades, error: tradesError } = await supabase
+      // Fetch all trade history with full details and date filter
+      let tradeQuery = supabase
         .from("trade_history")
         .select("client_code, side, value, quantity, price, security_code, category, trade_date, file_name");
+      
+      if (startDate) {
+        tradeQuery = tradeQuery.gte("trade_date", format(startDate, "yyyy-MM-dd"));
+      }
+      if (endDate) {
+        tradeQuery = tradeQuery.lte("trade_date", format(endDate, "yyyy-MM-dd"));
+      }
+      
+      const { data: trades, error: tradesError } = await tradeQuery;
 
       if (tradesError) throw tradesError;
 
@@ -567,7 +590,7 @@ export function OverBuyReport() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [startDate, endDate]);
 
   const rmOptions = useMemo(() => {
     const unique = [...new Set(data.map((d) => d.rm_name).filter(Boolean))];
@@ -671,6 +694,7 @@ export function OverBuyReport() {
             case "equity": row[col.label] = d.equity; break;
             case "total_deposits": row[col.label] = d.total_deposits; break;
             case "total_withdrawals": row[col.label] = d.total_withdrawals; break;
+            case "net_deposit": row[col.label] = d.net_deposit; break;
             case "adjusted_balance": row[col.label] = d.adjusted_balance; break;
             case "net_buy": row[col.label] = d.net_buy; break;
             case "net_sell": row[col.label] = d.net_sell; break;
@@ -733,6 +757,8 @@ export function OverBuyReport() {
         return <span className="font-mono text-green-600">{formatCurrency(row.total_deposits)}</span>;
       case "total_withdrawals":
         return <span className="font-mono text-red-600">{formatCurrency(row.total_withdrawals)}</span>;
+      case "net_deposit":
+        return <span className={cn("font-mono font-medium", row.net_deposit >= 0 ? "text-green-600" : "text-red-600")}>{formatCurrency(row.net_deposit)}</span>;
       case "adjusted_balance":
         return <span className="font-mono font-medium">{formatCurrency(row.adjusted_balance)}</span>;
       case "net_buy":
@@ -972,8 +998,8 @@ export function OverBuyReport() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
+        <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search by code or name..."
@@ -982,6 +1008,50 @@ export function OverBuyReport() {
               className="pl-9"
             />
           </div>
+          
+          {/* Date Range Filters */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className={cn("w-[160px] justify-start text-left font-normal", !startDate && "text-muted-foreground")}>
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {startDate ? format(startDate, "dd/MM/yyyy") : "Start Date"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={startDate}
+                onSelect={setStartDate}
+                initialFocus
+                className={cn("p-3 pointer-events-auto")}
+              />
+            </PopoverContent>
+          </Popover>
+          
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className={cn("w-[160px] justify-start text-left font-normal", !endDate && "text-muted-foreground")}>
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {endDate ? format(endDate, "dd/MM/yyyy") : "End Date"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={endDate}
+                onSelect={setEndDate}
+                initialFocus
+                className={cn("p-3 pointer-events-auto")}
+              />
+            </PopoverContent>
+          </Popover>
+          
+          {(startDate || endDate) && (
+            <Button variant="ghost" size="sm" onClick={() => { setStartDate(undefined); setEndDate(undefined); }}>
+              Clear Dates
+            </Button>
+          )}
+          
           <Select value={selectedRm} onValueChange={setSelectedRm}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Filter by RM" />
@@ -1013,7 +1083,7 @@ export function OverBuyReport() {
                 {visibleColumns.map((col) => (
                   <TableHead 
                     key={col.key}
-                    className={["ledger_balance", "market_value", "equity", "total_deposits", "total_withdrawals", "adjusted_balance", "net_buy", "net_sell", "net_position", "trade_count", "unique_securities_traded", "violation_amount"].includes(col.key) || col.isCustom ? "text-right" : col.key === "is_violation" ? "text-center" : ""}
+                    className={["ledger_balance", "market_value", "equity", "total_deposits", "total_withdrawals", "net_deposit", "adjusted_balance", "net_buy", "net_sell", "net_position", "trade_count", "unique_securities_traded", "violation_amount"].includes(col.key) || col.isCustom ? "text-right" : col.key === "is_violation" ? "text-center" : ""}
                   >
                     {col.label}
                   </TableHead>
