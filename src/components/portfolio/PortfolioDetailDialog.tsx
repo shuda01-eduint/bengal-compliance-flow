@@ -171,24 +171,67 @@ export function PortfolioDetailDialog({ portfolioId, onClose }: PortfolioDetailD
                     <TableHeader>
                       <TableRow className="bg-muted/50">
                         <TableHead className="text-foreground">Trading Code</TableHead>
-                        <TableHead className="text-foreground text-right">Total Stock</TableHead>
+                        <TableHead className="text-foreground text-right">Quantity</TableHead>
                         <TableHead className="text-foreground text-right">Saleable</TableHead>
                         <TableHead className="text-foreground text-right">Avg Cost</TableHead>
+                        <TableHead className="text-foreground text-right">Total Cost</TableHead>
                         <TableHead className="text-foreground text-right">Market Value</TableHead>
+                        <TableHead className="text-foreground text-right">Gain/Loss</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {holdings.map((holding) => (
-                        <TableRow key={holding.id} className="hover:bg-muted/30">
-                          <TableCell className="font-medium text-foreground">{holding.trading_code}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{holding.total_stock}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{holding.saleable}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{formatCurrency(holding.avg_cost)}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{formatCurrency(holding.market_value)}</TableCell>
-                        </TableRow>
-                      ))}
+                      {holdings.map((holding) => {
+                        const gainLoss = (holding.market_value || 0) - (holding.total_cost || 0);
+                        const isProfit = gainLoss >= 0;
+                        return (
+                          <TableRow key={holding.id} className="hover:bg-muted/30">
+                            <TableCell className="font-medium text-foreground">{holding.trading_code}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{holding.total_stock?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{holding.saleable?.toLocaleString()}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{formatCurrency(holding.avg_cost)}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{formatCurrency(holding.total_cost)}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{formatCurrency(holding.market_value)}</TableCell>
+                            <TableCell className={`text-right font-medium ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+                              {isProfit ? '+' : ''}{formatCurrency(gainLoss)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
+                </div>
+                {/* Holdings Summary */}
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-muted/30 rounded-lg px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Total Quantity</p>
+                    <p className="font-semibold text-foreground">
+                      {holdings.reduce((sum, h) => sum + (h.total_stock || 0), 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Total Cost</p>
+                    <p className="font-semibold text-foreground">
+                      {formatCurrency(holdings.reduce((sum, h) => sum + (h.total_cost || 0), 0))}
+                    </p>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Market Value</p>
+                    <p className="font-semibold text-foreground">
+                      {formatCurrency(holdings.reduce((sum, h) => sum + (h.market_value || 0), 0))}
+                    </p>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Total Gain/Loss</p>
+                    {(() => {
+                      const totalGainLoss = holdings.reduce((sum, h) => sum + ((h.market_value || 0) - (h.total_cost || 0)), 0);
+                      const isProfit = totalGainLoss >= 0;
+                      return (
+                        <p className={`font-semibold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+                          {isProfit ? '+' : ''}{formatCurrency(totalGainLoss)}
+                        </p>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
             </>
