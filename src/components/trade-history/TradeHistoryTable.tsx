@@ -52,6 +52,13 @@ interface TradeRecord {
   // Investor data from join
   brokerage_commission: number | null;
   interest_rate: number | null;
+  account_type: string | null;
+  investor_type: string | null;
+  // Client data
+  ledger_balance: number | null;
+  // Transaction aggregates
+  total_deposits: number | null;
+  total_withdrawals: number | null;
 }
 
 interface ColumnConfig {
@@ -99,7 +106,7 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     // Replace field references with actual values
     let expression = formula;
     
-    // Available fields for formulas (including investor data)
+    // Available fields for formulas (including investor/client/transaction data)
     const fields: Record<string, number | string | null> = {
       quantity: trade.quantity,
       price: trade.price,
@@ -107,6 +114,11 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
       side: trade.side,
       brokerage_commission: trade.brokerage_commission,
       interest_rate: trade.interest_rate,
+      account_type: trade.account_type,
+      investor_type: trade.investor_type,
+      ledger_balance: trade.ledger_balance,
+      total_deposits: trade.total_deposits,
+      total_withdrawals: trade.total_withdrawals,
     };
 
     // Replace field names with values
@@ -290,12 +302,25 @@ export function TradeHistoryTable() {
       // Get unique client codes from trades to fetch investor data
       const clientCodes = [...new Set((data || []).map(t => t.client_code).filter(Boolean))];
       
-      // Fetch investor data for commission rates
-      let investorMap: Record<string, { brokerage_commission: number | null; interest_rate: number | null }> = {};
+      // Fetch investor data for commission rates and account info
+      let investorMap: Record<string, { 
+        brokerage_commission: number | null; 
+        interest_rate: number | null;
+        account_type: string | null;
+        investor_type: string | null;
+      }> = {};
+      
+      // Fetch client data for ledger balance
+      let clientMap: Record<string, { ledger_balance: number | null }> = {};
+      
+      // Fetch transaction aggregates
+      let transactionMap: Record<string, { total_deposits: number; total_withdrawals: number }> = {};
+      
       if (clientCodes.length > 0) {
+        // Fetch investor data
         const { data: investors } = await supabase
           .from("investors")
-          .select("investor_code, brokerage_commission, interest_rate")
+          .select("investor_code, brokerage_commission, interest_rate, account_type, investor_type")
           .in("investor_code", clientCodes);
         
         if (investors) {
@@ -303,17 +328,57 @@ export function TradeHistoryTable() {
             acc[inv.investor_code] = {
               brokerage_commission: inv.brokerage_commission,
               interest_rate: inv.interest_rate,
+              account_type: inv.account_type,
+              investor_type: inv.investor_type,
             };
             return acc;
           }, {} as typeof investorMap);
         }
+        
+        // Fetch client data for ledger balance
+        const { data: clients } = await supabase
+          .from("clients")
+          .select("inv_code, ledger_balance")
+          .in("inv_code", clientCodes);
+        
+        if (clients) {
+          clientMap = clients.reduce((acc, client) => {
+            acc[client.inv_code] = { ledger_balance: client.ledger_balance };
+            return acc;
+          }, {} as typeof clientMap);
+        }
+        
+        // Fetch deposits/withdrawals aggregates
+        const { data: transactions } = await supabase
+          .from("deposits_withdrawals")
+          .select("investor_code, transaction_type, amount")
+          .in("investor_code", clientCodes);
+        
+        if (transactions) {
+          transactionMap = transactions.reduce((acc, tx) => {
+            if (!acc[tx.investor_code]) {
+              acc[tx.investor_code] = { total_deposits: 0, total_withdrawals: 0 };
+            }
+            if (tx.transaction_type === 'Deposit') {
+              acc[tx.investor_code].total_deposits += Number(tx.amount) || 0;
+            } else if (tx.transaction_type === 'Withdrawal') {
+              acc[tx.investor_code].total_withdrawals += Number(tx.amount) || 0;
+            }
+            return acc;
+          }, {} as typeof transactionMap);
+        }
       }
       
-      // Transform data to include investor fields
+      // Transform data to include all enriched fields
       const transformedData = (data || []).map((trade: any) => ({
         ...trade,
         brokerage_commission: trade.client_code ? investorMap[trade.client_code]?.brokerage_commission ?? null : null,
         interest_rate: trade.client_code ? investorMap[trade.client_code]?.interest_rate ?? null : null,
+        account_type: trade.client_code ? investorMap[trade.client_code]?.account_type ?? null : null,
+        investor_type: trade.client_code ? investorMap[trade.client_code]?.investor_type ?? null : null,
+        ledger_balance: trade.client_code ? clientMap[trade.client_code]?.ledger_balance ?? null : null,
+        total_deposits: trade.client_code ? transactionMap[trade.client_code]?.total_deposits ?? null : null,
+        total_withdrawals: trade.client_code ? transactionMap[trade.client_code]?.total_withdrawals ?? null : null,
       }));
       
       setTrades(transformedData);
@@ -450,7 +515,7 @@ export function TradeHistoryTable() {
                 <DialogHeader>
                   <DialogTitle>Add Custom Formula Column</DialogTitle>
                   <DialogDescription>
-                    Create a calculated column using formulas. Available fields: quantity, price, value, side, brokerage_commission, interest_rate
+                    Create a calculated column using formulas. Available fields: quantity, price, value, side, brokerage_commission, interest_rate, account_type, investor_type, ledger_balance, total_deposits, total_withdrawals
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
@@ -473,9 +538,8 @@ export function TradeHistoryTable() {
                     <p className="text-xs text-muted-foreground">
                       Examples: <br />
                       • Commission: <code>value * brokerage_commission / 100</code><br />
-                      • Interest: <code>value * interest_rate / 100</code><br />
-                      • Avg Price: <code>value / quantity</code><br />
-                      • With condition: <code>IF(side == "BUY", value * 1.01, value * 0.99)</code><br />
+                      • Net Balance: <code>ledger_balance + total_deposits - total_withdrawals</code><br />
+                      • Adjusted Value: <code>IF(account_type == "Margin", value * 1.5, value)</code><br />
                       • Functions: ABS(), ROUND(), MIN(), MAX(), SQRT()
                     </p>
                   </div>
