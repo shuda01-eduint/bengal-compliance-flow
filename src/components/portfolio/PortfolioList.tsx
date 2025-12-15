@@ -24,6 +24,7 @@ interface Portfolio {
 interface ClientData {
   inv_code: string;
   investor_name: string;
+  rm_name: string;
   ledger_balance: number;
   market_value: number;
   accrued_interest: number;
@@ -67,7 +68,7 @@ export function PortfolioList() {
       const investorCodes = [...new Set(portfolioData.map(p => p.investor_code))];
       const { data: clientsData, error: clientsError } = await supabase
         .from("clients")
-        .select("inv_code, investor_name, ledger_balance, market_value, accrued_interest, equity")
+        .select("inv_code, investor_name, rm_name, ledger_balance, market_value, accrued_interest, equity")
         .in("inv_code", investorCodes);
       if (clientsError) throw clientsError;
 
@@ -278,7 +279,7 @@ export function PortfolioList() {
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search portfolios..."
+              placeholder="Search by code or name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 bg-background border-border"
@@ -297,11 +298,13 @@ export function PortfolioList() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">
-                  <TableHead className="text-foreground">Portfolio Name</TableHead>
-                  <TableHead className="text-foreground">Investor</TableHead>
+                  <TableHead className="text-foreground">Code No</TableHead>
+                  <TableHead className="text-foreground">Investor Name</TableHead>
+                  <TableHead className="text-foreground">RM</TableHead>
                   <TableHead className="text-foreground text-right">Ledger Balance</TableHead>
-                  <TableHead className="text-foreground text-right">Market Value</TableHead>
                   <TableHead className="text-foreground text-right">Accrued Fees</TableHead>
+                  <TableHead className="text-foreground text-right">Market Value</TableHead>
+                  <TableHead className="text-foreground text-right">Cost Value</TableHead>
                   <TableHead className="text-foreground text-right">Equity</TableHead>
                   <TableHead className="text-foreground text-right">Actions</TableHead>
                 </TableRow>
@@ -310,27 +313,25 @@ export function PortfolioList() {
                 {filteredPortfolios.map((portfolio) => (
                   <TableRow key={portfolio.id} className="hover:bg-muted/30">
                     <TableCell className="font-medium text-foreground">
-                      <div>
-                        <p>{portfolio.name}</p>
-                        {portfolio.description && (
-                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{portfolio.description}</p>
-                        )}
-                      </div>
+                      {portfolio.investor_code}
+                    </TableCell>
+                    <TableCell className="text-foreground">
+                      {portfolio.client?.investor_name || "-"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      <div>
-                        <p className="font-medium text-foreground">{portfolio.client?.investor_name || "-"}</p>
-                        <p className="text-xs">{portfolio.investor_code}</p>
-                      </div>
+                      {portfolio.client?.rm_name || "-"}
                     </TableCell>
                     <TableCell className="text-right font-mono text-foreground">
                       {formatCurrency(portfolio.client?.ledger_balance)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-foreground">
-                      {formatCurrency(portfolio.client?.market_value)}
+                      {formatCurrency(portfolio.client?.accrued_interest)}
                     </TableCell>
                     <TableCell className="text-right font-mono text-foreground">
-                      {formatCurrency(portfolio.client?.accrued_interest)}
+                      {formatCurrency(portfolio.client?.market_value)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground">
+                      -
                     </TableCell>
                     <TableCell className="text-right font-mono text-foreground">
                       {formatCurrency(portfolio.client?.equity)}
