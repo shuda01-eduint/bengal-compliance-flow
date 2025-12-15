@@ -16,7 +16,8 @@ import {
   Briefcase,
   LogOut,
   UserCog,
-  UserCheck
+  UserCheck,
+  Contact
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ const navigation = [
   { name: "Trade History", href: "/trade-history", icon: History },
   { name: "Securities", href: "/securities", icon: Landmark },
   { name: "Portfolio", href: "/portfolio", icon: Briefcase },
+  { name: "Investors", href: "/investors", icon: Contact },
   { name: "Agents", href: "/agents", icon: UserCheck },
   { name: "Compliance Reports", href: "/reports", icon: FileText },
   { name: "Post-Report Activity", href: "/activity", icon: Activity },

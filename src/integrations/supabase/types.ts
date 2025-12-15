@@ -260,6 +260,81 @@ export type Database = {
         }
         Relationships: []
       }
+      investors: {
+        Row: {
+          account_open_date: string | null
+          account_type: string | null
+          bank_account_no: string | null
+          bank_branch: string | null
+          bank_name: string | null
+          bo_id: string | null
+          brokerage_commission: number | null
+          cell_no: string | null
+          created_at: string
+          date_of_birth: string | null
+          email: string | null
+          father_spouse_name: string | null
+          home_address: string | null
+          id: string
+          interest_rate: number | null
+          investor_code: string
+          investor_name: string
+          investor_type: string | null
+          mother_name: string | null
+          status: string | null
+          trader: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_open_date?: string | null
+          account_type?: string | null
+          bank_account_no?: string | null
+          bank_branch?: string | null
+          bank_name?: string | null
+          bo_id?: string | null
+          brokerage_commission?: number | null
+          cell_no?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          email?: string | null
+          father_spouse_name?: string | null
+          home_address?: string | null
+          id?: string
+          interest_rate?: number | null
+          investor_code: string
+          investor_name: string
+          investor_type?: string | null
+          mother_name?: string | null
+          status?: string | null
+          trader?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_open_date?: string | null
+          account_type?: string | null
+          bank_account_no?: string | null
+          bank_branch?: string | null
+          bank_name?: string | null
+          bo_id?: string | null
+          brokerage_commission?: number | null
+          cell_no?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          email?: string | null
+          father_spouse_name?: string | null
+          home_address?: string | null
+          id?: string
+          interest_rate?: number | null
+          investor_code?: string
+          investor_name?: string
+          investor_type?: string | null
+          mother_name?: string | null
+          status?: string | null
+          trader?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       portfolio_custom_fields: {
         Row: {
           created_at: string

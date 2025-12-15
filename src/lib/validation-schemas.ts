@@ -117,6 +117,31 @@ export const DepositsWithdrawalsRecordSchema = z.object({
 
 export type DepositsWithdrawalsRecord = z.infer<typeof DepositsWithdrawalsRecordSchema>;
 
+// Investor import schema
+export const InvestorRecordSchema = z.object({
+  investor_code: z.string().min(1, "Investor code is required").max(50, "Investor code too long"),
+  investor_name: z.string().min(1, "Investor name is required").max(200, "Investor name too long"),
+  investor_type: z.string().max(100).nullable().optional(),
+  bo_id: z.string().max(50).nullable().optional(),
+  father_spouse_name: z.string().max(200).nullable().optional(),
+  mother_name: z.string().max(200).nullable().optional(),
+  home_address: z.string().max(500).nullable().optional(),
+  date_of_birth: z.string().max(20).nullable().optional(),
+  cell_no: z.string().max(50).nullable().optional(),
+  email: z.string().max(255).email().nullable().optional(),
+  account_open_date: z.string().max(20).nullable().optional(),
+  bank_account_no: z.string().max(100).nullable().optional(),
+  bank_name: z.string().max(200).nullable().optional(),
+  bank_branch: z.string().max(200).nullable().optional(),
+  status: z.string().max(50).nullable().optional(),
+  trader: z.string().max(100).nullable().optional(),
+  account_type: z.string().max(100).nullable().optional(),
+  interest_rate: z.number().finite().min(0).max(100).nullable().optional(),
+  brokerage_commission: z.number().finite().min(0).max(100).nullable().optional(),
+});
+
+export type InvestorRecord = z.infer<typeof InvestorRecordSchema>;
+
 // Generic validation function
 export function validateRecords<T>(
   records: unknown[],

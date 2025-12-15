@@ -2,3 +2,6 @@ project_id = "qtdsorouavffdecpejrn"
 
 [functions.import-clients]
 verify_jwt = false
+
+[functions.import-investors]
+verify_jwt = false

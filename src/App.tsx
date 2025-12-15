@@ -20,6 +20,7 @@ import SecuritiesPage from "./pages/SecuritiesPage";
 import PortfolioPage from "./pages/PortfolioPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import AgentsPage from "./pages/AgentsPage";
+import InvestorsPage from "./pages/InvestorsPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
@@ -49,6 +50,7 @@ const App = () => (
             <Route path="/securities" element={<ProtectedRoute><SecuritiesPage /></ProtectedRoute>} />
             <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
+            <Route path="/investors" element={<ProtectedRoute><InvestorsPage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
