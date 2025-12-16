@@ -237,44 +237,34 @@ export function TradeHistoryTable() {
 
   const fetchFileNames = async () => {
     try {
-      // Fetch from both ends of the time range to capture all unique files
-      const [newestResult, oldestResult] = await Promise.all([
-        supabase
-          .from("trade_history")
-          .select("file_name, uploaded_at")
-          .not("file_name", "is", null)
-          .order("uploaded_at", { ascending: false })
-          .limit(100),
-        supabase
-          .from("trade_history")
-          .select("file_name, uploaded_at")
-          .not("file_name", "is", null)
-          .order("uploaded_at", { ascending: true })
-          .limit(100)
-      ]);
-      
-      const allData = [...(newestResult.data || []), ...(oldestResult.data || [])];
-      
-      if (allData.length > 0) {
-        // Get unique file names and sort by the most recent upload time
-        const fileMap = new Map<string, Date>();
-        allData.forEach(d => {
-          if (d.file_name) {
-            const existing = fileMap.get(d.file_name);
-            const current = new Date(d.uploaded_at);
-            if (!existing || current > existing) {
-              fileMap.set(d.file_name, current);
-            }
-          }
-        });
-        
-        // Sort by upload date descending
-        const unique = [...fileMap.entries()]
-          .sort((a, b) => b[1].getTime() - a[1].getTime())
-          .map(([name]) => name);
-        
-        setFileNames(unique);
+      // Sample from multiple time points to capture all unique files
+      // Each file has 50K+ records, so we need wide sampling
+      const sampleQueries = [];
+      for (let offset = 0; offset < 300000; offset += 50000) {
+        sampleQueries.push(
+          supabase
+            .from("trade_history")
+            .select("file_name")
+            .not("file_name", "is", null)
+            .order("uploaded_at", { ascending: false })
+            .range(offset, offset + 10)
+        );
       }
+      
+      const results = await Promise.all(sampleQueries);
+      const allFileNames = new Set<string>();
+      
+      results.forEach(result => {
+        if (result.data) {
+          result.data.forEach(d => {
+            if (d.file_name) allFileNames.add(d.file_name);
+          });
+        }
+      });
+      
+      // Sort by file name descending (which sorts by date in the filename)
+      const unique = [...allFileNames].sort((a, b) => b.localeCompare(a));
+      setFileNames(unique);
     } catch (error) {
       console.error("Error fetching file names:", error);
     }
