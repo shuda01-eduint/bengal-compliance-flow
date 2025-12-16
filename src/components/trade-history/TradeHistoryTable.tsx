@@ -237,34 +237,18 @@ export function TradeHistoryTable() {
 
   const fetchFileNames = async () => {
     try {
-      // Sample from multiple time points to capture all unique files
-      // Each file has 50K+ records, so we need wide sampling
-      const sampleQueries = [];
-      for (let offset = 0; offset < 300000; offset += 50000) {
-        sampleQueries.push(
-          supabase
-            .from("trade_history")
-            .select("file_name")
-            .not("file_name", "is", null)
-            .order("uploaded_at", { ascending: false })
-            .range(offset, offset + 10)
-        );
+      // Use the efficient RPC function to get file stats
+      const { data, error } = await supabase.rpc('get_trade_file_stats');
+      
+      if (error) {
+        console.error("Error fetching file names:", error);
+        return;
       }
       
-      const results = await Promise.all(sampleQueries);
-      const allFileNames = new Set<string>();
-      
-      results.forEach(result => {
-        if (result.data) {
-          result.data.forEach(d => {
-            if (d.file_name) allFileNames.add(d.file_name);
-          });
-        }
-      });
-      
-      // Sort by file name descending (which sorts by date in the filename)
-      const unique = [...allFileNames].sort((a, b) => b.localeCompare(a));
-      setFileNames(unique);
+      if (data) {
+        const fileNames = data.map((d: { file_name: string }) => d.file_name);
+        setFileNames(fileNames);
+      }
     } catch (error) {
       console.error("Error fetching file names:", error);
     }

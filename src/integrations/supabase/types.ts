@@ -932,6 +932,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_trade_file_stats: {
+        Args: never
+        Returns: {
+          file_name: string
+          first_upload: string
+          last_upload: string
+          record_count: number
+          total_value: number
+          unique_clients: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
