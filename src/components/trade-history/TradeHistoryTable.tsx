@@ -55,6 +55,11 @@ interface TradeRecord {
   account_type: string | null;
   investor_type: string | null;
   ledger_balance_snapshot: number | null;
+  // Denormalized agent/RM data
+  agent_id: string | null;
+  rm_id: string | null;
+  rm_name: string | null;
+  department: string | null;
 }
 
 interface ColumnConfig {
@@ -92,6 +97,17 @@ const BASE_COLUMNS: ColumnConfig[] = [
   { key: "trader_dealer_id", label: "Trader ID", defaultVisible: false, type: 'string' },
   { key: "owner_dealer_id", label: "Owner ID", defaultVisible: false, type: 'string' },
   { key: "file_name", label: "File", defaultVisible: true, type: 'string' },
+  // Denormalized investor/client fields
+  { key: "brokerage_commission", label: "Brokerage Comm.", defaultVisible: false, type: 'number' },
+  { key: "interest_rate", label: "Interest Rate", defaultVisible: false, type: 'number' },
+  { key: "account_type", label: "Account Type", defaultVisible: false, type: 'string' },
+  { key: "investor_type", label: "Investor Type", defaultVisible: false, type: 'string' },
+  { key: "ledger_balance_snapshot", label: "Ledger Balance", defaultVisible: false, type: 'currency' },
+  // Denormalized agent/RM fields
+  { key: "agent_id", label: "Agent ID", defaultVisible: false, type: 'string' },
+  { key: "rm_id", label: "RM ID", defaultVisible: false, type: 'string' },
+  { key: "rm_name", label: "RM Name", defaultVisible: false, type: 'string' },
+  { key: "department", label: "Department", defaultVisible: false, type: 'string' },
 ];
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];

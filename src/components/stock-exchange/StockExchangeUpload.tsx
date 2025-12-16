@@ -68,16 +68,20 @@ export function StockExchangeUpload() {
       // Get unique client codes to fetch investor/client data for denormalization
       const clientCodes = [...new Set(trades.map(t => t.client_code).filter(Boolean))];
       
-      // Fetch investor and client data in parallel
-      const [investorsResult, clientsResult] = await Promise.all([
+      // Fetch investor, client, and agent data in parallel
+      const [investorsResult, clientsResult, agentCodesResult] = await Promise.all([
         supabase
           .from("investors")
           .select("investor_code, brokerage_commission, interest_rate, account_type, investor_type")
           .in("investor_code", clientCodes),
         supabase
           .from("clients")
-          .select("inv_code, ledger_balance")
-          .in("inv_code", clientCodes)
+          .select("inv_code, ledger_balance, rm_name")
+          .in("inv_code", clientCodes),
+        supabase
+          .from("agent_codes")
+          .select("investor_code, agent_id, rm_id")
+          .in("investor_code", clientCodes)
       ]);
       
       // Build lookup maps
@@ -87,7 +91,8 @@ export function StockExchangeUpload() {
         account_type: string | null;
         investor_type: string | null;
       }> = {};
-      const clientMap: Record<string, { ledger_balance: number | null }> = {};
+      const clientMap: Record<string, { ledger_balance: number | null; rm_name: string | null }> = {};
+      const agentMap: Record<string, { agent_id: string | null; rm_id: string | null }> = {};
       
       if (investorsResult.data) {
         investorsResult.data.forEach(inv => {
@@ -102,8 +107,37 @@ export function StockExchangeUpload() {
       
       if (clientsResult.data) {
         clientsResult.data.forEach(client => {
-          clientMap[client.inv_code] = { ledger_balance: client.ledger_balance };
+          clientMap[client.inv_code] = { 
+            ledger_balance: client.ledger_balance,
+            rm_name: client.rm_name,
+          };
         });
+      }
+      
+      if (agentCodesResult.data) {
+        agentCodesResult.data.forEach(ac => {
+          agentMap[ac.investor_code] = {
+            agent_id: ac.agent_id,
+            rm_id: ac.rm_id,
+          };
+        });
+      }
+      
+      // Fetch department info based on RM names
+      const rmNames = [...new Set(clientsResult.data?.map(c => c.rm_name).filter(Boolean) || [])];
+      let departmentMap: Record<string, string> = {};
+      
+      if (rmNames.length > 0) {
+        const { data: employees } = await supabase
+          .from("employees")
+          .select("name, department")
+          .in("name", rmNames);
+        
+        if (employees) {
+          employees.forEach(emp => {
+            if (emp.name) departmentMap[emp.name] = emp.department;
+          });
+        }
       }
       
       // Validate and sanitize trade records before insert
@@ -115,6 +149,9 @@ export function StockExchangeUpload() {
         const clientCode = sanitizeString(trade.client_code);
         const investorData = clientCode ? investorMap[clientCode] : null;
         const clientData = clientCode ? clientMap[clientCode] : null;
+        const agentData = clientCode ? agentMap[clientCode] : null;
+        const rmName = clientData?.rm_name || null;
+        const department = rmName ? departmentMap[rmName] || null : null;
         
         const rawRecord = {
           action: sanitizeString(trade.action),
@@ -148,11 +185,16 @@ export function StockExchangeUpload() {
           account_type: investorData?.account_type ?? null,
           investor_type: investorData?.investor_type ?? null,
           ledger_balance_snapshot: clientData?.ledger_balance ?? null,
+          // Denormalized agent/RM data
+          agent_id: agentData?.agent_id ?? null,
+          rm_id: agentData?.rm_id ?? null,
+          rm_name: rmName,
+          department: department,
         };
         
         const result = TradeRecordSchema.safeParse(rawRecord);
         if (result.success) {
-          // Add denormalized fields (not in schema but valid for insert)
+          // Add all denormalized fields (not in schema but valid for insert)
           validRecords.push({
             ...result.data,
             brokerage_commission: rawRecord.brokerage_commission,
@@ -160,6 +202,10 @@ export function StockExchangeUpload() {
             account_type: rawRecord.account_type,
             investor_type: rawRecord.investor_type,
             ledger_balance_snapshot: rawRecord.ledger_balance_snapshot,
+            agent_id: rawRecord.agent_id,
+            rm_id: rawRecord.rm_id,
+            rm_name: rawRecord.rm_name,
+            department: rawRecord.department,
           });
         } else if (validationErrors.length < 10) {
           validationErrors.push(`Trade ${i + 1}: ${result.error.errors.map(e => e.message).join(', ')}`);
