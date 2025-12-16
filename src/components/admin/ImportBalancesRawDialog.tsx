@@ -37,6 +37,7 @@ const COLUMN_MAPPINGS: Record<string, string[]> = {
   matured_balance: ['Matured Balance', 'Matured', 'matured_balance', 'MaturedBalance'],
   receivable_sale: ['Receivable sales', 'Receivable Sale', 'receivable_sale', 'Receivables'],
   cq_in_transit: ['CQ in transit', 'CQ Transit', 'cq_in_transit', 'CQInTransit', 'CQ'],
+  rm_name: ['RM', 'RM Name', 'rm_name', 'rm', 'Relationship Manager', 'Manager'],
 };
 
 const findColumnName = (headers: string[], targetMappings: string[]): string | null => {
@@ -77,6 +78,20 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
         throw new Error('No data found in file');
       }
 
+      setProgress(20);
+
+      // Fetch employees to build name-to-employee_id map
+      const { data: employees } = await supabase
+        .from('employees')
+        .select('employee_id, name');
+      
+      const employeeMap = new Map<string, string>();
+      employees?.forEach(emp => {
+        // Map by name (case-insensitive, trimmed)
+        const normalizedName = emp.name.toLowerCase().trim();
+        employeeMap.set(normalizedName, emp.employee_id);
+      });
+
       setProgress(30);
 
       const headers = Object.keys(jsonData[0] as object);
@@ -94,25 +109,38 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
 
       const dateStr = format(asOfDate, 'yyyy-MM-dd');
       
-      // Parse rows
-      const records = jsonData.map((row: any) => ({
-        as_of_date: dateStr,
-        investor_code: String(row[columnMap.investor_code!] || '').trim(),
-        instrument: columnMap.instrument ? String(row[columnMap.instrument] || '').trim() || null : null,
-        total_stock: parseNumber(columnMap.total_stock ? row[columnMap.total_stock] : 0),
-        saleable: parseNumber(columnMap.saleable ? row[columnMap.saleable] : 0),
-        avg_cost: parseNumber(columnMap.avg_cost ? row[columnMap.avg_cost] : 0),
-        total_cost: parseNumber(columnMap.total_cost ? row[columnMap.total_cost] : 0),
-        total_mv: parseNumber(columnMap.total_mv ? row[columnMap.total_mv] : 0),
-        ledger_balance: parseNumber(columnMap.ledger_balance ? row[columnMap.ledger_balance] : 0),
-        matured_balance: parseNumber(columnMap.matured_balance ? row[columnMap.matured_balance] : 0),
-        receivable_sale: parseNumber(columnMap.receivable_sale ? row[columnMap.receivable_sale] : 0),
-        cq_in_transit: parseNumber(columnMap.cq_in_transit ? row[columnMap.cq_in_transit] : 0),
-      })).filter(r => r.investor_code);
+      // Parse rows and look up RM employee_id
+      const records = jsonData.map((row: any) => {
+        const rmName = columnMap.rm_name ? String(row[columnMap.rm_name] || '').trim() : null;
+        const normalizedRmName = rmName?.toLowerCase().trim() || '';
+        const rmId = employeeMap.get(normalizedRmName) || null;
+        
+        return {
+          as_of_date: dateStr,
+          investor_code: String(row[columnMap.investor_code!] || '').trim(),
+          instrument: columnMap.instrument ? String(row[columnMap.instrument] || '').trim() || null : null,
+          total_stock: parseNumber(columnMap.total_stock ? row[columnMap.total_stock] : 0),
+          saleable: parseNumber(columnMap.saleable ? row[columnMap.saleable] : 0),
+          avg_cost: parseNumber(columnMap.avg_cost ? row[columnMap.avg_cost] : 0),
+          total_cost: parseNumber(columnMap.total_cost ? row[columnMap.total_cost] : 0),
+          total_mv: parseNumber(columnMap.total_mv ? row[columnMap.total_mv] : 0),
+          ledger_balance: parseNumber(columnMap.ledger_balance ? row[columnMap.ledger_balance] : 0),
+          matured_balance: parseNumber(columnMap.matured_balance ? row[columnMap.matured_balance] : 0),
+          receivable_sale: parseNumber(columnMap.receivable_sale ? row[columnMap.receivable_sale] : 0),
+          cq_in_transit: parseNumber(columnMap.cq_in_transit ? row[columnMap.cq_in_transit] : 0),
+          rm_name: rmName || null,
+          rm_id: rmId,
+        };
+      }).filter(r => r.investor_code);
 
       if (records.length === 0) {
         throw new Error('No valid records found');
       }
+      
+      // Count how many RMs were matched
+      const matchedRms = records.filter(r => r.rm_id).length;
+      const unmatchedRms = records.filter(r => r.rm_name && !r.rm_id).length;
+      console.log(`RM matching: ${matchedRms} matched, ${unmatchedRms} unmatched`);
 
       setProgress(50);
 
@@ -152,7 +180,10 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
       }
 
       setProgress(100);
-      toast.success(`Successfully imported ${records.length} balance records for ${format(asOfDate, 'PP')}`);
+      const rmInfo = columnMap.rm_name 
+        ? ` (${matchedRms} RMs linked, ${unmatchedRms} unmatched)` 
+        : '';
+      toast.success(`Successfully imported ${records.length} balance records for ${format(asOfDate, 'PP')}${rmInfo}`);
       setOpen(false);
       onImportComplete?.();
     } catch (error) {

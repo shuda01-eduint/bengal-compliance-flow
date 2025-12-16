@@ -116,6 +116,8 @@ export type Database = {
           ledger_balance: number | null
           matured_balance: number | null
           receivable_sale: number | null
+          rm_id: string | null
+          rm_name: string | null
           saleable: number | null
           total_cost: number | null
           total_mv: number | null
@@ -133,6 +135,8 @@ export type Database = {
           ledger_balance?: number | null
           matured_balance?: number | null
           receivable_sale?: number | null
+          rm_id?: string | null
+          rm_name?: string | null
           saleable?: number | null
           total_cost?: number | null
           total_mv?: number | null
@@ -150,6 +154,8 @@ export type Database = {
           ledger_balance?: number | null
           matured_balance?: number | null
           receivable_sale?: number | null
+          rm_id?: string | null
+          rm_name?: string | null
           saleable?: number | null
           total_cost?: number | null
           total_mv?: number | null
