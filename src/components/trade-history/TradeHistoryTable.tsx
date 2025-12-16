@@ -130,7 +130,10 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     const buyValue = trade.side === "BUY" ? (trade.value || 0) : 0;
     const sellValue = trade.side === "SELL" ? (trade.value || 0) : 0;
     const netBuy = buyValue - sellValue; // positive means net buy
+    const netSell = sellValue - buyValue; // positive means net sell (adds to cash)
     const adjustedBalance = (trade.ledger_balance_snapshot || 0) + (trade.total_deposits || 0) - (trade.total_withdrawals || 0);
+    // Dynamic ledger: base balance + deposits - withdrawals + net sell (selling adds cash)
+    const dynamicLedger = (trade.ledger_balance_snapshot || 0) + (trade.total_deposits || 0) - (trade.total_withdrawals || 0) + netSell;
     
     // Available fields for formulas (denormalized investor data stored on trade)
     const fields: Record<string, number | string | null> = {
@@ -150,7 +153,9 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
       buy_value: buyValue,
       sell_value: sellValue,
       net_buy: netBuy,
+      net_sell: netSell,
       adjusted_balance: adjustedBalance,
+      dynamic_ledger: dynamicLedger,
     };
 
     // Replace field names with values (longer names first to avoid partial matches)
@@ -508,11 +513,13 @@ export function TradeHistoryTable() {
                       rows={3}
                     />
                     <p className="text-xs text-muted-foreground">
+                      Available fields: quantity, price, value, side, ledger_balance, total_deposits, total_withdrawals, net_deposit, brokerage_commission, interest_rate, account_type, investor_type<br />
+                      Computed: buy_value, sell_value, net_buy, net_sell, adjusted_balance, <strong>dynamic_ledger</strong> (ledger + deposits - withdrawals + net_sell)<br />
                       Examples: <br />
+                      • Dynamic Balance: <code>dynamic_ledger</code><br />
                       • Commission: <code>value * brokerage_commission / 100</code><br />
-                      • Net Balance: <code>ledger_balance + total_deposits - total_withdrawals</code><br />
-                      • Adjusted Value: <code>IF(account_type == "Margin", value * 1.5, value)</code><br />
-                      • Functions: ABS(), ROUND(), MIN(), MAX(), SQRT()
+                      • Conditional: <code>IF(dynamic_ledger &gt; 0, dynamic_ledger - IF(net_buy &gt; 0, net_buy, 0), 0)</code><br />
+                      • Functions: ABS(), ROUND(), MIN(), MAX(), SQRT(), IF()
                     </p>
                   </div>
 
