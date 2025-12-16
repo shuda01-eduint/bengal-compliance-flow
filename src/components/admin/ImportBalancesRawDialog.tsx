@@ -38,6 +38,7 @@ const COLUMN_MAPPINGS: Record<string, string[]> = {
   receivable_sale: ['Receivable sales', 'Receivable Sale', 'receivable_sale', 'Receivables'],
   cq_in_transit: ['CQ in transit', 'CQ Transit', 'cq_in_transit', 'CQInTransit', 'CQ'],
   rm_name: ['RM', 'RM Name', 'rm_name', 'rm', 'Relationship Manager', 'Manager'],
+  rm_id: ['RM ID', 'RM Id', 'rm_id', 'RMID', 'Employee ID', 'EmpID'],
 };
 
 const findColumnName = (headers: string[], targetMappings: string[]): string | null => {
@@ -109,11 +110,19 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
 
       const dateStr = format(asOfDate, 'yyyy-MM-dd');
       
-      // Parse rows and look up RM employee_id
+      // Parse rows - use rm_id from file if available, otherwise lookup by rm_name
       const records = jsonData.map((row: any) => {
         const rmName = columnMap.rm_name ? String(row[columnMap.rm_name] || '').trim() : null;
-        const normalizedRmName = rmName?.toLowerCase().trim() || '';
-        const rmId = employeeMap.get(normalizedRmName) || null;
+        // First try to get RM ID directly from file
+        let rmId = columnMap.rm_id ? String(row[columnMap.rm_id] || '').trim() : null;
+        // Handle #N/A or invalid values
+        if (rmId === '#N/A' || rmId === 'N/A' || rmId === '') rmId = null;
+        
+        // If no direct RM ID, lookup by name from employees table
+        if (!rmId && rmName) {
+          const normalizedRmName = rmName.toLowerCase().trim();
+          rmId = employeeMap.get(normalizedRmName) || null;
+        }
         
         return {
           as_of_date: dateStr,
