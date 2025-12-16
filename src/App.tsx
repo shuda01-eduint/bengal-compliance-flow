@@ -13,7 +13,6 @@ import RulesPage from "./pages/RulesPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import SettingsPage from "./pages/SettingsPage";
 import AdminBalancesPage from "./pages/AdminBalancesPage";
-import StockExchangeDataPage from "./pages/StockExchangeDataPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
 import SecuritiesPage from "./pages/SecuritiesPage";
 import PortfolioPage from "./pages/PortfolioPage";
@@ -41,7 +40,6 @@ const App = () => (
             <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
             <Route path="/admin/balances" element={<ProtectedRoute><AdminBalancesPage /></ProtectedRoute>} />
-            <Route path="/stock-exchange" element={<ProtectedRoute><StockExchangeDataPage /></ProtectedRoute>} />
             <Route path="/trade-history" element={<ProtectedRoute><TradeHistoryPage /></ProtectedRoute>} />
             <Route path="/securities" element={<ProtectedRoute><SecuritiesPage /></ProtectedRoute>} />
             <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
