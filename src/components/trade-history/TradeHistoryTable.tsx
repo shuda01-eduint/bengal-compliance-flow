@@ -515,6 +515,35 @@ export function TradeHistoryTable() {
                       • Functions: ABS(), ROUND(), MIN(), MAX(), SQRT()
                     </p>
                   </div>
+
+                  {/* Formula Preview */}
+                  {newColumnFormula.trim() && trades.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2">
+                        Preview <span className="text-xs text-muted-foreground">(first 5 rows)</span>
+                      </Label>
+                      <div className="bg-secondary/50 rounded p-2 text-xs space-y-1 max-h-40 overflow-auto">
+                        <div className="grid grid-cols-3 gap-2 font-medium border-b pb-1 mb-1">
+                          <span>Client</span>
+                          <span>Side</span>
+                          <span>Result</span>
+                        </div>
+                        {trades.slice(0, 5).map((trade, idx) => {
+                          const result = evaluateFormula(newColumnFormula, trade);
+                          const isError = result === 'Error' || result === 'Invalid';
+                          return (
+                            <div key={idx} className="grid grid-cols-3 gap-2">
+                              <span className="truncate">{trade.client_code || '-'}</span>
+                              <span>{trade.side || '-'}</span>
+                              <span className={cn(isError && "text-destructive font-medium")}>
+                                {typeof result === 'number' ? result.toLocaleString(undefined, { maximumFractionDigits: 2 }) : result}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   
                   {customColumns.length > 0 && (
                     <div className="space-y-2">
