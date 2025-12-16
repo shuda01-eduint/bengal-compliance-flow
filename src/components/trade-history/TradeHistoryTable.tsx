@@ -237,21 +237,42 @@ export function TradeHistoryTable() {
 
   const fetchFileNames = async () => {
     try {
-      // Use distinct file names from recent uploads only to avoid timeout
-      const { data, error } = await supabase
-        .from("trade_history")
-        .select("file_name")
-        .not("file_name", "is", null)
-        .order("uploaded_at", { ascending: false })
-        .limit(500);
+      // Fetch from both ends of the time range to capture all unique files
+      const [newestResult, oldestResult] = await Promise.all([
+        supabase
+          .from("trade_history")
+          .select("file_name, uploaded_at")
+          .not("file_name", "is", null)
+          .order("uploaded_at", { ascending: false })
+          .limit(100),
+        supabase
+          .from("trade_history")
+          .select("file_name, uploaded_at")
+          .not("file_name", "is", null)
+          .order("uploaded_at", { ascending: true })
+          .limit(100)
+      ]);
       
-      if (error) {
-        console.error("Error fetching file names:", error);
-        return;
-      }
+      const allData = [...(newestResult.data || []), ...(oldestResult.data || [])];
       
-      if (data) {
-        const unique = [...new Set(data.map(d => d.file_name).filter(Boolean))] as string[];
+      if (allData.length > 0) {
+        // Get unique file names and sort by the most recent upload time
+        const fileMap = new Map<string, Date>();
+        allData.forEach(d => {
+          if (d.file_name) {
+            const existing = fileMap.get(d.file_name);
+            const current = new Date(d.uploaded_at);
+            if (!existing || current > existing) {
+              fileMap.set(d.file_name, current);
+            }
+          }
+        });
+        
+        // Sort by upload date descending
+        const unique = [...fileMap.entries()]
+          .sort((a, b) => b[1].getTime() - a[1].getTime())
+          .map(([name]) => name);
+        
         setFileNames(unique);
       }
     } catch (error) {
