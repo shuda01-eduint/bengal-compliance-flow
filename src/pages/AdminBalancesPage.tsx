@@ -33,12 +33,14 @@ import {
   groupByInvestor,
   groupByInstrument,
   groupByPortfolio,
+  groupByRM,
   formatCurrency,
   formatNumber,
   formatPercent,
   InvestorGroupedRow,
   InstrumentSummary,
   PortfolioSummary,
+  RMSummary,
 } from "@/lib/balance-utils";
 
 type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'adjusted_ledger' | 'deposits' | 'withdrawals' | 'net_sell' | 'net_buy' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag';
@@ -50,6 +52,7 @@ const AdminBalancesPage = () => {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [portfolioSearchQuery, setPortfolioSearchQuery] = useState("");
+  const [rmSearchQuery, setRMSearchQuery] = useState("");
   const [riskFilter, setRiskFilter] = useState<string>("all");
   const [onlyNegativeLedger, setOnlyNegativeLedger] = useState(false);
   const [onlyReceivables, setOnlyReceivables] = useState(false);
@@ -285,6 +288,12 @@ const AdminBalancesPage = () => {
     return groupByPortfolio(enrichedData, portfolios);
   }, [enrichedData, portfolios]);
 
+  // Group by RM for fourth tab
+  const rmSummary = useMemo(() => {
+    if (!portfolios) return [];
+    return groupByRM(enrichedData, portfolios);
+  }, [enrichedData, portfolios]);
+
   const filteredPortfolioSummary = useMemo(() => {
     const queryRaw = portfolioSearchQuery.trim();
     if (!queryRaw) return portfolioSummary;
@@ -310,6 +319,26 @@ const AdminBalancesPage = () => {
   const sortedPortfolioRows = useMemo(() => {
     return [...filteredPortfolioSummary].sort((a, b) => b.total_mv - a.total_mv);
   }, [filteredPortfolioSummary]);
+
+  // Filter RM summary
+  const filteredRMSummary = useMemo(() => {
+    const queryRaw = rmSearchQuery.trim();
+    if (!queryRaw) return rmSummary;
+
+    const query = queryRaw.toLowerCase();
+
+    return rmSummary.filter((rm) => {
+      if (rm.rm_id.toLowerCase().includes(query)) return true;
+      if (rm.rm_name?.toLowerCase().includes(query)) return true;
+      if (rm.investor_codes.some((code) => code.toLowerCase() === query)) return true;
+      if (rm.portfolio_names.some((name) => name.toLowerCase().includes(query))) return true;
+      return false;
+    });
+  }, [rmSummary, rmSearchQuery]);
+
+  const sortedRMRows = useMemo(() => {
+    return [...filteredRMSummary].sort((a, b) => b.total_mv - a.total_mv);
+  }, [filteredRMSummary]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -476,6 +505,7 @@ const AdminBalancesPage = () => {
           <TabsTrigger value="all">All Holdings</TabsTrigger>
           <TabsTrigger value="by-instrument">By Instrument</TabsTrigger>
           <TabsTrigger value="by-portfolio">By Portfolio</TabsTrigger>
+          <TabsTrigger value="by-rm">By RM</TabsTrigger>
         </TabsList>
 
         <TabsContent value="all" className="space-y-4">
@@ -880,6 +910,98 @@ const AdminBalancesPage = () => {
                           {formatNumber(portfolio.ledger_balance)}
                         </TableCell>
                         <TableCell>{getRiskBadge(portfolio.risk_flag)}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="by-rm" className="space-y-4">
+          {/* Search filter for RMs */}
+          <div className="flex items-center gap-4 p-4 glass-card rounded-xl">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search RM name, ID, investor code, or portfolio..."
+                value={rmSearchQuery}
+                onChange={(e) => setRMSearchQuery(e.target.value)}
+                className="pl-10 bg-secondary border-border"
+              />
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {sortedRMRows.length} RMs
+            </span>
+          </div>
+
+          <div className="glass-card rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
+                    <TableHead className="text-muted-foreground">RM ID</TableHead>
+                    <TableHead className="text-muted-foreground">RM Name</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Investors</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Portfolios</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Total Qty</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Unrealized P&L</TableHead>
+                    <TableHead className="text-muted-foreground text-right">P&L %</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
+                    <TableHead className="text-muted-foreground">Risk</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sortedRMRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                        No RM data found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sortedRMRows.map((rm) => (
+                      <TableRow
+                        key={rm.rm_id}
+                        className={cn(
+                          "border-border hover:bg-secondary/30",
+                          rm.risk_flag === 'High' && "bg-destructive/10",
+                          rm.risk_flag === 'Watch' && "bg-amber-500/10"
+                        )}
+                      >
+                        <TableCell className="font-mono text-sm">{rm.rm_id}</TableCell>
+                        <TableCell className="font-medium">{rm.rm_name || '—'}</TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant="secondary">{rm.investor_count}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant="outline">{rm.portfolio_count}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{rm.total_qty.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">{formatNumber(rm.total_cost)}</TableCell>
+                        <TableCell className="text-right">{formatNumber(rm.total_mv)}</TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right",
+                            rm.unrealized_pnl >= 0 ? "text-success" : "text-destructive"
+                          )}
+                        >
+                          {formatNumber(rm.unrealized_pnl)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right",
+                            (rm.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive"
+                          )}
+                        >
+                          {formatPercent(rm.pnl_pct)}
+                        </TableCell>
+                        <TableCell className={cn("text-right", rm.ledger_balance < 0 && "text-destructive")}>
+                          {formatNumber(rm.ledger_balance)}
+                        </TableCell>
+                        <TableCell>{getRiskBadge(rm.risk_flag)}</TableCell>
                       </TableRow>
                     ))
                   )}

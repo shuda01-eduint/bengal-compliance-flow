@@ -14,6 +14,8 @@ export interface BalanceRawRow {
   matured_balance: number;
   receivable_sale: number;
   cq_in_transit: number;
+  rm_id: string | null;
+  rm_name: string | null;
 }
 
 export interface InvestorAdjustment {
@@ -77,6 +79,23 @@ export interface PortfolioSummary {
   description: string | null;
   investor_codes: string[];
   investor_count: number;
+  total_qty: number;
+  total_cost: number;
+  total_mv: number;
+  unrealized_pnl: number;
+  pnl_pct: number | null;
+  ledger_balance: number;
+  adjusted_ledger: number;
+  risk_flag: 'OK' | 'Watch' | 'High';
+}
+
+export interface RMSummary {
+  rm_id: string;
+  rm_name: string | null;
+  investor_codes: string[];
+  investor_count: number;
+  portfolio_names: string[];
+  portfolio_count: number;
   total_qty: number;
   total_cost: number;
   total_mv: number;
@@ -301,6 +320,80 @@ export function groupByPortfolio(rows: EnrichedBalanceRow[], portfolios: Portfol
       description: data.portfolio.description,
       investor_codes: Array.from(data.investorCodes),
       investor_count: data.investorCodes.size,
+      total_qty,
+      total_cost,
+      total_mv,
+      unrealized_pnl,
+      pnl_pct,
+      ledger_balance,
+      adjusted_ledger,
+      risk_flag,
+    };
+  });
+}
+
+// Group by RM
+export function groupByRM(rows: EnrichedBalanceRow[], portfolios: Portfolio[]): RMSummary[] {
+  // Create a map of investor_code -> portfolio names
+  const investorToPortfolios: Record<string, string[]> = {};
+  portfolios.forEach(p => {
+    if (!investorToPortfolios[p.investor_code]) {
+      investorToPortfolios[p.investor_code] = [];
+    }
+    investorToPortfolios[p.investor_code].push(p.name);
+  });
+
+  // Group rows by RM
+  const grouped: Record<string, { 
+    rm_name: string | null; 
+    rows: EnrichedBalanceRow[]; 
+    investorCodes: Set<string>;
+    portfolioNames: Set<string>;
+  }> = {};
+  
+  rows.forEach(row => {
+    const rmId = (row as any).rm_id || 'Unknown';
+    const rmName = (row as any).rm_name || null;
+    
+    if (!grouped[rmId]) {
+      grouped[rmId] = { rm_name: rmName, rows: [], investorCodes: new Set(), portfolioNames: new Set() };
+    }
+    grouped[rmId].rows.push(row);
+    grouped[rmId].investorCodes.add(row.investor_code);
+    
+    // Add portfolio names for this investor
+    const portfolioNamesForInvestor = investorToPortfolios[row.investor_code] || [];
+    portfolioNamesForInvestor.forEach(name => grouped[rmId].portfolioNames.add(name));
+  });
+
+  return Object.entries(grouped).map(([rmId, data]) => {
+    const total_qty = data.rows.reduce((sum, r) => sum + r.total_stock, 0);
+    const total_cost = data.rows.reduce((sum, r) => sum + r.total_cost, 0);
+    const total_mv = data.rows.reduce((sum, r) => sum + r.total_mv, 0);
+    const unrealized_pnl = total_mv - total_cost;
+    const pnl_pct = total_cost !== 0 ? (unrealized_pnl / total_cost) * 100 : null;
+    
+    // Sum unique ledger and adjusted_ledger balances per investor
+    const ledgerByInvestor: Record<string, number> = {};
+    const adjustedByInvestor: Record<string, number> = {};
+    data.rows.forEach(r => {
+      ledgerByInvestor[r.investor_code] = r.ledger_balance;
+      adjustedByInvestor[r.investor_code] = r.adjusted_ledger;
+    });
+    const ledger_balance = Object.values(ledgerByInvestor).reduce((sum, v) => sum + v, 0);
+    const adjusted_ledger = Object.values(adjustedByInvestor).reduce((sum, v) => sum + v, 0);
+    
+    // Highest risk flag
+    const riskFlags = data.rows.map(r => r.risk_flag);
+    const risk_flag = riskFlags.includes('High') ? 'High' : riskFlags.includes('Watch') ? 'Watch' : 'OK';
+
+    return {
+      rm_id: rmId,
+      rm_name: data.rm_name,
+      investor_codes: Array.from(data.investorCodes),
+      investor_count: data.investorCodes.size,
+      portfolio_names: Array.from(data.portfolioNames),
+      portfolio_count: data.portfolioNames.size,
       total_qty,
       total_cost,
       total_mv,
