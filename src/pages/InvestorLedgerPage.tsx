@@ -183,27 +183,58 @@ const InvestorLedgerPage = () => {
       credit: number;
     }> = [];
 
-    // Add trades
+    // Aggregate trades by date + security_code + side
+    const tradeAggregates: Record<string, {
+      date: string;
+      sortDate: string;
+      side: string;
+      security_code: string;
+      totalQty: number;
+      totalValue: number;
+    }> = {};
+
     trades?.forEach(trade => {
-      const isBuy = trade.side?.toUpperCase() === 'BUY' || trade.side?.toUpperCase() === 'B';
-      const isSell = trade.side?.toUpperCase() === 'SELL' || trade.side?.toUpperCase() === 'S';
+      const key = `${trade.trade_date}_${trade.security_code}_${trade.side}`;
+      const qty = Number(trade.quantity) || 0;
       const value = Number(trade.value) || 0;
+
+      if (!tradeAggregates[key]) {
+        tradeAggregates[key] = {
+          date: trade.trade_date || '',
+          sortDate: trade.trade_date || '',
+          side: trade.side || '',
+          security_code: trade.security_code || 'Unknown',
+          totalQty: 0,
+          totalValue: 0,
+        };
+      }
+      tradeAggregates[key].totalQty += qty;
+      tradeAggregates[key].totalValue += value;
+    });
+
+    // Convert aggregated trades to ledger items
+    Object.values(tradeAggregates).forEach(agg => {
+      const isBuy = agg.side?.toUpperCase() === 'BUY' || agg.side?.toUpperCase() === 'B';
+      const isSell = agg.side?.toUpperCase() === 'SELL' || agg.side?.toUpperCase() === 'S';
       
       // Format trade_date from YYYYMMDD to display format
-      const dateStr = trade.trade_date || '';
+      const dateStr = agg.sortDate;
       const formattedDate = dateStr.length === 8 
         ? `${dateStr.slice(6, 8)}-${getMonthName(dateStr.slice(4, 6))}-${dateStr.slice(0, 4)}`
         : dateStr;
+
+      // Calculate average rate
+      const avgRate = agg.totalQty > 0 ? agg.totalValue / agg.totalQty : 0;
 
       allItems.push({
         date: formattedDate,
         sortDate: dateStr,
         operation: isBuy ? 'BUY' : 'SELL',
-        details: `${isBuy ? 'Bought' : 'Sold'} ${trade.security_code || 'Unknown'}`,
-        quantity: trade.quantity,
-        rate: trade.price,
-        debit: isBuy ? value : 0,
-        credit: isSell ? value : 0,
+        details: `${isBuy ? 'Bought' : 'Sold'} ${agg.security_code}`,
+        quantity: agg.totalQty,
+        rate: avgRate,
+        debit: isBuy ? agg.totalValue : 0,
+        credit: isSell ? agg.totalValue : 0,
       });
     });
 
