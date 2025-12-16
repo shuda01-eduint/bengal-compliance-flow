@@ -779,10 +779,12 @@ export type Database = {
       }
       trade_history: {
         Row: {
+          account_type: string | null
           action: string | null
           asset_class: string | null
           board: string | null
           boid: string | null
+          brokerage_commission: number | null
           category: string | null
           client_code: string | null
           compulsory_spot: string | null
@@ -791,7 +793,10 @@ export type Database = {
           file_name: string | null
           fill_type: string | null
           id: string
+          interest_rate: number | null
+          investor_type: string | null
           isin: string | null
+          ledger_balance_snapshot: number | null
           order_id: string | null
           owner_dealer_id: string | null
           price: number | null
@@ -809,10 +814,12 @@ export type Database = {
           value: number | null
         }
         Insert: {
+          account_type?: string | null
           action?: string | null
           asset_class?: string | null
           board?: string | null
           boid?: string | null
+          brokerage_commission?: number | null
           category?: string | null
           client_code?: string | null
           compulsory_spot?: string | null
@@ -821,7 +828,10 @@ export type Database = {
           file_name?: string | null
           fill_type?: string | null
           id?: string
+          interest_rate?: number | null
+          investor_type?: string | null
           isin?: string | null
+          ledger_balance_snapshot?: number | null
           order_id?: string | null
           owner_dealer_id?: string | null
           price?: number | null
@@ -839,10 +849,12 @@ export type Database = {
           value?: number | null
         }
         Update: {
+          account_type?: string | null
           action?: string | null
           asset_class?: string | null
           board?: string | null
           boid?: string | null
+          brokerage_commission?: number | null
           category?: string | null
           client_code?: string | null
           compulsory_spot?: string | null
@@ -851,7 +863,10 @@ export type Database = {
           file_name?: string | null
           fill_type?: string | null
           id?: string
+          interest_rate?: number | null
+          investor_type?: string | null
           isin?: string | null
+          ledger_balance_snapshot?: number | null
           order_id?: string | null
           owner_dealer_id?: string | null
           price?: number | null
