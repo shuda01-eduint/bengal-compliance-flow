@@ -6,10 +6,26 @@ import { Upload, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from "xlsx";
-import { ClientRecordSchema, sanitizeString, type ClientRecord } from "@/lib/validation-schemas";
+import { sanitizeString } from "@/lib/validation-schemas";
 
 interface ImportClientsDialogProps {
   onImportComplete: () => void;
+}
+
+interface RawBalanceRow {
+  investor_code: string;
+  boid: string;
+  instrument: string;
+  investor_name: string;
+  total_stock: number;
+  saleable: number;
+  avg_cost: number;
+  total_cost: number;
+  market_value: number;
+  ledger_balance: number;
+  matured_balance: number;
+  receivable_sales: number;
+  cq_in_transit: number;
 }
 
 export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogProps) {
@@ -24,10 +40,19 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
   const parseNumber = (value: string | number | undefined): number => {
     if (value === undefined || value === null || value === "") return 0;
     if (typeof value === "number") return value;
-    // Remove commas and parse
     const cleaned = String(value).replace(/,/g, "").trim();
     const num = parseFloat(cleaned);
     return isNaN(num) ? 0 : num;
+  };
+
+  const findColumnIndex = (headers: string[], possibleNames: string[]): number => {
+    const normalizedHeaders = headers.map(h => String(h || "").toLowerCase().trim().replace(/[.\s]+/g, "_"));
+    for (const name of possibleNames) {
+      const normalizedName = name.toLowerCase().trim().replace(/[.\s]+/g, "_");
+      const index = normalizedHeaders.findIndex(h => h.includes(normalizedName) || normalizedName.includes(h));
+      if (index !== -1) return index;
+    }
+    return -1;
   };
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,48 +65,104 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
     setResult(null);
 
     try {
-      // Read Excel file
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: "array" });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as unknown[][];
 
-      // Parse and validate rows (skip header)
-      const clients: ClientRecord[] = [];
-      const validationErrors: string[] = [];
-      
+      if (jsonData.length < 2) {
+        throw new Error("File is empty or has no data rows");
+      }
+
+      // Find header row and column indices
+      const headers = jsonData[0] as string[];
+      const colMap = {
+        investor_code: findColumnIndex(headers, ["investor_code", "inv_code", "code", "investor code"]),
+        boid: findColumnIndex(headers, ["boid", "bo_id", "bo id"]),
+        instrument: findColumnIndex(headers, ["instrument", "trading_code", "stock"]),
+        investor_name: findColumnIndex(headers, ["investor_name", "inv_name", "investor name", "name"]),
+        total_stock: findColumnIndex(headers, ["totalstock", "total_stock", "total stock", "qty"]),
+        saleable: findColumnIndex(headers, ["saleable", "salable"]),
+        avg_cost: findColumnIndex(headers, ["avgcost", "avg_cost", "avg cost", "average cost"]),
+        total_cost: findColumnIndex(headers, ["total_cost", "total cost", "totalcost"]),
+        market_value: findColumnIndex(headers, ["total_m_v", "market_value", "total m.v.", "total m v", "mv", "market value"]),
+        ledger_balance: findColumnIndex(headers, ["ledger_balance", "ledger balance", "ledger"]),
+        matured_balance: findColumnIndex(headers, ["matured_balance", "matured balance", "matured"]),
+        receivable_sales: findColumnIndex(headers, ["receivable_sales", "receivable sales", "receivable"]),
+        cq_in_transit: findColumnIndex(headers, ["cq_in_transit", "cq in transit", "cq"]),
+      };
+
+      console.log("Column mapping:", colMap);
+
+      if (colMap.investor_code === -1) {
+        throw new Error("Could not find 'Investor Code' column in the file");
+      }
+
+      // Parse rows and aggregate by investor_code
+      const investorMap = new Map<string, {
+        investor_name: string;
+        boid: string;
+        ledger_balance: number;
+        market_value: number;
+        total_cost: number;
+        total_stock: number;
+        matured_balance: number;
+        receivable_sales: number;
+        cq_in_transit: number;
+      }>();
+
       for (let i = 1; i < jsonData.length; i++) {
         const row = jsonData[i] as (string | number | undefined)[];
-        if (!row || row.length < 10) continue;
-        
-        const rawRecord = {
-          inv_code: sanitizeString(String(row[1] || "")),
-          investor_name: sanitizeString(String(row[2] || "")),
-          ledger_balance: parseNumber(row[3]),
-          accrued_interest: parseNumber(row[4]),
-          current_liabilities: parseNumber(row[5]),
-          market_value: parseNumber(row[6]),
-          equity: parseNumber(row[7]),
-          rm_name: sanitizeString(String(row[8] || "General")),
-          status: sanitizeString(String(row[9] || "Active")),
-        };
+        if (!row || row.length === 0) continue;
 
-        // Validate using zod schema
-        const result = ClientRecordSchema.safeParse(rawRecord);
-        
-        if (result.success) {
-          clients.push(result.data);
-        } else if (validationErrors.length < 10) {
-          validationErrors.push(`Row ${i}: ${result.error.errors.map(e => e.message).join(', ')}`);
+        const invCode = sanitizeString(String(row[colMap.investor_code] || "")).trim();
+        if (!invCode) continue;
+
+        const invName = colMap.investor_name !== -1 ? sanitizeString(String(row[colMap.investor_name] || "")) : "";
+        const boid = colMap.boid !== -1 ? sanitizeString(String(row[colMap.boid] || "")) : "";
+        const ledgerBal = colMap.ledger_balance !== -1 ? parseNumber(row[colMap.ledger_balance]) : 0;
+        const marketVal = colMap.market_value !== -1 ? parseNumber(row[colMap.market_value]) : 0;
+        const totalCost = colMap.total_cost !== -1 ? parseNumber(row[colMap.total_cost]) : 0;
+        const totalStock = colMap.total_stock !== -1 ? parseNumber(row[colMap.total_stock]) : 0;
+        const maturedBal = colMap.matured_balance !== -1 ? parseNumber(row[colMap.matured_balance]) : 0;
+        const receivableSales = colMap.receivable_sales !== -1 ? parseNumber(row[colMap.receivable_sales]) : 0;
+        const cqInTransit = colMap.cq_in_transit !== -1 ? parseNumber(row[colMap.cq_in_transit]) : 0;
+
+        if (investorMap.has(invCode)) {
+          const existing = investorMap.get(invCode)!;
+          existing.market_value += marketVal;
+          existing.total_cost += totalCost;
+          existing.total_stock += totalStock;
+          // Ledger balance, matured balance, receivable, CQ are account-level, take from first row
+        } else {
+          investorMap.set(invCode, {
+            investor_name: invName,
+            boid,
+            ledger_balance: ledgerBal,
+            market_value: marketVal,
+            total_cost: totalCost,
+            total_stock: totalStock,
+            matured_balance: maturedBal,
+            receivable_sales: receivableSales,
+            cq_in_transit: cqInTransit,
+          });
         }
       }
-      
-      if (validationErrors.length > 0) {
-        console.warn('Validation warnings:', validationErrors);
-      }
 
-      console.log(`Parsed ${clients.length} clients from Excel`);
+      const clients = Array.from(investorMap.entries()).map(([invCode, data]) => ({
+        inv_code: invCode,
+        investor_name: data.investor_name,
+        ledger_balance: data.ledger_balance,
+        market_value: data.market_value,
+        equity: data.market_value + data.ledger_balance,
+        accrued_interest: data.matured_balance,
+        current_liabilities: data.receivable_sales + data.cq_in_transit,
+        rm_name: "General",
+        status: "Active",
+      }));
+
+      console.log(`Parsed ${clients.length} unique investors from Excel`);
       setProgress(10);
       setStatus("importing");
 
@@ -94,11 +175,11 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
       for (let i = 0; i < clients.length; i += batchSize) {
         const batch = clients.slice(i, i + batchSize);
         const batchNum = Math.floor(i / batchSize) + 1;
-        
+
         const { data, error } = await supabase.functions.invoke("import-clients", {
-          body: { 
+          body: {
             clients: batch,
-            clearExisting: i === 0 // Only clear on first batch
+            clearExisting: i === 0,
           },
         });
 
@@ -159,7 +240,7 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
       <DialogTrigger asChild>
         <Button className="gap-2">
           <Upload className="h-4 w-4" />
-          Import Excel
+          Import Balance
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
@@ -176,13 +257,12 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
-                Upload an Excel file (.xlsx) with client balance data.
-                The file should have columns: Inv. Code, Investor Name, Ledger Balance, etc.
+                Upload an Excel file with columns: Investor Code, BOID, Instrument, Investor Name, TotalStock, Saleable, AvgCost, Total Cost, Total M.V., Ledger Balance, Matured Balance, Receivable sales, CQ in transit
               </p>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".xlsx,.xls"
+                accept=".xlsx,.xls,.csv"
                 onChange={handleFileSelect}
                 className="hidden"
               />
