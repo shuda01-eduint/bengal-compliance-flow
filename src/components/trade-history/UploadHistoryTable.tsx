@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -18,69 +17,21 @@ import { format } from "date-fns";
 interface FileUploadStats {
   file_name: string;
   record_count: number;
-  first_upload: string;
-  last_upload: string;
   unique_clients: number;
   total_value: number;
+  first_upload: string;
+  last_upload: string;
 }
 
 export const UploadHistoryTable = () => {
   const { data: uploadHistory, isLoading } = useQuery({
     queryKey: ["upload-history"],
     queryFn: async () => {
-      // Get distinct file names with their stats
-      const { data, error } = await supabase
-        .from("trade_history")
-        .select("file_name, uploaded_at, client_code, value")
-        .not("file_name", "is", null);
-
+      const { data, error } = await supabase.rpc('get_trade_file_stats');
+      
       if (error) throw error;
-
-      // Aggregate stats per file
-      const fileStats = new Map<string, {
-        record_count: number;
-        first_upload: Date;
-        last_upload: Date;
-        clients: Set<string>;
-        total_value: number;
-      }>();
-
-      data?.forEach((record) => {
-        if (!record.file_name) return;
-        
-        const existing = fileStats.get(record.file_name);
-        const uploadDate = new Date(record.uploaded_at);
-        
-        if (existing) {
-          existing.record_count++;
-          if (uploadDate < existing.first_upload) existing.first_upload = uploadDate;
-          if (uploadDate > existing.last_upload) existing.last_upload = uploadDate;
-          if (record.client_code) existing.clients.add(record.client_code);
-          existing.total_value += Number(record.value) || 0;
-        } else {
-          fileStats.set(record.file_name, {
-            record_count: 1,
-            first_upload: uploadDate,
-            last_upload: uploadDate,
-            clients: new Set(record.client_code ? [record.client_code] : []),
-            total_value: Number(record.value) || 0,
-          });
-        }
-      });
-
-      // Convert to array and sort by last upload
-      const result: FileUploadStats[] = [...fileStats.entries()]
-        .map(([file_name, stats]) => ({
-          file_name,
-          record_count: stats.record_count,
-          first_upload: stats.first_upload.toISOString(),
-          last_upload: stats.last_upload.toISOString(),
-          unique_clients: stats.clients.size,
-          total_value: stats.total_value,
-        }))
-        .sort((a, b) => new Date(b.last_upload).getTime() - new Date(a.last_upload).getTime());
-
-      return result;
+      
+      return (data || []) as FileUploadStats[];
     },
   });
 
