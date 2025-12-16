@@ -195,7 +195,7 @@ export function TradeHistoryTable() {
   const [totalCount, setTotalCount] = useState(0);
   const [hideZeroValues, setHideZeroValues] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [sortColumn, setSortColumn] = useState<string>("uploaded_at");
+  const [sortColumn, setSortColumn] = useState<string>("trade_date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const { toast } = useToast();
 
