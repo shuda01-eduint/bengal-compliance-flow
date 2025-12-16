@@ -138,7 +138,8 @@ const AdminBalancesPage = () => {
     queryFn: async () => {
       if (!selectedDate) return [];
       const nextDay = addDays(selectedDate, 1);
-      const nextDayStr = format(nextDay, 'yyyy-MM-dd');
+      // trade_date is stored as YYYYMMDD format (no dashes)
+      const nextDayStr = format(nextDay, 'yyyyMMdd');
       
       const { data, error } = await supabase
         .from('trade_history')
