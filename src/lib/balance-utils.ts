@@ -20,6 +20,7 @@ export interface InvestorAdjustment {
   deposits: number;
   withdrawals: number;
   net_sell: number;
+  net_buy: number;
 }
 
 export interface EnrichedBalanceRow extends BalanceRawRow {
@@ -31,6 +32,7 @@ export interface EnrichedBalanceRow extends BalanceRawRow {
   deposits: number;
   withdrawals: number;
   net_sell: number;
+  net_buy: number;
 }
 
 export interface BalanceSummary {
@@ -54,6 +56,7 @@ export interface InvestorGroupedRow {
   deposits: number;
   withdrawals: number;
   net_sell: number;
+  net_buy: number;
   risk_flag: 'OK' | 'Watch' | 'High';
   instruments: EnrichedBalanceRow[];
 }
@@ -107,7 +110,7 @@ export function enrichBalanceRow(
   row: BalanceRawRow, 
   adjustments?: Record<string, InvestorAdjustment>
 ): EnrichedBalanceRow {
-  const adjustment = adjustments?.[row.investor_code] || { deposits: 0, withdrawals: 0, net_sell: 0 };
+  const adjustment = adjustments?.[row.investor_code] || { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0 };
   
   const unrealized_pnl = row.total_mv - row.total_cost;
   const pnl_pct = row.total_cost !== 0 ? (unrealized_pnl / row.total_cost) * 100 : null;
@@ -132,6 +135,7 @@ export function enrichBalanceRow(
     deposits: adjustment.deposits,
     withdrawals: adjustment.withdrawals,
     net_sell: adjustment.net_sell,
+    net_buy: adjustment.net_buy,
   };
 }
 
@@ -192,6 +196,7 @@ export function groupByInvestor(rows: EnrichedBalanceRow[]): InvestorGroupedRow[
     const deposits = instruments[0]?.deposits || 0;
     const withdrawals = instruments[0]?.withdrawals || 0;
     const net_sell = instruments[0]?.net_sell || 0;
+    const net_buy = instruments[0]?.net_buy || 0;
     
     // Highest risk flag
     const riskFlags = instruments.map(i => i.risk_flag);
@@ -208,6 +213,7 @@ export function groupByInvestor(rows: EnrichedBalanceRow[]): InvestorGroupedRow[
       deposits,
       withdrawals,
       net_sell,
+      net_buy,
       risk_flag,
       instruments,
     };

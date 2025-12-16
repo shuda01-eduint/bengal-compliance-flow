@@ -41,7 +41,7 @@ import {
   PortfolioSummary,
 } from "@/lib/balance-utils";
 
-type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'adjusted_ledger' | 'deposits' | 'withdrawals' | 'net_sell' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag';
+type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'adjusted_ledger' | 'deposits' | 'withdrawals' | 'net_sell' | 'net_buy' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag';
 type SortDirection = 'asc' | 'desc';
 
 const ROWS_PER_PAGE = 50;
@@ -159,7 +159,7 @@ const AdminBalancesPage = () => {
     // Process transactions
     nextDayTransactions?.forEach(tx => {
       if (!adjustments[tx.investor_code]) {
-        adjustments[tx.investor_code] = { deposits: 0, withdrawals: 0, net_sell: 0 };
+        adjustments[tx.investor_code] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0 };
       }
       if (tx.transaction_type === 'Deposit') {
         adjustments[tx.investor_code].deposits += Number(tx.amount) || 0;
@@ -168,19 +168,21 @@ const AdminBalancesPage = () => {
       }
     });
     
-    // Process trades - net_sell = sell_value - buy_value
+    // Process trades - net_sell = sell_value - buy_value, net_buy = buy_value - sell_value
     nextDayTrades?.forEach(trade => {
       const clientCode = trade.client_code;
       if (!clientCode) return;
       
       if (!adjustments[clientCode]) {
-        adjustments[clientCode] = { deposits: 0, withdrawals: 0, net_sell: 0 };
+        adjustments[clientCode] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0 };
       }
       const value = Number(trade.value) || 0;
       if (trade.side?.toUpperCase() === 'SELL' || trade.side?.toUpperCase() === 'S') {
         adjustments[clientCode].net_sell += value;
+        adjustments[clientCode].net_buy -= value;
       } else if (trade.side?.toUpperCase() === 'BUY' || trade.side?.toUpperCase() === 'B') {
         adjustments[clientCode].net_sell -= value;
+        adjustments[clientCode].net_buy += value;
       }
     });
     
@@ -556,6 +558,7 @@ const AdminBalancesPage = () => {
                       <TableHead className="text-muted-foreground text-right">Ledger</TableHead>
                       <TableHead className="text-muted-foreground text-right">Deposits</TableHead>
                       <TableHead className="text-muted-foreground text-right">Withdraw</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Net Buy</TableHead>
                       <TableHead className="text-muted-foreground text-right">Net Sell</TableHead>
                       <TableHead className="text-muted-foreground text-right">Adj. Ledger</TableHead>
                       <TableHead className="text-muted-foreground">Risk</TableHead>
@@ -597,6 +600,9 @@ const AdminBalancesPage = () => {
                           </TableCell>
                           <TableCell className={cn("text-right", group.withdrawals > 0 && "text-destructive")}>
                             {formatNumber(group.withdrawals)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", group.net_buy > 0 ? "text-destructive" : group.net_buy < 0 ? "text-success" : "")}>
+                            {formatNumber(group.net_buy)}
                           </TableCell>
                           <TableCell className={cn("text-right", group.net_sell >= 0 ? "text-success" : "text-destructive")}>
                             {formatNumber(group.net_sell)}
@@ -648,6 +654,7 @@ const AdminBalancesPage = () => {
                         <SortableHeader field="ledger_balance" className="text-right">Ledger</SortableHeader>
                         <SortableHeader field="deposits" className="text-right">Deposits</SortableHeader>
                         <SortableHeader field="withdrawals" className="text-right">Withdraw</SortableHeader>
+                        <SortableHeader field="net_buy" className="text-right">Net Buy</SortableHeader>
                         <SortableHeader field="net_sell" className="text-right">Net Sell</SortableHeader>
                         <SortableHeader field="adjusted_ledger" className="text-right">Adj. Ledger</SortableHeader>
                         <SortableHeader field="matured_balance" className="text-right">Matured</SortableHeader>
@@ -688,6 +695,9 @@ const AdminBalancesPage = () => {
                           </TableCell>
                           <TableCell className={cn("text-right", row.withdrawals > 0 && "text-destructive")}>
                             {formatNumber(row.withdrawals)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", row.net_buy > 0 ? "text-destructive" : row.net_buy < 0 ? "text-success" : "")}>
+                            {formatNumber(row.net_buy)}
                           </TableCell>
                           <TableCell className={cn("text-right", row.net_sell >= 0 ? "text-success" : "text-destructive")}>
                             {formatNumber(row.net_sell)}
