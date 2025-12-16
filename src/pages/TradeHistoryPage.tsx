@@ -2,8 +2,9 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { TradeHistoryTable } from "@/components/trade-history/TradeHistoryTable";
 import { AgentCodesTable } from "@/components/trade-history/AgentCodesTable";
 import { DepositsWithdrawalsTable } from "@/components/trade-history/DepositsWithdrawalsTable";
+import { UploadHistoryTable } from "@/components/trade-history/UploadHistoryTable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { History, Users, ArrowDownUp } from "lucide-react";
+import { History, Users, ArrowDownUp, FileUp } from "lucide-react";
 
 const TradeHistoryPage = () => {
   return (
@@ -22,6 +23,10 @@ const TradeHistoryPage = () => {
             <Users className="h-4 w-4" />
             Agent Codes
           </TabsTrigger>
+          <TabsTrigger value="uploads" className="gap-2">
+            <FileUp className="h-4 w-4" />
+            Upload History
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="trades">
           <TradeHistoryTable />
@@ -31,6 +36,9 @@ const TradeHistoryPage = () => {
         </TabsContent>
         <TabsContent value="agents">
           <AgentCodesTable />
+        </TabsContent>
+        <TabsContent value="uploads">
+          <UploadHistoryTable />
         </TabsContent>
       </Tabs>
     </MainLayout>
