@@ -138,11 +138,15 @@ const AdminBalancesPage = () => {
 
   // Apply filters
   const filteredData = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
     return enrichedData.filter(row => {
       // Search filter
-      const matchesSearch = searchQuery === '' ||
-        row.investor_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (row.instrument?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
+      // - investor_code: exact match only
+      // - instrument: partial match
+      const matchesSearch = query === '' ||
+        row.investor_code.toLowerCase() === query ||
+        (row.instrument?.toLowerCase().includes(query) ?? false);
 
       // Risk filter
       const matchesRisk = riskFilter === 'all' || row.risk_flag === riskFilter;
@@ -203,6 +207,32 @@ const AdminBalancesPage = () => {
     if (!portfolios) return [];
     return groupByPortfolio(enrichedData, portfolios);
   }, [enrichedData, portfolios]);
+
+  const filteredPortfolioSummary = useMemo(() => {
+    const queryRaw = portfolioSearchQuery.trim();
+    if (!queryRaw) return portfolioSummary;
+
+    const query = queryRaw.toLowerCase();
+    const isNumericQuery = /^\d+$/.test(queryRaw);
+
+    return portfolioSummary.filter((p) => {
+      if (isNumericQuery) {
+        // Numeric searches should match codes exactly (prevents 3008 matching 13008 / OBO3008)
+        if (p.portfolio_name.toLowerCase() === query) return true;
+        return p.investor_codes.some((code) => code.toLowerCase() === query);
+      }
+
+      // Text searches: partial match on name/description, exact match on codes
+      if (p.portfolio_name.toLowerCase().includes(query)) return true;
+      if (p.description?.toLowerCase().includes(query)) return true;
+      if (p.investor_codes.some((code) => code.toLowerCase() === query)) return true;
+      return false;
+    });
+  }, [portfolioSummary, portfolioSearchQuery]);
+
+  const sortedPortfolioRows = useMemo(() => {
+    return [...filteredPortfolioSummary].sort((a, b) => b.total_mv - a.total_mv);
+  }, [filteredPortfolioSummary]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -665,16 +695,7 @@ const AdminBalancesPage = () => {
               />
             </div>
             <span className="text-sm text-muted-foreground">
-              {portfolioSummary.filter(p => {
-                if (portfolioSearchQuery === '') return true;
-                const query = portfolioSearchQuery.toLowerCase();
-                // Partial match for name/description
-                if (p.portfolio_name.toLowerCase().includes(query)) return true;
-                if (p.description?.toLowerCase().includes(query)) return true;
-                // Exact match for investor codes
-                if (p.investor_codes.some(code => code.toLowerCase() === query)) return true;
-                return false;
-              }).length} portfolios
+              {sortedPortfolioRows.length} portfolios
             </span>
           </div>
 
@@ -696,68 +717,54 @@ const AdminBalancesPage = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {portfolioSummary
-                    .filter(p => {
-                      if (portfolioSearchQuery === '') return true;
-                      const query = portfolioSearchQuery.toLowerCase();
-                      // Partial match for name/description
-                      if (p.portfolio_name.toLowerCase().includes(query)) return true;
-                      if (p.description?.toLowerCase().includes(query)) return true;
-                      // Exact match for investor codes
-                      if (p.investor_codes.some(code => code.toLowerCase() === query)) return true;
-                      return false;
-                    })
-                    .sort((a, b) => b.total_mv - a.total_mv)
-                    .length === 0 ? (
+                  {sortedPortfolioRows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                         No portfolios found with balance data
                       </TableCell>
                     </TableRow>
                   ) : (
-                    portfolioSummary
-                      .filter(p => {
-                        if (portfolioSearchQuery === '') return true;
-                        const query = portfolioSearchQuery.toLowerCase();
-                        // Partial match for name/description
-                        if (p.portfolio_name.toLowerCase().includes(query)) return true;
-                        if (p.description?.toLowerCase().includes(query)) return true;
-                        // Exact match for investor codes
-                        if (p.investor_codes.some(code => code.toLowerCase() === query)) return true;
-                        return false;
-                      })
-                      .sort((a, b) => b.total_mv - a.total_mv)
-                      .map((portfolio) => (
-                        <TableRow 
-                          key={portfolio.portfolio_id} 
+                    sortedPortfolioRows.map((portfolio) => (
+                      <TableRow
+                        key={portfolio.portfolio_id}
+                        className={cn(
+                          "border-border hover:bg-secondary/30",
+                          portfolio.risk_flag === 'High' && "bg-destructive/10",
+                          portfolio.risk_flag === 'Watch' && "bg-amber-500/10"
+                        )}
+                      >
+                        <TableCell className="font-medium">{portfolio.portfolio_name}</TableCell>
+                        <TableCell className="text-muted-foreground max-w-[200px] truncate">
+                          {portfolio.description || '—'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant="secondary">{portfolio.investor_count}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{portfolio.total_qty.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">{formatNumber(portfolio.total_cost)}</TableCell>
+                        <TableCell className="text-right">{formatNumber(portfolio.total_mv)}</TableCell>
+                        <TableCell
                           className={cn(
-                            "border-border hover:bg-secondary/30",
-                            portfolio.risk_flag === 'High' && "bg-destructive/10",
-                            portfolio.risk_flag === 'Watch' && "bg-amber-500/10"
+                            "text-right",
+                            portfolio.unrealized_pnl >= 0 ? "text-success" : "text-destructive"
                           )}
                         >
-                          <TableCell className="font-medium">{portfolio.portfolio_name}</TableCell>
-                          <TableCell className="text-muted-foreground max-w-[200px] truncate">
-                            {portfolio.description || '—'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Badge variant="secondary">{portfolio.investor_count}</Badge>
-                          </TableCell>
-                          <TableCell className="text-right">{portfolio.total_qty.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">{formatNumber(portfolio.total_cost)}</TableCell>
-                          <TableCell className="text-right">{formatNumber(portfolio.total_mv)}</TableCell>
-                          <TableCell className={cn("text-right", portfolio.unrealized_pnl >= 0 ? "text-success" : "text-destructive")}>
-                            {formatNumber(portfolio.unrealized_pnl)}
-                          </TableCell>
-                          <TableCell className={cn("text-right", (portfolio.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
-                            {formatPercent(portfolio.pnl_pct)}
-                          </TableCell>
-                          <TableCell className={cn("text-right", portfolio.ledger_balance < 0 && "text-destructive")}>
-                            {formatNumber(portfolio.ledger_balance)}
-                          </TableCell>
-                          <TableCell>{getRiskBadge(portfolio.risk_flag)}</TableCell>
-                        </TableRow>
-                      ))
+                          {formatNumber(portfolio.unrealized_pnl)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right",
+                            (portfolio.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive"
+                          )}
+                        >
+                          {formatPercent(portfolio.pnl_pct)}
+                        </TableCell>
+                        <TableCell className={cn("text-right", portfolio.ledger_balance < 0 && "text-destructive")}>
+                          {formatNumber(portfolio.ledger_balance)}
+                        </TableCell>
+                        <TableCell>{getRiskBadge(portfolio.risk_flag)}</TableCell>
+                      </TableRow>
+                    ))
                   )}
                 </TableBody>
               </Table>
