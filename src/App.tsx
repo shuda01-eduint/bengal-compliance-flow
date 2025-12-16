@@ -15,9 +15,7 @@ import SettingsPage from "./pages/SettingsPage";
 import AdminBalancesPage from "./pages/AdminBalancesPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
 import SecuritiesPage from "./pages/SecuritiesPage";
-import PortfolioPage from "./pages/PortfolioPage";
 import InvestorsPage from "./pages/InvestorsPage";
-import InvestorLedgerPage from "./pages/InvestorLedgerPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
@@ -42,9 +40,7 @@ const App = () => (
             <Route path="/admin/balances" element={<ProtectedRoute><AdminBalancesPage /></ProtectedRoute>} />
             <Route path="/trade-history" element={<ProtectedRoute><TradeHistoryPage /></ProtectedRoute>} />
             <Route path="/securities" element={<ProtectedRoute><SecuritiesPage /></ProtectedRoute>} />
-            <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
             <Route path="/investors" element={<ProtectedRoute><InvestorsPage /></ProtectedRoute>} />
-            <Route path="/investor-ledger" element={<ProtectedRoute><InvestorLedgerPage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
