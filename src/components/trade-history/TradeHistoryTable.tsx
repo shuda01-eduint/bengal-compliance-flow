@@ -49,16 +49,12 @@ interface TradeRecord {
   boid: string | null;
   trader_dealer_id: string | null;
   owner_dealer_id: string | null;
-  // Investor data from join
+  // Denormalized investor/client data (stored on trade record)
   brokerage_commission: number | null;
   interest_rate: number | null;
   account_type: string | null;
   investor_type: string | null;
-  // Client data
-  ledger_balance: number | null;
-  // Transaction aggregates
-  total_deposits: number | null;
-  total_withdrawals: number | null;
+  ledger_balance_snapshot: number | null;
 }
 
 interface ColumnConfig {
@@ -106,7 +102,7 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     // Replace field references with actual values
     let expression = formula;
     
-    // Available fields for formulas (including investor/client/transaction data)
+    // Available fields for formulas (denormalized investor data stored on trade)
     const fields: Record<string, number | string | null> = {
       quantity: trade.quantity,
       price: trade.price,
@@ -116,9 +112,7 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
       interest_rate: trade.interest_rate,
       account_type: trade.account_type,
       investor_type: trade.investor_type,
-      ledger_balance: trade.ledger_balance,
-      total_deposits: trade.total_deposits,
-      total_withdrawals: trade.total_withdrawals,
+      ledger_balance: trade.ledger_balance_snapshot,
     };
 
     // Replace field names with values
@@ -293,92 +287,15 @@ export function TradeHistoryTable() {
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      // Fetch trades without count first (count is expensive on large tables)
+      // Fetch trades - denormalized fields are already on trade_history
       const { data, error } = await query
         .order("uploaded_at", { ascending: false })
         .range(from, to);
 
       if (error) throw error;
       
-      // Get unique client codes from trades to fetch investor data
-      const clientCodes = [...new Set((data || []).map(t => t.client_code).filter(Boolean))] as string[];
-      
-      // Initialize empty maps
-      let investorMap: Record<string, { 
-        brokerage_commission: number | null; 
-        interest_rate: number | null;
-        account_type: string | null;
-        investor_type: string | null;
-      }> = {};
-      let clientMap: Record<string, { ledger_balance: number | null }> = {};
-      let transactionMap: Record<string, { total_deposits: number; total_withdrawals: number }> = {};
-      
-      // Fetch enrichment data in parallel (only if we have client codes)
-      if (clientCodes.length > 0) {
-        const [investorsResult, clientsResult, transactionsResult] = await Promise.all([
-          supabase
-            .from("investors")
-            .select("investor_code, brokerage_commission, interest_rate, account_type, investor_type")
-            .in("investor_code", clientCodes),
-          supabase
-            .from("clients")
-            .select("inv_code, ledger_balance")
-            .in("inv_code", clientCodes),
-          supabase
-            .from("deposits_withdrawals")
-            .select("investor_code, transaction_type, amount")
-            .in("investor_code", clientCodes)
-        ]);
-        
-        if (investorsResult.data) {
-          investorMap = investorsResult.data.reduce((acc, inv) => {
-            acc[inv.investor_code] = {
-              brokerage_commission: inv.brokerage_commission,
-              interest_rate: inv.interest_rate,
-              account_type: inv.account_type,
-              investor_type: inv.investor_type,
-            };
-            return acc;
-          }, {} as typeof investorMap);
-        }
-        
-        if (clientsResult.data) {
-          clientMap = clientsResult.data.reduce((acc, client) => {
-            acc[client.inv_code] = { ledger_balance: client.ledger_balance };
-            return acc;
-          }, {} as typeof clientMap);
-        }
-        
-        if (transactionsResult.data) {
-          transactionMap = transactionsResult.data.reduce((acc, tx) => {
-            if (!acc[tx.investor_code]) {
-              acc[tx.investor_code] = { total_deposits: 0, total_withdrawals: 0 };
-            }
-            if (tx.transaction_type === 'Deposit') {
-              acc[tx.investor_code].total_deposits += Number(tx.amount) || 0;
-            } else if (tx.transaction_type === 'Withdrawal') {
-              acc[tx.investor_code].total_withdrawals += Number(tx.amount) || 0;
-            }
-            return acc;
-          }, {} as typeof transactionMap);
-        }
-      }
-      
-      // Transform data to include all enriched fields
-      const transformedData = (data || []).map((trade: any) => ({
-        ...trade,
-        brokerage_commission: trade.client_code ? investorMap[trade.client_code]?.brokerage_commission ?? null : null,
-        interest_rate: trade.client_code ? investorMap[trade.client_code]?.interest_rate ?? null : null,
-        account_type: trade.client_code ? investorMap[trade.client_code]?.account_type ?? null : null,
-        investor_type: trade.client_code ? investorMap[trade.client_code]?.investor_type ?? null : null,
-        ledger_balance: trade.client_code ? clientMap[trade.client_code]?.ledger_balance ?? null : null,
-        total_deposits: trade.client_code ? transactionMap[trade.client_code]?.total_deposits ?? null : null,
-        total_withdrawals: trade.client_code ? transactionMap[trade.client_code]?.total_withdrawals ?? null : null,
-      }));
-      
-      setTrades(transformedData);
+      setTrades(data || []);
       // Estimate count based on returned data (count query is too slow on large tables)
-      // If we got a full page, assume there's more data
       const estimatedCount = data?.length === pageSize 
         ? (currentPage * pageSize) + pageSize 
         : ((currentPage - 1) * pageSize) + (data?.length || 0);

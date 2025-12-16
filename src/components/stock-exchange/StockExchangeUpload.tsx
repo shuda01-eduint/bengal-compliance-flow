@@ -65,12 +65,57 @@ export function StockExchangeUpload() {
     setProgress({ current: 0, total: trades.length });
     
     try {
+      // Get unique client codes to fetch investor/client data for denormalization
+      const clientCodes = [...new Set(trades.map(t => t.client_code).filter(Boolean))];
+      
+      // Fetch investor and client data in parallel
+      const [investorsResult, clientsResult] = await Promise.all([
+        supabase
+          .from("investors")
+          .select("investor_code, brokerage_commission, interest_rate, account_type, investor_type")
+          .in("investor_code", clientCodes),
+        supabase
+          .from("clients")
+          .select("inv_code, ledger_balance")
+          .in("inv_code", clientCodes)
+      ]);
+      
+      // Build lookup maps
+      const investorMap: Record<string, { 
+        brokerage_commission: number | null; 
+        interest_rate: number | null;
+        account_type: string | null;
+        investor_type: string | null;
+      }> = {};
+      const clientMap: Record<string, { ledger_balance: number | null }> = {};
+      
+      if (investorsResult.data) {
+        investorsResult.data.forEach(inv => {
+          investorMap[inv.investor_code] = {
+            brokerage_commission: inv.brokerage_commission,
+            interest_rate: inv.interest_rate,
+            account_type: inv.account_type,
+            investor_type: inv.investor_type,
+          };
+        });
+      }
+      
+      if (clientsResult.data) {
+        clientsResult.data.forEach(client => {
+          clientMap[client.inv_code] = { ledger_balance: client.ledger_balance };
+        });
+      }
+      
       // Validate and sanitize trade records before insert
       const validRecords: any[] = [];
       const validationErrors: string[] = [];
       
       for (let i = 0; i < trades.length; i++) {
         const trade = trades[i];
+        const clientCode = sanitizeString(trade.client_code);
+        const investorData = clientCode ? investorMap[clientCode] : null;
+        const clientData = clientCode ? clientMap[clientCode] : null;
+        
         const rawRecord = {
           action: sanitizeString(trade.action),
           status: sanitizeString(trade.status),
@@ -92,16 +137,30 @@ export function StockExchangeUpload() {
           fill_type: sanitizeString(trade.fill_type),
           category: sanitizeString(trade.category),
           compulsory_spot: sanitizeString(trade.compulsory_spot),
-          client_code: sanitizeString(trade.client_code),
+          client_code: clientCode,
           trader_dealer_id: sanitizeString(trade.trader_dealer_id),
           owner_dealer_id: sanitizeString(trade.owner_dealer_id),
           trade_report_type: sanitizeString(trade.trade_report_type),
           file_name: sanitizeString(fileName),
+          // Denormalized investor/client data
+          brokerage_commission: investorData?.brokerage_commission ?? null,
+          interest_rate: investorData?.interest_rate ?? null,
+          account_type: investorData?.account_type ?? null,
+          investor_type: investorData?.investor_type ?? null,
+          ledger_balance_snapshot: clientData?.ledger_balance ?? null,
         };
         
         const result = TradeRecordSchema.safeParse(rawRecord);
         if (result.success) {
-          validRecords.push(result.data);
+          // Add denormalized fields (not in schema but valid for insert)
+          validRecords.push({
+            ...result.data,
+            brokerage_commission: rawRecord.brokerage_commission,
+            interest_rate: rawRecord.interest_rate,
+            account_type: rawRecord.account_type,
+            investor_type: rawRecord.investor_type,
+            ledger_balance_snapshot: rawRecord.ledger_balance_snapshot,
+          });
         } else if (validationErrors.length < 10) {
           validationErrors.push(`Trade ${i + 1}: ${result.error.errors.map(e => e.message).join(', ')}`);
         }
