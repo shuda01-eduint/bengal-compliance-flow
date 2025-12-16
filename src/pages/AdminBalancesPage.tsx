@@ -26,15 +26,18 @@ import { cn } from "@/lib/utils";
 import {
   BalanceRawRow,
   EnrichedBalanceRow,
+  Portfolio,
   enrichBalanceRow,
   calculateSummary,
   groupByInvestor,
   groupByInstrument,
+  groupByPortfolio,
   formatCurrency,
   formatNumber,
   formatPercent,
   InvestorGroupedRow,
   InstrumentSummary,
+  PortfolioSummary,
 } from "@/lib/balance-utils";
 
 type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag';
@@ -106,6 +109,19 @@ const AdminBalancesPage = () => {
       return allData;
     },
     enabled: !!selectedDate,
+  });
+
+  // Fetch portfolios for grouping
+  const { data: portfolios } = useQuery({
+    queryKey: ['portfolios-for-balance'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('portfolios')
+        .select('id, name, description, investor_code');
+      
+      if (error) throw error;
+      return data as Portfolio[];
+    },
   });
 
   // Enrich data with computed fields
@@ -180,6 +196,12 @@ const AdminBalancesPage = () => {
   const instrumentSummary = useMemo(() => {
     return groupByInstrument(enrichedData);
   }, [enrichedData]);
+
+  // Group by portfolio for third tab
+  const portfolioSummary = useMemo(() => {
+    if (!portfolios) return [];
+    return groupByPortfolio(enrichedData, portfolios);
+  }, [enrichedData, portfolios]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -345,6 +367,7 @@ const AdminBalancesPage = () => {
         <TabsList>
           <TabsTrigger value="all">All Holdings</TabsTrigger>
           <TabsTrigger value="by-instrument">By Instrument</TabsTrigger>
+          <TabsTrigger value="by-portfolio">By Portfolio</TabsTrigger>
         </TabsList>
 
         <TabsContent value="all" className="space-y-4">
@@ -622,6 +645,72 @@ const AdminBalancesPage = () => {
                       </TableCell>
                     </TableRow>
                   ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="by-portfolio" className="space-y-4">
+          <div className="glass-card rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
+                    <TableHead className="text-muted-foreground">Portfolio</TableHead>
+                    <TableHead className="text-muted-foreground">Description</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Investors</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Total Qty</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Unrealized P&L</TableHead>
+                    <TableHead className="text-muted-foreground text-right">P&L %</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
+                    <TableHead className="text-muted-foreground">Risk</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {portfolioSummary.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                        No portfolios found with balance data
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    portfolioSummary
+                      .sort((a, b) => b.total_mv - a.total_mv)
+                      .map((portfolio) => (
+                        <TableRow 
+                          key={portfolio.portfolio_id} 
+                          className={cn(
+                            "border-border hover:bg-secondary/30",
+                            portfolio.risk_flag === 'High' && "bg-destructive/10",
+                            portfolio.risk_flag === 'Watch' && "bg-amber-500/10"
+                          )}
+                        >
+                          <TableCell className="font-medium">{portfolio.portfolio_name}</TableCell>
+                          <TableCell className="text-muted-foreground max-w-[200px] truncate">
+                            {portfolio.description || '—'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge variant="secondary">{portfolio.investor_count}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right">{portfolio.total_qty.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{formatNumber(portfolio.total_cost)}</TableCell>
+                          <TableCell className="text-right">{formatNumber(portfolio.total_mv)}</TableCell>
+                          <TableCell className={cn("text-right", portfolio.unrealized_pnl >= 0 ? "text-success" : "text-destructive")}>
+                            {formatNumber(portfolio.unrealized_pnl)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", (portfolio.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
+                            {formatPercent(portfolio.pnl_pct)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", portfolio.ledger_balance < 0 && "text-destructive")}>
+                            {formatNumber(portfolio.ledger_balance)}
+                          </TableCell>
+                          <TableCell>{getRiskBadge(portfolio.risk_flag)}</TableCell>
+                        </TableRow>
+                      ))
+                  )}
                 </TableBody>
               </Table>
             </div>
