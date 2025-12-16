@@ -11,10 +11,8 @@ import {
   Wallet,
   History,
   Landmark,
-  Briefcase,
   LogOut,
-  Contact,
-  BookOpen
+  Contact
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -31,9 +29,7 @@ const navigation = [
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
   { name: "Trade History", href: "/trade-history", icon: History },
   { name: "Securities", href: "/securities", icon: Landmark },
-  { name: "Portfolio", href: "/portfolio", icon: Briefcase },
   { name: "Investors", href: "/investors", icon: Contact },
-  { name: "Investor Ledger", href: "/investor-ledger", icon: BookOpen },
   { name: "Compliance Reports", href: "/reports", icon: FileText },
   { name: "Post-Report Activity", href: "/activity", icon: Activity },
   { name: "Organization", href: "/employees", icon: Users },
