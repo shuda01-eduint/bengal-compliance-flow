@@ -48,6 +48,7 @@ const ROWS_PER_PAGE = 50;
 const AdminBalancesPage = () => {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
+  const [portfolioSearchQuery, setPortfolioSearchQuery] = useState("");
   const [riskFilter, setRiskFilter] = useState<string>("all");
   const [onlyNegativeLedger, setOnlyNegativeLedger] = useState(false);
   const [onlyReceivables, setOnlyReceivables] = useState(false);
@@ -652,6 +653,26 @@ const AdminBalancesPage = () => {
         </TabsContent>
 
         <TabsContent value="by-portfolio" className="space-y-4">
+          {/* Search filter for portfolios */}
+          <div className="flex items-center gap-4 p-4 glass-card rounded-xl">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search portfolio name or description..."
+                value={portfolioSearchQuery}
+                onChange={(e) => setPortfolioSearchQuery(e.target.value)}
+                className="pl-10 bg-secondary border-border"
+              />
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {portfolioSummary.filter(p => 
+                portfolioSearchQuery === '' ||
+                p.portfolio_name.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ||
+                (p.description?.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ?? false)
+              ).length} portfolios
+            </span>
+          </div>
+
           <div className="glass-card rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <Table>
@@ -670,7 +691,14 @@ const AdminBalancesPage = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {portfolioSummary.length === 0 ? (
+                  {portfolioSummary
+                    .filter(p => 
+                      portfolioSearchQuery === '' ||
+                      p.portfolio_name.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ||
+                      (p.description?.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ?? false)
+                    )
+                    .sort((a, b) => b.total_mv - a.total_mv)
+                    .length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                         No portfolios found with balance data
@@ -678,6 +706,11 @@ const AdminBalancesPage = () => {
                     </TableRow>
                   ) : (
                     portfolioSummary
+                      .filter(p => 
+                        portfolioSearchQuery === '' ||
+                        p.portfolio_name.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ||
+                        (p.description?.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ?? false)
+                      )
                       .sort((a, b) => b.total_mv - a.total_mv)
                       .map((portfolio) => (
                         <TableRow 
