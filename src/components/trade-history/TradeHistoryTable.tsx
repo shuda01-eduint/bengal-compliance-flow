@@ -19,7 +19,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { CalendarIcon, Search, Filter, Loader2, ChevronLeft, ChevronRight, Settings2, Plus, Trash2, Calculator } from "lucide-react";
+import { CalendarIcon, Search, Filter, Loader2, ChevronLeft, ChevronRight, Settings2, Plus, Trash2, Calculator, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -106,11 +106,11 @@ const BASE_COLUMNS: ColumnConfig[] = [
   { key: "interest_rate", label: "Interest Rate", defaultVisible: false, type: 'number' },
   { key: "account_type", label: "Account Type", defaultVisible: false, type: 'string' },
   { key: "investor_type", label: "Investor Type", defaultVisible: false, type: 'string' },
-  { key: "ledger_balance_snapshot", label: "Ledger Balance", defaultVisible: false, type: 'currency' },
+  { key: "ledger_balance_snapshot", label: "Ledger Balance", defaultVisible: true, type: 'currency' },
   // Denormalized agent/RM fields
   { key: "agent_id", label: "Agent ID", defaultVisible: false, type: 'string' },
   { key: "rm_id", label: "RM ID", defaultVisible: false, type: 'string' },
-  { key: "rm_name", label: "RM Name", defaultVisible: false, type: 'string' },
+  { key: "rm_name", label: "RM Name", defaultVisible: true, type: 'string' },
   { key: "department", label: "Department", defaultVisible: false, type: 'string' },
   // Denormalized deposit/withdrawal fields
   { key: "total_deposits", label: "Total Deposits", defaultVisible: false, type: 'currency' },
@@ -195,6 +195,8 @@ export function TradeHistoryTable() {
   const [totalCount, setTotalCount] = useState(0);
   const [hideZeroValues, setHideZeroValues] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortColumn, setSortColumn] = useState<string>("uploaded_at");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const { toast } = useToast();
 
   // Debounce search input
@@ -233,7 +235,7 @@ export function TradeHistoryTable() {
   // Fetch trades with server-side filtering
   useEffect(() => {
     fetchTrades();
-  }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, currentPage, pageSize, hideZeroValues, statusFilter]);
+  }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, currentPage, pageSize, hideZeroValues, statusFilter, sortColumn, sortDirection]);
 
   const fetchFileNames = async () => {
     try {
@@ -311,7 +313,7 @@ export function TradeHistoryTable() {
 
       // Fetch trades - denormalized fields are already on trade_history
       const { data, error } = await query
-        .order("uploaded_at", { ascending: false })
+        .order(sortColumn, { ascending: sortDirection === "asc" })
         .range(from, to);
 
       if (error) throw error;
@@ -370,6 +372,16 @@ export function TradeHistoryTable() {
 
   const goToPage = (page: number) => {
     setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+  };
+
+  const handleSort = (columnKey: string) => {
+    if (sortColumn === columnKey) {
+      setSortDirection(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(columnKey);
+      setSortDirection("asc");
+    }
+    setCurrentPage(1);
   };
 
   const toggleColumn = (key: string) => {
@@ -642,8 +654,22 @@ export function TradeHistoryTable() {
               <TableHeader>
                 <TableRow>
                   {BASE_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(column => (
-                    <TableHead key={column.key} className={column.type === 'number' || column.type === 'currency' ? 'text-right' : ''}>
-                      {column.label}
+                    <TableHead 
+                      key={column.key} 
+                      className={cn(
+                        "cursor-pointer hover:bg-muted/50 select-none",
+                        (column.type === 'number' || column.type === 'currency') && 'text-right'
+                      )}
+                      onClick={() => handleSort(column.key)}
+                    >
+                      <div className={cn("flex items-center gap-1", (column.type === 'number' || column.type === 'currency') && 'justify-end')}>
+                        {column.label}
+                        {sortColumn === column.key ? (
+                          sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3 opacity-30" />
+                        )}
+                      </div>
                     </TableHead>
                   ))}
                   {customColumns.map(col => (
