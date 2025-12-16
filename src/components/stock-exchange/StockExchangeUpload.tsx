@@ -68,8 +68,8 @@ export function StockExchangeUpload() {
       // Get unique client codes to fetch investor/client data for denormalization
       const clientCodes = [...new Set(trades.map(t => t.client_code).filter(Boolean))];
       
-      // Fetch investor, client, and agent data in parallel
-      const [investorsResult, clientsResult, agentCodesResult] = await Promise.all([
+      // Fetch investor, client, agent, and deposits/withdrawals data in parallel
+      const [investorsResult, clientsResult, agentCodesResult, depositsResult] = await Promise.all([
         supabase
           .from("investors")
           .select("investor_code, brokerage_commission, interest_rate, account_type, investor_type")
@@ -81,6 +81,10 @@ export function StockExchangeUpload() {
         supabase
           .from("agent_codes")
           .select("investor_code, agent_id, rm_id")
+          .in("investor_code", clientCodes),
+        supabase
+          .from("deposits_withdrawals")
+          .select("investor_code, transaction_type, amount")
           .in("investor_code", clientCodes)
       ]);
       
@@ -93,6 +97,7 @@ export function StockExchangeUpload() {
       }> = {};
       const clientMap: Record<string, { ledger_balance: number | null; rm_name: string | null }> = {};
       const agentMap: Record<string, { agent_id: string | null; rm_id: string | null }> = {};
+      const depositsMap: Record<string, { total_deposits: number; total_withdrawals: number; net_deposit: number }> = {};
       
       if (investorsResult.data) {
         investorsResult.data.forEach(inv => {
@@ -123,6 +128,24 @@ export function StockExchangeUpload() {
         });
       }
       
+      // Aggregate deposits/withdrawals per investor
+      if (depositsResult.data) {
+        depositsResult.data.forEach(tx => {
+          if (!depositsMap[tx.investor_code]) {
+            depositsMap[tx.investor_code] = { total_deposits: 0, total_withdrawals: 0, net_deposit: 0 };
+          }
+          if (tx.transaction_type.toLowerCase().includes('deposit')) {
+            depositsMap[tx.investor_code].total_deposits += tx.amount;
+          } else {
+            depositsMap[tx.investor_code].total_withdrawals += tx.amount;
+          }
+        });
+        // Calculate net_deposit for each investor
+        Object.keys(depositsMap).forEach(code => {
+          depositsMap[code].net_deposit = depositsMap[code].total_deposits - depositsMap[code].total_withdrawals;
+        });
+      }
+      
       // Fetch department info based on RM names
       const rmNames = [...new Set(clientsResult.data?.map(c => c.rm_name).filter(Boolean) || [])];
       let departmentMap: Record<string, string> = {};
@@ -150,6 +173,7 @@ export function StockExchangeUpload() {
         const investorData = clientCode ? investorMap[clientCode] : null;
         const clientData = clientCode ? clientMap[clientCode] : null;
         const agentData = clientCode ? agentMap[clientCode] : null;
+        const depositData = clientCode ? depositsMap[clientCode] : null;
         const rmName = clientData?.rm_name || null;
         const department = rmName ? departmentMap[rmName] || null : null;
         
@@ -190,6 +214,10 @@ export function StockExchangeUpload() {
           rm_id: agentData?.rm_id ?? null,
           rm_name: rmName,
           department: department,
+          // Denormalized deposit/withdrawal data
+          total_deposits: depositData?.total_deposits ?? 0,
+          total_withdrawals: depositData?.total_withdrawals ?? 0,
+          net_deposit: depositData?.net_deposit ?? 0,
         };
         
         const result = TradeRecordSchema.safeParse(rawRecord);
@@ -206,6 +234,9 @@ export function StockExchangeUpload() {
             rm_id: rawRecord.rm_id,
             rm_name: rawRecord.rm_name,
             department: rawRecord.department,
+            total_deposits: rawRecord.total_deposits,
+            total_withdrawals: rawRecord.total_withdrawals,
+            net_deposit: rawRecord.net_deposit,
           });
         } else if (validationErrors.length < 10) {
           validationErrors.push(`Trade ${i + 1}: ${result.error.errors.map(e => e.message).join(', ')}`);
