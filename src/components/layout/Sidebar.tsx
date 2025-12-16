@@ -3,7 +3,6 @@ import {
   FileText, 
   Users, 
   Activity, 
-  Building2, 
   Settings,
   Shield,
   Bell,
@@ -16,7 +15,6 @@ import {
   Briefcase,
   LogOut,
   UserCog,
-  UserCheck,
   Contact,
   BookOpen
 } from "lucide-react";
@@ -40,11 +38,9 @@ const navigation = [
   { name: "Portfolio", href: "/portfolio", icon: Briefcase },
   { name: "Investors", href: "/investors", icon: Contact },
   { name: "Investor Ledger", href: "/investor-ledger", icon: BookOpen },
-  { name: "Agents", href: "/agents", icon: UserCheck },
   { name: "Compliance Reports", href: "/reports", icon: FileText },
   { name: "Post-Report Activity", href: "/activity", icon: Activity },
-  { name: "Employees", href: "/employees", icon: Users },
-  { name: "Departments", href: "/departments", icon: Building2 },
+  { name: "Organization", href: "/employees", icon: Users },
   { name: "Compliance Rules", href: "/rules", icon: Shield },
   { name: "Notifications", href: "/notifications", icon: Bell },
   { name: "Settings", href: "/settings", icon: Settings },

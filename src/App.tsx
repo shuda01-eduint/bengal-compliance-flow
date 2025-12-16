@@ -9,7 +9,6 @@ import Index from "./pages/Index";
 import ReportsPage from "./pages/ReportsPage";
 import ActivityPage from "./pages/ActivityPage";
 import EmployeesPage from "./pages/EmployeesPage";
-import DepartmentsPage from "./pages/DepartmentsPage";
 import RulesPage from "./pages/RulesPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -19,7 +18,6 @@ import TradeHistoryPage from "./pages/TradeHistoryPage";
 import SecuritiesPage from "./pages/SecuritiesPage";
 import PortfolioPage from "./pages/PortfolioPage";
 import UserManagementPage from "./pages/UserManagementPage";
-import AgentsPage from "./pages/AgentsPage";
 import InvestorsPage from "./pages/InvestorsPage";
 import InvestorLedgerPage from "./pages/InvestorLedgerPage";
 import AuthPage from "./pages/AuthPage";
@@ -40,7 +38,6 @@ const App = () => (
             <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
             <Route path="/activity" element={<ProtectedRoute><ActivityPage /></ProtectedRoute>} />
             <Route path="/employees" element={<ProtectedRoute><EmployeesPage /></ProtectedRoute>} />
-            <Route path="/departments" element={<ProtectedRoute><DepartmentsPage /></ProtectedRoute>} />
             <Route path="/rules" element={<ProtectedRoute><RulesPage /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
@@ -50,7 +47,6 @@ const App = () => (
             <Route path="/trade-history" element={<ProtectedRoute><TradeHistoryPage /></ProtectedRoute>} />
             <Route path="/securities" element={<ProtectedRoute><SecuritiesPage /></ProtectedRoute>} />
             <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
-            <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
             <Route path="/investors" element={<ProtectedRoute><InvestorsPage /></ProtectedRoute>} />
             <Route path="/investor-ledger" element={<ProtectedRoute><InvestorLedgerPage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
