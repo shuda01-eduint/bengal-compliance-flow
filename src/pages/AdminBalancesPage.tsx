@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Users, TrendingUp, Wallet, AlertCircle } from "lucide-react";
+import { Search, Users, TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -14,254 +14,228 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ImportClientsDialog } from "@/components/admin/ImportClientsDialog";
-import { useAgentCodes, getAgentCodesGroupedByRM } from "@/hooks/useAgentCodes";
-import { employees } from "@/data/employees";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ImportBalancesRawDialog } from "@/components/admin/ImportBalancesRawDialog";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format, parseISO } from "date-fns";
+import { cn } from "@/lib/utils";
+import {
+  BalanceRawRow,
+  EnrichedBalanceRow,
+  enrichBalanceRow,
+  calculateSummary,
+  groupByInvestor,
+  groupByInstrument,
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+  InvestorGroupedRow,
+  InstrumentSummary,
+} from "@/lib/balance-utils";
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('en-BD', {
-    style: 'currency',
-    currency: 'BDT',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
-};
+type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag';
+type SortDirection = 'asc' | 'desc';
+
+const ROWS_PER_PAGE = 50;
 
 const AdminBalancesPage = () => {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedRM, setSelectedRM] = useState("all");
+  const [riskFilter, setRiskFilter] = useState<string>("all");
+  const [onlyNegativeLedger, setOnlyNegativeLedger] = useState(false);
+  const [onlyReceivables, setOnlyReceivables] = useState(false);
+  const [groupByInvestorView, setGroupByInvestorView] = useState(false);
+  const [expandedInvestors, setExpandedInvestors] = useState<Set<string>>(new Set());
+  const [sortField, setSortField] = useState<SortField>('investor_code');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
 
-  const { data: clients, isLoading, error } = useQuery({
-    queryKey: ['clients'],
+  // Fetch available dates
+  const { data: availableDates } = useQuery({
+    queryKey: ['balances-raw-dates'],
     queryFn: async () => {
-      // Fetch all clients - using range to bypass 1000 limit
-      type Client = {
-        id: string;
-        inv_code: string;
-        investor_name: string;
-        ledger_balance: number;
-        accrued_interest: number;
-        current_liabilities: number;
-        market_value: number;
-        equity: number;
-        rm_name: string;
-        rm_email: string | null;
-        status: string;
-        created_at: string;
-        updated_at: string;
-      };
+      const { data, error } = await supabase
+        .from('balances_raw')
+        .select('as_of_date')
+        .order('as_of_date', { ascending: false });
       
-      let allClients: Client[] = [];
+      if (error) throw error;
+      const uniqueDates = [...new Set(data.map(d => d.as_of_date))];
+      return uniqueDates;
+    },
+  });
+
+  // Set default date to latest available
+  useMemo(() => {
+    if (availableDates && availableDates.length > 0 && !selectedDate) {
+      setSelectedDate(parseISO(availableDates[0]));
+    }
+  }, [availableDates, selectedDate]);
+
+  // Fetch raw balance data for selected date
+  const { data: rawBalances, isLoading, error } = useQuery({
+    queryKey: ['balances-raw', selectedDate?.toISOString()],
+    queryFn: async () => {
+      if (!selectedDate) return [];
+      
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      let allData: BalanceRawRow[] = [];
       let from = 0;
       const batchSize = 1000;
-      
+
       while (true) {
         const { data, error } = await supabase
-          .from('clients')
+          .from('balances_raw')
           .select('*')
-          .order('rm_name', { ascending: true })
+          .eq('as_of_date', dateStr)
           .range(from, from + batchSize - 1);
-        
+
         if (error) throw error;
         if (!data || data.length === 0) break;
-        
-        allClients = [...allClients, ...data];
+
+        allData = [...allData, ...data as BalanceRawRow[]];
         if (data.length < batchSize) break;
         from += batchSize;
       }
-      
-      return allClients;
+
+      return allData;
     },
+    enabled: !!selectedDate,
   });
 
-  // Fetch deposits/withdrawals grouped by investor_code
-  const { data: depositsWithdrawals } = useQuery({
-    queryKey: ['deposits-withdrawals-summary'],
-    queryFn: async () => {
-      let allData: { investor_code: string; transaction_type: string; amount: number }[] = [];
-      let from = 0;
-      const batchSize = 1000;
-      
-      while (true) {
-        const { data, error } = await supabase
-          .from('deposits_withdrawals')
-          .select('investor_code, transaction_type, amount')
-          .range(from, from + batchSize - 1);
-        
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        
-        allData = [...allData, ...data];
-        if (data.length < batchSize) break;
-        from += batchSize;
+  // Enrich data with computed fields
+  const enrichedData = useMemo(() => {
+    if (!rawBalances) return [];
+    return rawBalances.map(enrichBalanceRow);
+  }, [rawBalances]);
+
+  // Calculate summary
+  const summary = useMemo(() => {
+    return calculateSummary(enrichedData);
+  }, [enrichedData]);
+
+  // Apply filters
+  const filteredData = useMemo(() => {
+    return enrichedData.filter(row => {
+      // Search filter
+      const matchesSearch = searchQuery === '' ||
+        row.investor_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (row.instrument?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
+
+      // Risk filter
+      const matchesRisk = riskFilter === 'all' || row.risk_flag === riskFilter;
+
+      // Negative ledger filter
+      const matchesNegative = !onlyNegativeLedger || row.ledger_balance < 0;
+
+      // Receivables filter
+      const matchesReceivables = !onlyReceivables || (row.receivable_sale + row.cq_in_transit) > 0;
+
+      return matchesSearch && matchesRisk && matchesNegative && matchesReceivables;
+    });
+  }, [enrichedData, searchQuery, riskFilter, onlyNegativeLedger, onlyReceivables]);
+
+  // Sort data
+  const sortedData = useMemo(() => {
+    return [...filteredData].sort((a, b) => {
+      let aVal: any = a[sortField];
+      let bVal: any = b[sortField];
+
+      if (sortField === 'risk_flag') {
+        const riskOrder = { 'High': 3, 'Watch': 2, 'OK': 1 };
+        aVal = riskOrder[a.risk_flag];
+        bVal = riskOrder[b.risk_flag];
       }
-      
-      // Group by investor_code
-      const grouped: Record<string, { deposits: number; withdrawals: number }> = {};
-      allData.forEach(item => {
-        if (!grouped[item.investor_code]) {
-          grouped[item.investor_code] = { deposits: 0, withdrawals: 0 };
-        }
-        if (item.transaction_type === 'Deposit') {
-          grouped[item.investor_code].deposits += Number(item.amount) || 0;
-        } else if (item.transaction_type === 'Withdrawal') {
-          grouped[item.investor_code].withdrawals += Number(item.amount) || 0;
-        }
-      });
-      
-      return grouped;
-    },
-  });
 
-  // Fetch trade data to calculate net sell per client
-  const { data: tradeSummary } = useQuery({
-    queryKey: ['trade-summary'],
-    queryFn: async () => {
-      let allTrades: { client_code: string | null; side: string | null; value: number | null }[] = [];
-      let from = 0;
-      const batchSize = 1000;
-      
-      while (true) {
-        const { data, error } = await supabase
-          .from('trade_history')
-          .select('client_code, side, value')
-          .range(from, from + batchSize - 1);
-        
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        
-        allTrades = [...allTrades, ...data];
-        if (data.length < batchSize) break;
-        from += batchSize;
+      if (aVal === null) return 1;
+      if (bVal === null) return -1;
+
+      if (typeof aVal === 'string') {
+        return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       }
-      
-      // Group by client_code and calculate net sell
-      const grouped: Record<string, { buyValue: number; sellValue: number; netSell: number }> = {};
-      allTrades.forEach(trade => {
-        if (!trade.client_code) return;
-        if (!grouped[trade.client_code]) {
-          grouped[trade.client_code] = { buyValue: 0, sellValue: 0, netSell: 0 };
-        }
-        const value = Number(trade.value) || 0;
-        if (trade.side === 'BUY') {
-          grouped[trade.client_code].buyValue += value;
-        } else if (trade.side === 'SELL') {
-          grouped[trade.client_code].sellValue += value;
-        }
-      });
-      
-      // Calculate net sell for each client
-      Object.keys(grouped).forEach(code => {
-        grouped[code].netSell = grouped[code].sellValue - grouped[code].buyValue;
-      });
-      
-      return grouped;
-    },
-  });
 
-  // Calculate dynamic ledger for each client
-  const clientsWithDynamicLedger = useMemo(() => {
-    if (!clients) return [];
-    
-    return clients.map(client => {
-      const dw = depositsWithdrawals?.[client.inv_code] || { deposits: 0, withdrawals: 0 };
-      const trade = tradeSummary?.[client.inv_code] || { netSell: 0 };
-      
-      // Dynamic ledger = base ledger + deposits - withdrawals + net sell
-      const dynamicLedger = Number(client.ledger_balance) + dw.deposits - dw.withdrawals + trade.netSell;
-      
-      return {
-        ...client,
-        dynamic_ledger: dynamicLedger,
-        total_deposits: dw.deposits,
-        total_withdrawals: dw.withdrawals,
-        net_sell: trade.netSell,
-      };
+      return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
     });
-  }, [clients, depositsWithdrawals, tradeSummary]);
+  }, [filteredData, sortField, sortDirection]);
 
-  const rmList = useMemo(() => {
-    if (!clientsWithDynamicLedger) return [];
-    const rms = [...new Set(clientsWithDynamicLedger.map(c => c.rm_name))];
-    return rms.sort();
-  }, [clientsWithDynamicLedger]);
+  // Paginate
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * ROWS_PER_PAGE;
+    return sortedData.slice(start, start + ROWS_PER_PAGE);
+  }, [sortedData, currentPage]);
 
-  const { data: agentCodes } = useAgentCodes();
-  
-  const agentCodesByRM = useMemo(() => {
-    if (!agentCodes) return {};
-    return getAgentCodesGroupedByRM(agentCodes);
-  }, [agentCodes]);
+  const totalPages = Math.ceil(sortedData.length / ROWS_PER_PAGE);
 
-  // Map employee names to their IDs for agent code lookup
-  const employeeNameToId = useMemo(() => {
-    const map: Record<string, string> = {};
-    employees.forEach(emp => {
-      map[emp.name] = emp.id;
-    });
-    return map;
-  }, []);
+  // Group by investor
+  const investorGroups = useMemo(() => {
+    return groupByInvestor(filteredData);
+  }, [filteredData]);
 
-  const rmSummary = useMemo(() => {
-    if (!clientsWithDynamicLedger) return [];
-    
-    const summary: Record<string, {
-      rm_name: string;
-      rm_email: string | null;
-      client_count: number;
-      total_ledger: number;
-      total_equity: number;
-      total_market_value: number;
-    }> = {};
+  // Group by instrument for second tab
+  const instrumentSummary = useMemo(() => {
+    return groupByInstrument(enrichedData);
+  }, [enrichedData]);
 
-    clientsWithDynamicLedger.forEach(client => {
-      if (!summary[client.rm_name]) {
-        summary[client.rm_name] = {
-          rm_name: client.rm_name,
-          rm_email: client.rm_email,
-          client_count: 0,
-          total_ledger: 0,
-          total_equity: 0,
-          total_market_value: 0,
-        };
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+    setCurrentPage(1);
+  };
+
+  const toggleInvestorExpand = (code: string) => {
+    setExpandedInvestors(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(code)) {
+        newSet.delete(code);
+      } else {
+        newSet.add(code);
       }
-      summary[client.rm_name].client_count++;
-      summary[client.rm_name].total_ledger += client.dynamic_ledger;
-      summary[client.rm_name].total_equity += Number(client.equity);
-      summary[client.rm_name].total_market_value += Number(client.market_value);
+      return newSet;
     });
+  };
 
-    return Object.values(summary).sort((a, b) => b.total_equity - a.total_equity);
-  }, [clientsWithDynamicLedger]);
+  const handleImportComplete = () => {
+    queryClient.invalidateQueries({ queryKey: ['balances-raw'] });
+    queryClient.invalidateQueries({ queryKey: ['balances-raw-dates'] });
+  };
 
-  const filteredClients = useMemo(() => {
-    if (!clientsWithDynamicLedger) return [];
-    
-    return clientsWithDynamicLedger.filter((client) => {
-      const matchesSearch = 
-        client.investor_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        client.inv_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        client.rm_name.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      const matchesRM = selectedRM === "all" || client.rm_name === selectedRM;
+  const getRiskBadge = (risk: 'OK' | 'Watch' | 'High') => {
+    switch (risk) {
+      case 'High':
+        return <Badge variant="destructive">High</Badge>;
+      case 'Watch':
+        return <Badge className="bg-amber-500/20 text-amber-400 hover:bg-amber-500/30">Watch</Badge>;
+      default:
+        return <Badge variant="secondary">OK</Badge>;
+    }
+  };
 
-      return matchesSearch && matchesRM;
-    });
-  }, [clientsWithDynamicLedger, searchQuery, selectedRM]);
-
-  const totals = useMemo(() => {
-    return filteredClients.reduce((acc, client) => ({
-      ledger: acc.ledger + client.dynamic_ledger,
-      equity: acc.equity + Number(client.equity),
-      marketValue: acc.marketValue + Number(client.market_value),
-      liabilities: acc.liabilities + Number(client.current_liabilities),
-    }), { ledger: 0, equity: 0, marketValue: 0, liabilities: 0 });
-  }, [filteredClients]);
+  const SortableHeader = ({ field, children, className }: { field: SortField; children: React.ReactNode; className?: string }) => (
+    <TableHead 
+      className={cn("text-muted-foreground cursor-pointer hover:text-foreground select-none", className)}
+      onClick={() => handleSort(field)}
+    >
+      <div className="flex items-center gap-1">
+        {children}
+        {sortField === field && (
+          <span className="text-xs">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+        )}
+      </div>
+    </TableHead>
+  );
 
   if (error) {
     return (
-      <MainLayout title="Admin Balances" subtitle="Client portfolio overview">
+      <MainLayout title="Admin Balances" subtitle="Balance data analysis">
         <div className="glass-card rounded-xl p-12 text-center">
           <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
           <h3 className="text-lg font-medium text-foreground mb-2">Error loading data</h3>
@@ -271,220 +245,389 @@ const AdminBalancesPage = () => {
     );
   }
 
-  const handleImportComplete = () => {
-    queryClient.invalidateQueries({ queryKey: ['clients'] });
-  };
-
   return (
     <MainLayout 
       title="Admin Balances" 
-      subtitle="Client portfolio overview by Relationship Manager"
+      subtitle="Balance data analysis by investor and instrument"
     >
-      {/* Header with Import Button */}
-      <div className="flex justify-end mb-6">
-        <ImportClientsDialog onImportComplete={handleImportComplete} />
+      {/* Sticky Summary Bar */}
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm pb-4 border-b border-border mb-6">
+        <div className="flex justify-between items-start mb-4">
+          {/* Date Picker */}
+          <div className="flex items-center gap-4">
+            <Label>As of Date</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-[200px] justify-start text-left font-normal">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {selectedDate ? format(selectedDate, "PPP") : "Select date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={setSelectedDate}
+                  disabled={(date) => {
+                    if (!availableDates) return true;
+                    return !availableDates.includes(format(date, 'yyyy-MM-dd'));
+                  }}
+                  initialFocus
+                  className="pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+          <ImportBalancesRawDialog onImportComplete={handleImportComplete} />
+        </div>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Users className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Investors</span>
+            </div>
+            <p className="text-xl font-semibold">{summary.total_clients}</p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Market Value</span>
+            </div>
+            <p className="text-xl font-semibold">{formatCurrency(summary.total_mv_sum)}</p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Total Cost</span>
+            </div>
+            <p className="text-xl font-semibold">{formatCurrency(summary.total_cost_sum)}</p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              {summary.unrealized_pnl_sum >= 0 ? (
+                <TrendingUp className="h-4 w-4 text-success" />
+              ) : (
+                <TrendingDown className="h-4 w-4 text-destructive" />
+              )}
+              <span className="text-xs text-muted-foreground">Unrealized P&L</span>
+            </div>
+            <p className={cn("text-xl font-semibold", summary.unrealized_pnl_sum >= 0 ? "text-success" : "text-destructive")}>
+              {formatCurrency(summary.unrealized_pnl_sum)}
+            </p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              <span className="text-xs text-muted-foreground">Negative Ledger</span>
+            </div>
+            <p className="text-xl font-semibold text-destructive">{summary.negative_ledger_clients_count}</p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Wallet className="h-4 w-4 text-amber-400" />
+              <span className="text-xs text-muted-foreground">Receivables</span>
+            </div>
+            <p className="text-xl font-semibold text-amber-400">
+              {formatCurrency(summary.receivable_sum + summary.cq_sum)}
+            </p>
+          </div>
+        </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div className="glass-card rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Total Clients</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">
-                {filteredClients.length}
-              </p>
+      <Tabs defaultValue="all" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="all">All Holdings</TabsTrigger>
+          <TabsTrigger value="by-instrument">By Instrument</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="all" className="space-y-4">
+          {/* Filters Panel */}
+          <div className="flex flex-wrap items-center gap-4 p-4 glass-card rounded-xl">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search investor code or instrument..."
+                value={searchQuery}
+                onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                className="pl-10 bg-secondary border-border"
+              />
             </div>
-            <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
-              <Users className="h-5 w-5 text-primary" />
+
+            <Select value={riskFilter} onValueChange={(v) => { setRiskFilter(v); setCurrentPage(1); }}>
+              <SelectTrigger className="w-[140px] bg-secondary border-border">
+                <SelectValue placeholder="Risk" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Risk</SelectItem>
+                <SelectItem value="OK">OK</SelectItem>
+                <SelectItem value="Watch">Watch</SelectItem>
+                <SelectItem value="High">High</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center gap-2">
+              <Switch 
+                id="negative" 
+                checked={onlyNegativeLedger} 
+                onCheckedChange={(v) => { setOnlyNegativeLedger(v); setCurrentPage(1); }}
+              />
+              <Label htmlFor="negative" className="text-sm cursor-pointer">Negative ledger</Label>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Switch 
+                id="receivables" 
+                checked={onlyReceivables} 
+                onCheckedChange={(v) => { setOnlyReceivables(v); setCurrentPage(1); }}
+              />
+              <Label htmlFor="receivables" className="text-sm cursor-pointer">Receivables &gt; 0</Label>
+            </div>
+
+            <div className="flex items-center gap-2 ml-auto">
+              <Switch 
+                id="group" 
+                checked={groupByInvestorView} 
+                onCheckedChange={setGroupByInvestorView}
+              />
+              <Label htmlFor="group" className="text-sm cursor-pointer">Group by Investor</Label>
             </div>
           </div>
-        </div>
 
-        <div className="glass-card rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Total Equity</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">
-                {formatCurrency(totals.equity)}
-              </p>
-            </div>
-            <div className="h-10 w-10 rounded-lg bg-success/20 flex items-center justify-center">
-              <TrendingUp className="h-5 w-5 text-success" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-card rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Market Value</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">
-                {formatCurrency(totals.marketValue)}
-              </p>
-            </div>
-            <div className="h-10 w-10 rounded-lg bg-accent/20 flex items-center justify-center">
-              <Wallet className="h-5 w-5 text-accent" />
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-card rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Dynamic Ledger</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">
-                {formatCurrency(totals.ledger)}
-              </p>
-            </div>
-            <div className="h-10 w-10 rounded-lg bg-warning/20 flex items-center justify-center">
-              <Wallet className="h-5 w-5 text-warning" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* RM Summary Table */}
-      <div className="glass-card rounded-xl p-5 mb-6">
-        <h2 className="text-lg font-semibold text-foreground mb-4">RM Portfolio Summary</h2>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="text-muted-foreground">Relationship Manager</TableHead>
-                <TableHead className="text-muted-foreground text-right">Clients</TableHead>
-                <TableHead className="text-muted-foreground text-right">Agent Codes</TableHead>
-                <TableHead className="text-muted-foreground text-right">Total Equity</TableHead>
-                <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
-                <TableHead className="text-muted-foreground text-right">Dynamic Ledger</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rmSummary.map((rm) => {
-                const rmEmployeeId = employeeNameToId[rm.rm_name];
-                const rmAgentData = rmEmployeeId ? agentCodesByRM[rmEmployeeId] : null;
-                const agentCount = rmAgentData ? Object.keys(rmAgentData.agents).length : 0;
-                const investorCount = rmAgentData ? rmAgentData.totalInvestors : 0;
-
-                return (
-                  <TableRow key={rm.rm_name} className="border-border hover:bg-secondary/30">
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-foreground">{rm.rm_name}</p>
-                        {rm.rm_email && (
-                          <p className="text-xs text-muted-foreground">{rm.rm_email}</p>
+          {/* Main Data Grid */}
+          <div className="glass-card rounded-xl overflow-hidden">
+            {isLoading ? (
+              <div className="p-12 text-center">
+                <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+                <p className="text-muted-foreground">Loading balance data...</p>
+              </div>
+            ) : sortedData.length === 0 ? (
+              <div className="p-12 text-center">
+                <AlertCircle className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">No data found for the selected criteria</p>
+              </div>
+            ) : groupByInvestorView ? (
+              // Grouped view
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
+                      <TableHead className="w-8"></TableHead>
+                      <TableHead className="text-muted-foreground">Investor Code</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Unrealized P&L</TableHead>
+                      <TableHead className="text-muted-foreground text-right">P&L %</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
+                      <TableHead className="text-muted-foreground">Risk</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {investorGroups.map((group) => (
+                      <>
+                        <TableRow 
+                          key={group.investor_code} 
+                          className={cn(
+                            "border-border cursor-pointer",
+                            group.risk_flag === 'High' && "bg-destructive/10",
+                            group.risk_flag === 'Watch' && "bg-amber-500/10"
+                          )}
+                          onClick={() => toggleInvestorExpand(group.investor_code)}
+                        >
+                          <TableCell>
+                            {expandedInvestors.has(group.investor_code) ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </TableCell>
+                          <TableCell className="font-medium">{group.investor_code}</TableCell>
+                          <TableCell className="text-right">{formatNumber(group.total_cost)}</TableCell>
+                          <TableCell className="text-right">{formatNumber(group.total_mv)}</TableCell>
+                          <TableCell className={cn("text-right", group.unrealized_pnl >= 0 ? "text-success" : "text-destructive")}>
+                            {formatNumber(group.unrealized_pnl)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", (group.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
+                            {formatPercent(group.pnl_pct)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", group.ledger_balance < 0 && "text-destructive")}>
+                            {formatNumber(group.ledger_balance)}
+                          </TableCell>
+                          <TableCell>{getRiskBadge(group.risk_flag)}</TableCell>
+                        </TableRow>
+                        {expandedInvestors.has(group.investor_code) && (
+                          group.instruments.map((inst) => (
+                            <TableRow key={inst.id} className="border-border bg-muted/30">
+                              <TableCell></TableCell>
+                              <TableCell className="pl-8 text-muted-foreground">{inst.instrument || '—'}</TableCell>
+                              <TableCell className="text-right text-muted-foreground">{formatNumber(inst.total_cost)}</TableCell>
+                              <TableCell className="text-right text-muted-foreground">{formatNumber(inst.total_mv)}</TableCell>
+                              <TableCell className={cn("text-right", inst.unrealized_pnl >= 0 ? "text-success/70" : "text-destructive/70")}>
+                                {formatNumber(inst.unrealized_pnl)}
+                              </TableCell>
+                              <TableCell className={cn("text-right", (inst.pnl_pct ?? 0) >= 0 ? "text-success/70" : "text-destructive/70")}>
+                                {formatPercent(inst.pnl_pct)}
+                              </TableCell>
+                              <TableCell></TableCell>
+                              <TableCell></TableCell>
+                            </TableRow>
+                          ))
                         )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Badge variant="secondary">{rm.client_count}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {agentCount > 0 ? (
-                        <Badge variant="outline" className="text-xs">
-                          {agentCount} agents · {investorCount} codes
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right text-success font-medium">
-                      {formatCurrency(rm.total_equity)}
-                    </TableCell>
-                    <TableCell className="text-right text-foreground">
-                      {formatCurrency(rm.total_market_value)}
-                    </TableCell>
-                    <TableCell className="text-right text-foreground">
-                      {formatCurrency(rm.total_ledger)}
-                    </TableCell>
+                      </>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              // Flat view with all columns
+              <>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
+                        <SortableHeader field="investor_code">Investor Code</SortableHeader>
+                        <SortableHeader field="instrument">Instrument</SortableHeader>
+                        <SortableHeader field="total_stock" className="text-right">Total Qty</SortableHeader>
+                        <SortableHeader field="saleable" className="text-right">Saleable</SortableHeader>
+                        <SortableHeader field="avg_cost" className="text-right">Avg Cost</SortableHeader>
+                        <SortableHeader field="total_cost" className="text-right">Total Cost</SortableHeader>
+                        <SortableHeader field="total_mv" className="text-right">Total M.V.</SortableHeader>
+                        <SortableHeader field="unrealized_pnl" className="text-right">P&L</SortableHeader>
+                        <SortableHeader field="pnl_pct" className="text-right">P&L %</SortableHeader>
+                        <SortableHeader field="ledger_balance" className="text-right">Ledger</SortableHeader>
+                        <SortableHeader field="matured_balance" className="text-right">Matured</SortableHeader>
+                        <SortableHeader field="receivable_sale" className="text-right">Receivable</SortableHeader>
+                        <SortableHeader field="cq_in_transit" className="text-right">CQ</SortableHeader>
+                        <SortableHeader field="net_available" className="text-right">Net Avail.</SortableHeader>
+                        <SortableHeader field="risk_flag">Risk</SortableHeader>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedData.map((row) => (
+                        <TableRow 
+                          key={row.id} 
+                          className={cn(
+                            "border-border",
+                            row.risk_flag === 'High' && "bg-destructive/10 hover:bg-destructive/15",
+                            row.risk_flag === 'Watch' && "bg-amber-500/10 hover:bg-amber-500/15"
+                          )}
+                        >
+                          <TableCell className="font-medium">{row.investor_code}</TableCell>
+                          <TableCell>{row.instrument || '—'}</TableCell>
+                          <TableCell className="text-right">{row.total_stock.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{row.saleable.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{formatNumber(row.avg_cost)}</TableCell>
+                          <TableCell className="text-right">{formatNumber(row.total_cost)}</TableCell>
+                          <TableCell className="text-right">{formatNumber(row.total_mv)}</TableCell>
+                          <TableCell className={cn("text-right", row.unrealized_pnl >= 0 ? "text-success" : "text-destructive")}>
+                            {formatNumber(row.unrealized_pnl)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", (row.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
+                            {formatPercent(row.pnl_pct)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", row.ledger_balance < 0 && "text-destructive")}>
+                            {formatNumber(row.ledger_balance)}
+                          </TableCell>
+                          <TableCell className="text-right">{formatNumber(row.matured_balance)}</TableCell>
+                          <TableCell className="text-right">
+                            {row.receivable_sale > 0 ? (
+                              <Badge className="bg-amber-500/20 text-amber-400">{formatNumber(row.receivable_sale)}</Badge>
+                            ) : formatNumber(row.receivable_sale)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {row.cq_in_transit > 0 ? (
+                              <Badge className="bg-amber-500/20 text-amber-400">{formatNumber(row.cq_in_transit)}</Badge>
+                            ) : formatNumber(row.cq_in_transit)}
+                          </TableCell>
+                          <TableCell className="text-right">{formatNumber(row.net_available)}</TableCell>
+                          <TableCell>{getRiskBadge(row.risk_flag)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between p-4 border-t border-border">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {((currentPage - 1) * ROWS_PER_PAGE) + 1} to {Math.min(currentPage * ROWS_PER_PAGE, sortedData.length)} of {sortedData.length} rows
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="flex items-center px-3 text-sm">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="by-instrument" className="space-y-4">
+          <div className="glass-card rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
+                    <TableHead className="text-muted-foreground">Instrument</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Total Qty</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Unrealized P&L</TableHead>
+                    <TableHead className="text-muted-foreground text-right">P&L %</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Investors</TableHead>
                   </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by client name, code, or RM..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-secondary border-border"
-          />
-        </div>
-        <Select value={selectedRM} onValueChange={setSelectedRM}>
-          <SelectTrigger className="w-full sm:w-[220px] bg-secondary border-border">
-            <SelectValue placeholder="Filter by RM" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Relationship Managers</SelectItem>
-            {rmList.map((rm) => (
-              <SelectItem key={rm} value={rm}>{rm}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Client Details Table */}
-      <div className="glass-card rounded-xl overflow-hidden">
-        {isLoading ? (
-          <div className="p-12 text-center">
-            <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-            <p className="text-muted-foreground">Loading client data...</p>
+                </TableHeader>
+                <TableBody>
+                  {instrumentSummary
+                    .sort((a, b) => b.total_mv - a.total_mv)
+                    .map((inst) => (
+                    <TableRow key={inst.instrument} className="border-border hover:bg-secondary/30">
+                      <TableCell className="font-medium">{inst.instrument}</TableCell>
+                      <TableCell className="text-right">{inst.total_qty.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{formatNumber(inst.total_cost)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(inst.total_mv)}</TableCell>
+                      <TableCell className={cn("text-right", inst.unrealized_pnl >= 0 ? "text-success" : "text-destructive")}>
+                        {formatNumber(inst.unrealized_pnl)}
+                      </TableCell>
+                      <TableCell className={cn("text-right", (inst.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
+                        {formatPercent(inst.pnl_pct)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant="secondary">{inst.investor_count}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
-                  <TableHead className="text-muted-foreground">Client Code</TableHead>
-                  <TableHead className="text-muted-foreground">Investor Name</TableHead>
-                  <TableHead className="text-muted-foreground">RM</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Dynamic Ledger</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Equity</TableHead>
-                  <TableHead className="text-muted-foreground">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredClients.map((client) => (
-                  <TableRow key={client.id} className="border-border hover:bg-secondary/30">
-                    <TableCell className="font-mono text-primary">{client.inv_code}</TableCell>
-                    <TableCell className="font-medium text-foreground">{client.investor_name}</TableCell>
-                    <TableCell className="text-muted-foreground">{client.rm_name}</TableCell>
-                    <TableCell className="text-right text-foreground">
-                      {formatCurrency(client.dynamic_ledger)}
-                    </TableCell>
-                    <TableCell className="text-right text-foreground">
-                      {formatCurrency(Number(client.market_value))}
-                    </TableCell>
-                    <TableCell className="text-right text-success font-medium">
-                      {formatCurrency(Number(client.equity))}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={client.status === 'Active' ? 'default' : 'secondary'}>
-                        {client.status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-
-        {!isLoading && filteredClients.length === 0 && (
-          <div className="p-12 text-center">
-            <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-2">No clients found</h3>
-            <p className="text-sm text-muted-foreground">Try adjusting your search or filter criteria</p>
-          </div>
-        )}
-      </div>
+        </TabsContent>
+      </Tabs>
     </MainLayout>
   );
 };

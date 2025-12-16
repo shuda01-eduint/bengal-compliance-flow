@@ -104,6 +104,60 @@ export type Database = {
         }
         Relationships: []
       }
+      balances_raw: {
+        Row: {
+          as_of_date: string
+          avg_cost: number | null
+          cq_in_transit: number | null
+          created_at: string
+          id: string
+          instrument: string | null
+          investor_code: string
+          ledger_balance: number | null
+          matured_balance: number | null
+          receivable_sale: number | null
+          saleable: number | null
+          total_cost: number | null
+          total_mv: number | null
+          total_stock: number | null
+          updated_at: string
+        }
+        Insert: {
+          as_of_date?: string
+          avg_cost?: number | null
+          cq_in_transit?: number | null
+          created_at?: string
+          id?: string
+          instrument?: string | null
+          investor_code: string
+          ledger_balance?: number | null
+          matured_balance?: number | null
+          receivable_sale?: number | null
+          saleable?: number | null
+          total_cost?: number | null
+          total_mv?: number | null
+          total_stock?: number | null
+          updated_at?: string
+        }
+        Update: {
+          as_of_date?: string
+          avg_cost?: number | null
+          cq_in_transit?: number | null
+          created_at?: string
+          id?: string
+          instrument?: string | null
+          investor_code?: string
+          ledger_balance?: number | null
+          matured_balance?: number | null
+          receivable_sale?: number | null
+          saleable?: number | null
+          total_cost?: number | null
+          total_mv?: number | null
+          total_stock?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       clients: {
         Row: {
           accrued_interest: number
