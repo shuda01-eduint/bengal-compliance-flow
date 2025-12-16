@@ -9,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Wallet,
-  TrendingUp,
   History,
   Landmark,
   Briefcase,
@@ -30,7 +29,6 @@ interface SidebarProps {
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
-  { name: "Stock Exchange Data", href: "/stock-exchange", icon: TrendingUp },
   { name: "Trade History", href: "/trade-history", icon: History },
   { name: "Securities", href: "/securities", icon: Landmark },
   { name: "Portfolio", href: "/portfolio", icon: Briefcase },
