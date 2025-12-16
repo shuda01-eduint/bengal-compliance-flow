@@ -264,13 +264,10 @@ export function TradeHistoryTable() {
   const fetchTrades = async () => {
     setLoading(true);
     try {
-      const hasFilters = searchTerm || sideFilter !== "all" || selectedFile !== "all" || 
-                         dateFrom || dateTo || statusFilter !== "all";
-      
-      // First fetch trades
+      // Always use planned count to avoid timeouts on large tables
       let query = supabase
         .from("trade_history")
-        .select("*", hasFilters ? { count: "exact" } : { count: "planned" });
+        .select("*", { count: "planned" });
 
       // Apply search filter (server-side)
       if (searchTerm) {
@@ -320,10 +317,18 @@ export function TradeHistoryTable() {
       
       setTrades(data || []);
       // Estimate count based on returned data (count query is too slow on large tables)
-      const estimatedCount = data?.length === pageSize 
-        ? (currentPage * pageSize) + pageSize 
-        : ((currentPage - 1) * pageSize) + (data?.length || 0);
-      setFilteredCount(Math.max(filteredCount, estimatedCount));
+      const returnedRows = data?.length || 0;
+      if (currentPage === 1) {
+        // On first page, estimate based on whether we got a full page
+        const estimated = returnedRows === pageSize ? pageSize * 10 : returnedRows;
+        setFilteredCount(estimated);
+      } else if (returnedRows === pageSize) {
+        // If we got a full page, there might be more
+        setFilteredCount(Math.max(filteredCount, (currentPage * pageSize) + pageSize));
+      } else {
+        // Partial page means we're at the end
+        setFilteredCount((currentPage - 1) * pageSize + returnedRows);
+      }
     } catch (error) {
       console.error("Error fetching trades:", error);
       toast({
