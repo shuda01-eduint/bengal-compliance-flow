@@ -781,6 +781,7 @@ export type Database = {
         Row: {
           account_type: string | null
           action: string | null
+          agent_id: string | null
           asset_class: string | null
           board: string | null
           boid: string | null
@@ -789,6 +790,7 @@ export type Database = {
           client_code: string | null
           compulsory_spot: string | null
           created_at: string
+          department: string | null
           exec_id: string | null
           file_name: string | null
           fill_type: string | null
@@ -802,6 +804,8 @@ export type Database = {
           price: number | null
           quantity: number | null
           ref_order_id: string | null
+          rm_id: string | null
+          rm_name: string | null
           security_code: string | null
           session: string | null
           side: string | null
@@ -816,6 +820,7 @@ export type Database = {
         Insert: {
           account_type?: string | null
           action?: string | null
+          agent_id?: string | null
           asset_class?: string | null
           board?: string | null
           boid?: string | null
@@ -824,6 +829,7 @@ export type Database = {
           client_code?: string | null
           compulsory_spot?: string | null
           created_at?: string
+          department?: string | null
           exec_id?: string | null
           file_name?: string | null
           fill_type?: string | null
@@ -837,6 +843,8 @@ export type Database = {
           price?: number | null
           quantity?: number | null
           ref_order_id?: string | null
+          rm_id?: string | null
+          rm_name?: string | null
           security_code?: string | null
           session?: string | null
           side?: string | null
@@ -851,6 +859,7 @@ export type Database = {
         Update: {
           account_type?: string | null
           action?: string | null
+          agent_id?: string | null
           asset_class?: string | null
           board?: string | null
           boid?: string | null
@@ -859,6 +868,7 @@ export type Database = {
           client_code?: string | null
           compulsory_spot?: string | null
           created_at?: string
+          department?: string | null
           exec_id?: string | null
           file_name?: string | null
           fill_type?: string | null
@@ -872,6 +882,8 @@ export type Database = {
           price?: number | null
           quantity?: number | null
           ref_order_id?: string | null
+          rm_id?: string | null
+          rm_name?: string | null
           security_code?: string | null
           session?: string | null
           side?: string | null
