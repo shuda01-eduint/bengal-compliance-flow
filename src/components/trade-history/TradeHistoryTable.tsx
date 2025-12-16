@@ -167,8 +167,8 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     // Support IF statements: IF(condition, trueVal, falseVal)
     expression = expression.replace(/IF\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)/gi, '($1 ? $2 : $3)');
 
-    // Validate - only allow safe characters
-    if (!/^[\d\s\+\-\*\/\(\)\.\,\?\:\<\>\=\!\&\|\"Math\.absroundflooceimaxinpowsqrt]+$/i.test(expression)) {
+    // Validate - only allow safe characters (digits, operators, Math functions, quotes)
+    if (!/^[\d\s\+\-\*\/\(\)\.\,\?\:\<\>\=\!\&\|\"\w]+$/i.test(expression)) {
       return 'Invalid';
     }
 
