@@ -60,6 +60,10 @@ interface TradeRecord {
   rm_id: string | null;
   rm_name: string | null;
   department: string | null;
+  // Denormalized deposit/withdrawal data
+  total_deposits: number | null;
+  total_withdrawals: number | null;
+  net_deposit: number | null;
 }
 
 interface ColumnConfig {
@@ -108,6 +112,10 @@ const BASE_COLUMNS: ColumnConfig[] = [
   { key: "rm_id", label: "RM ID", defaultVisible: false, type: 'string' },
   { key: "rm_name", label: "RM Name", defaultVisible: false, type: 'string' },
   { key: "department", label: "Department", defaultVisible: false, type: 'string' },
+  // Denormalized deposit/withdrawal fields
+  { key: "total_deposits", label: "Total Deposits", defaultVisible: false, type: 'currency' },
+  { key: "total_withdrawals", label: "Total Withdrawals", defaultVisible: false, type: 'currency' },
+  { key: "net_deposit", label: "Net Deposit", defaultVisible: false, type: 'currency' },
 ];
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
@@ -129,6 +137,9 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
       account_type: trade.account_type,
       investor_type: trade.investor_type,
       ledger_balance: trade.ledger_balance_snapshot,
+      total_deposits: trade.total_deposits,
+      total_withdrawals: trade.total_withdrawals,
+      net_deposit: trade.net_deposit,
     };
 
     // Replace field names with values

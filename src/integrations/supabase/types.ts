@@ -799,6 +799,7 @@ export type Database = {
           investor_type: string | null
           isin: string | null
           ledger_balance_snapshot: number | null
+          net_deposit: number | null
           order_id: string | null
           owner_dealer_id: string | null
           price: number | null
@@ -810,6 +811,8 @@ export type Database = {
           session: string | null
           side: string | null
           status: string | null
+          total_deposits: number | null
+          total_withdrawals: number | null
           trade_date: string | null
           trade_report_type: string | null
           trade_time: string | null
@@ -838,6 +841,7 @@ export type Database = {
           investor_type?: string | null
           isin?: string | null
           ledger_balance_snapshot?: number | null
+          net_deposit?: number | null
           order_id?: string | null
           owner_dealer_id?: string | null
           price?: number | null
@@ -849,6 +853,8 @@ export type Database = {
           session?: string | null
           side?: string | null
           status?: string | null
+          total_deposits?: number | null
+          total_withdrawals?: number | null
           trade_date?: string | null
           trade_report_type?: string | null
           trade_time?: string | null
@@ -877,6 +883,7 @@ export type Database = {
           investor_type?: string | null
           isin?: string | null
           ledger_balance_snapshot?: number | null
+          net_deposit?: number | null
           order_id?: string | null
           owner_dealer_id?: string | null
           price?: number | null
@@ -888,6 +895,8 @@ export type Database = {
           session?: string | null
           side?: string | null
           status?: string | null
+          total_deposits?: number | null
+          total_withdrawals?: number | null
           trade_date?: string | null
           trade_report_type?: string | null
           trade_time?: string | null
