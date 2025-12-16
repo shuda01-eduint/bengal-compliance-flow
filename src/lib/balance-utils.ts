@@ -16,11 +16,21 @@ export interface BalanceRawRow {
   cq_in_transit: number;
 }
 
+export interface InvestorAdjustment {
+  deposits: number;
+  withdrawals: number;
+  net_sell: number;
+}
+
 export interface EnrichedBalanceRow extends BalanceRawRow {
   unrealized_pnl: number;
   pnl_pct: number | null;
   net_available: number;
   risk_flag: 'OK' | 'Watch' | 'High';
+  adjusted_ledger: number;
+  deposits: number;
+  withdrawals: number;
+  net_sell: number;
 }
 
 export interface BalanceSummary {
@@ -40,6 +50,10 @@ export interface InvestorGroupedRow {
   unrealized_pnl: number;
   pnl_pct: number | null;
   ledger_balance: number;
+  adjusted_ledger: number;
+  deposits: number;
+  withdrawals: number;
+  net_sell: number;
   risk_flag: 'OK' | 'Watch' | 'High';
   instruments: EnrichedBalanceRow[];
 }
@@ -66,6 +80,7 @@ export interface PortfolioSummary {
   unrealized_pnl: number;
   pnl_pct: number | null;
   ledger_balance: number;
+  adjusted_ledger: number;
   risk_flag: 'OK' | 'Watch' | 'High';
 }
 
@@ -76,27 +91,36 @@ export interface Portfolio {
   investor_code: string;
 }
 
-// Calculate risk flag based on ledger balance and P&L %
-export function calculateRiskFlag(ledgerBalance: number, pnlPct: number | null): 'OK' | 'Watch' | 'High' {
-  if (ledgerBalance < -200000 || (pnlPct !== null && pnlPct < -20)) {
+// Calculate risk flag based on adjusted ledger balance and P&L %
+export function calculateRiskFlag(adjustedLedger: number, pnlPct: number | null): 'OK' | 'Watch' | 'High' {
+  if (adjustedLedger < -200000 || (pnlPct !== null && pnlPct < -20)) {
     return 'High';
   }
-  if (ledgerBalance < 0 || (pnlPct !== null && pnlPct < -5)) {
+  if (adjustedLedger < 0 || (pnlPct !== null && pnlPct < -5)) {
     return 'Watch';
   }
   return 'OK';
 }
 
-// Enrich raw balance row with computed fields
-export function enrichBalanceRow(row: BalanceRawRow): EnrichedBalanceRow {
+// Enrich raw balance row with computed fields including next-day adjustments
+export function enrichBalanceRow(
+  row: BalanceRawRow, 
+  adjustments?: Record<string, InvestorAdjustment>
+): EnrichedBalanceRow {
+  const adjustment = adjustments?.[row.investor_code] || { deposits: 0, withdrawals: 0, net_sell: 0 };
+  
   const unrealized_pnl = row.total_mv - row.total_cost;
   const pnl_pct = row.total_cost !== 0 ? (unrealized_pnl / row.total_cost) * 100 : null;
+  
+  // Adjusted ledger = ledger_balance + deposits - withdrawals + net_sell
+  const adjusted_ledger = row.ledger_balance + adjustment.deposits - adjustment.withdrawals + adjustment.net_sell;
   
   // Net available = matured + (saleable * price per unit) - receivable - cq
   const pricePerUnit = row.total_stock > 0 ? row.total_mv / row.total_stock : 0;
   const net_available = row.matured_balance + (row.saleable * pricePerUnit) - row.receivable_sale - row.cq_in_transit;
   
-  const risk_flag = calculateRiskFlag(row.ledger_balance, pnl_pct);
+  // Risk flag now uses adjusted_ledger instead of raw ledger_balance
+  const risk_flag = calculateRiskFlag(adjusted_ledger, pnl_pct);
 
   return {
     ...row,
@@ -104,6 +128,10 @@ export function enrichBalanceRow(row: BalanceRawRow): EnrichedBalanceRow {
     pnl_pct,
     net_available,
     risk_flag,
+    adjusted_ledger,
+    deposits: adjustment.deposits,
+    withdrawals: adjustment.withdrawals,
+    net_sell: adjustment.net_sell,
   };
 }
 
@@ -126,7 +154,8 @@ export function calculateSummary(rows: EnrichedBalanceRow[]): BalanceSummary {
     receivable_sum += row.receivable_sale;
     cq_sum += row.cq_in_transit;
     
-    if (row.ledger_balance < 0) {
+    // Use adjusted_ledger for negative count
+    if (row.adjusted_ledger < 0) {
       negativeInvestors.add(row.investor_code);
     }
   });
@@ -158,7 +187,11 @@ export function groupByInvestor(rows: EnrichedBalanceRow[]): InvestorGroupedRow[
     const total_mv = instruments.reduce((sum, r) => sum + r.total_mv, 0);
     const unrealized_pnl = total_mv - total_cost;
     const pnl_pct = total_cost !== 0 ? (unrealized_pnl / total_cost) * 100 : null;
-    const ledger_balance = instruments[0]?.ledger_balance || 0; // Same for all rows of investor
+    const ledger_balance = instruments[0]?.ledger_balance || 0;
+    const adjusted_ledger = instruments[0]?.adjusted_ledger || 0;
+    const deposits = instruments[0]?.deposits || 0;
+    const withdrawals = instruments[0]?.withdrawals || 0;
+    const net_sell = instruments[0]?.net_sell || 0;
     
     // Highest risk flag
     const riskFlags = instruments.map(i => i.risk_flag);
@@ -171,6 +204,10 @@ export function groupByInvestor(rows: EnrichedBalanceRow[]): InvestorGroupedRow[
       unrealized_pnl,
       pnl_pct,
       ledger_balance,
+      adjusted_ledger,
+      deposits,
+      withdrawals,
+      net_sell,
       risk_flag,
       instruments,
     };
@@ -238,12 +275,15 @@ export function groupByPortfolio(rows: EnrichedBalanceRow[], portfolios: Portfol
     const unrealized_pnl = total_mv - total_cost;
     const pnl_pct = total_cost !== 0 ? (unrealized_pnl / total_cost) * 100 : null;
     
-    // Sum unique ledger balances per investor
+    // Sum unique ledger and adjusted_ledger balances per investor
     const ledgerByInvestor: Record<string, number> = {};
+    const adjustedByInvestor: Record<string, number> = {};
     data.rows.forEach(r => {
       ledgerByInvestor[r.investor_code] = r.ledger_balance;
+      adjustedByInvestor[r.investor_code] = r.adjusted_ledger;
     });
     const ledger_balance = Object.values(ledgerByInvestor).reduce((sum, v) => sum + v, 0);
+    const adjusted_ledger = Object.values(adjustedByInvestor).reduce((sum, v) => sum + v, 0);
     
     // Highest risk flag
     const riskFlags = data.rows.map(r => r.risk_flag);
@@ -261,6 +301,7 @@ export function groupByPortfolio(rows: EnrichedBalanceRow[], portfolios: Portfol
       unrealized_pnl,
       pnl_pct,
       ledger_balance,
+      adjusted_ledger,
       risk_flag,
     };
   });

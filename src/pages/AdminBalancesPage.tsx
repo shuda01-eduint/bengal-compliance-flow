@@ -21,12 +21,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImportBalancesRawDialog } from "@/components/admin/ImportBalancesRawDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, addDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
   BalanceRawRow,
   EnrichedBalanceRow,
   Portfolio,
+  InvestorAdjustment,
   enrichBalanceRow,
   calculateSummary,
   groupByInvestor,
@@ -40,7 +41,7 @@ import {
   PortfolioSummary,
 } from "@/lib/balance-utils";
 
-type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag';
+type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'adjusted_ledger' | 'deposits' | 'withdrawals' | 'net_sell' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag';
 type SortDirection = 'asc' | 'desc';
 
 const ROWS_PER_PAGE = 50;
@@ -112,6 +113,79 @@ const AdminBalancesPage = () => {
     enabled: !!selectedDate,
   });
 
+  // Fetch next day's deposits/withdrawals
+  const { data: nextDayTransactions } = useQuery({
+    queryKey: ['next-day-transactions', selectedDate?.toISOString()],
+    queryFn: async () => {
+      if (!selectedDate) return [];
+      const nextDay = addDays(selectedDate, 1);
+      const nextDayStr = format(nextDay, 'yyyy-MM-dd');
+      
+      const { data, error } = await supabase
+        .from('deposits_withdrawals')
+        .select('investor_code, transaction_type, amount')
+        .eq('transaction_date', nextDayStr);
+      
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!selectedDate,
+  });
+
+  // Fetch next day's trades
+  const { data: nextDayTrades } = useQuery({
+    queryKey: ['next-day-trades', selectedDate?.toISOString()],
+    queryFn: async () => {
+      if (!selectedDate) return [];
+      const nextDay = addDays(selectedDate, 1);
+      const nextDayStr = format(nextDay, 'yyyy-MM-dd');
+      
+      const { data, error } = await supabase
+        .from('trade_history')
+        .select('client_code, side, value')
+        .eq('trade_date', nextDayStr);
+      
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!selectedDate,
+  });
+
+  // Calculate adjustments per investor from next day's data
+  const investorAdjustments = useMemo(() => {
+    const adjustments: Record<string, InvestorAdjustment> = {};
+    
+    // Process transactions
+    nextDayTransactions?.forEach(tx => {
+      if (!adjustments[tx.investor_code]) {
+        adjustments[tx.investor_code] = { deposits: 0, withdrawals: 0, net_sell: 0 };
+      }
+      if (tx.transaction_type === 'Deposit') {
+        adjustments[tx.investor_code].deposits += Number(tx.amount) || 0;
+      } else if (tx.transaction_type === 'Withdrawal') {
+        adjustments[tx.investor_code].withdrawals += Number(tx.amount) || 0;
+      }
+    });
+    
+    // Process trades - net_sell = sell_value - buy_value
+    nextDayTrades?.forEach(trade => {
+      const clientCode = trade.client_code;
+      if (!clientCode) return;
+      
+      if (!adjustments[clientCode]) {
+        adjustments[clientCode] = { deposits: 0, withdrawals: 0, net_sell: 0 };
+      }
+      const value = Number(trade.value) || 0;
+      if (trade.side?.toUpperCase() === 'SELL' || trade.side?.toUpperCase() === 'S') {
+        adjustments[clientCode].net_sell += value;
+      } else if (trade.side?.toUpperCase() === 'BUY' || trade.side?.toUpperCase() === 'B') {
+        adjustments[clientCode].net_sell -= value;
+      }
+    });
+    
+    return adjustments;
+  }, [nextDayTransactions, nextDayTrades]);
+
   // Fetch portfolios for grouping
   const { data: portfolios } = useQuery({
     queryKey: ['portfolios-for-balance'],
@@ -125,11 +199,11 @@ const AdminBalancesPage = () => {
     },
   });
 
-  // Enrich data with computed fields
+  // Enrich data with computed fields including next-day adjustments
   const enrichedData = useMemo(() => {
     if (!rawBalances) return [];
-    return rawBalances.map(enrichBalanceRow);
-  }, [rawBalances]);
+    return rawBalances.map(row => enrichBalanceRow(row, investorAdjustments));
+  }, [rawBalances, investorAdjustments]);
 
   // Calculate summary
   const summary = useMemo(() => {
@@ -151,8 +225,8 @@ const AdminBalancesPage = () => {
       // Risk filter
       const matchesRisk = riskFilter === 'all' || row.risk_flag === riskFilter;
 
-      // Negative ledger filter
-      const matchesNegative = !onlyNegativeLedger || row.ledger_balance < 0;
+      // Negative ledger filter (uses adjusted_ledger now)
+      const matchesNegative = !onlyNegativeLedger || row.adjusted_ledger < 0;
 
       // Receivables filter
       const matchesReceivables = !onlyReceivables || (row.receivable_sale + row.cq_in_transit) > 0;
@@ -478,7 +552,11 @@ const AdminBalancesPage = () => {
                       <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
                       <TableHead className="text-muted-foreground text-right">Unrealized P&L</TableHead>
                       <TableHead className="text-muted-foreground text-right">P&L %</TableHead>
-                      <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Ledger</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Deposits</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Withdraw</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Net Sell</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Adj. Ledger</TableHead>
                       <TableHead className="text-muted-foreground">Risk</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -512,6 +590,18 @@ const AdminBalancesPage = () => {
                           </TableCell>
                           <TableCell className={cn("text-right", group.ledger_balance < 0 && "text-destructive")}>
                             {formatNumber(group.ledger_balance)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", group.deposits > 0 && "text-success")}>
+                            {formatNumber(group.deposits)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", group.withdrawals > 0 && "text-destructive")}>
+                            {formatNumber(group.withdrawals)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", group.net_sell >= 0 ? "text-success" : "text-destructive")}>
+                            {formatNumber(group.net_sell)}
+                          </TableCell>
+                          <TableCell className={cn("text-right font-medium", group.adjusted_ledger < 0 ? "text-destructive" : "text-success")}>
+                            {formatNumber(group.adjusted_ledger)}
                           </TableCell>
                           <TableCell>{getRiskBadge(group.risk_flag)}</TableCell>
                         </TableRow>
@@ -555,6 +645,10 @@ const AdminBalancesPage = () => {
                         <SortableHeader field="unrealized_pnl" className="text-right">P&L</SortableHeader>
                         <SortableHeader field="pnl_pct" className="text-right">P&L %</SortableHeader>
                         <SortableHeader field="ledger_balance" className="text-right">Ledger</SortableHeader>
+                        <SortableHeader field="deposits" className="text-right">Deposits</SortableHeader>
+                        <SortableHeader field="withdrawals" className="text-right">Withdraw</SortableHeader>
+                        <SortableHeader field="net_sell" className="text-right">Net Sell</SortableHeader>
+                        <SortableHeader field="adjusted_ledger" className="text-right">Adj. Ledger</SortableHeader>
                         <SortableHeader field="matured_balance" className="text-right">Matured</SortableHeader>
                         <SortableHeader field="receivable_sale" className="text-right">Receivable</SortableHeader>
                         <SortableHeader field="cq_in_transit" className="text-right">CQ</SortableHeader>
@@ -587,6 +681,18 @@ const AdminBalancesPage = () => {
                           </TableCell>
                           <TableCell className={cn("text-right", row.ledger_balance < 0 && "text-destructive")}>
                             {formatNumber(row.ledger_balance)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", row.deposits > 0 && "text-success")}>
+                            {formatNumber(row.deposits)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", row.withdrawals > 0 && "text-destructive")}>
+                            {formatNumber(row.withdrawals)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", row.net_sell >= 0 ? "text-success" : "text-destructive")}>
+                            {formatNumber(row.net_sell)}
+                          </TableCell>
+                          <TableCell className={cn("text-right font-medium", row.adjusted_ledger < 0 ? "text-destructive" : "text-success")}>
+                            {formatNumber(row.adjusted_ledger)}
                           </TableCell>
                           <TableCell className="text-right">{formatNumber(row.matured_balance)}</TableCell>
                           <TableCell className="text-right">
