@@ -658,18 +658,23 @@ const AdminBalancesPage = () => {
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search portfolio name or description..."
+                placeholder="Search portfolio name, description, or investor code (exact)..."
                 value={portfolioSearchQuery}
                 onChange={(e) => setPortfolioSearchQuery(e.target.value)}
                 className="pl-10 bg-secondary border-border"
               />
             </div>
             <span className="text-sm text-muted-foreground">
-              {portfolioSummary.filter(p => 
-                portfolioSearchQuery === '' ||
-                p.portfolio_name.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ||
-                (p.description?.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ?? false)
-              ).length} portfolios
+              {portfolioSummary.filter(p => {
+                if (portfolioSearchQuery === '') return true;
+                const query = portfolioSearchQuery.toLowerCase();
+                // Partial match for name/description
+                if (p.portfolio_name.toLowerCase().includes(query)) return true;
+                if (p.description?.toLowerCase().includes(query)) return true;
+                // Exact match for investor codes
+                if (p.investor_codes.some(code => code.toLowerCase() === query)) return true;
+                return false;
+              }).length} portfolios
             </span>
           </div>
 
@@ -692,11 +697,16 @@ const AdminBalancesPage = () => {
                 </TableHeader>
                 <TableBody>
                   {portfolioSummary
-                    .filter(p => 
-                      portfolioSearchQuery === '' ||
-                      p.portfolio_name.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ||
-                      (p.description?.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ?? false)
-                    )
+                    .filter(p => {
+                      if (portfolioSearchQuery === '') return true;
+                      const query = portfolioSearchQuery.toLowerCase();
+                      // Partial match for name/description
+                      if (p.portfolio_name.toLowerCase().includes(query)) return true;
+                      if (p.description?.toLowerCase().includes(query)) return true;
+                      // Exact match for investor codes
+                      if (p.investor_codes.some(code => code.toLowerCase() === query)) return true;
+                      return false;
+                    })
                     .sort((a, b) => b.total_mv - a.total_mv)
                     .length === 0 ? (
                     <TableRow>
@@ -706,11 +716,16 @@ const AdminBalancesPage = () => {
                     </TableRow>
                   ) : (
                     portfolioSummary
-                      .filter(p => 
-                        portfolioSearchQuery === '' ||
-                        p.portfolio_name.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ||
-                        (p.description?.toLowerCase().includes(portfolioSearchQuery.toLowerCase()) ?? false)
-                      )
+                      .filter(p => {
+                        if (portfolioSearchQuery === '') return true;
+                        const query = portfolioSearchQuery.toLowerCase();
+                        // Partial match for name/description
+                        if (p.portfolio_name.toLowerCase().includes(query)) return true;
+                        if (p.description?.toLowerCase().includes(query)) return true;
+                        // Exact match for investor codes
+                        if (p.investor_codes.some(code => code.toLowerCase() === query)) return true;
+                        return false;
+                      })
                       .sort((a, b) => b.total_mv - a.total_mv)
                       .map((portfolio) => (
                         <TableRow 
