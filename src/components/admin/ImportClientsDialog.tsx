@@ -152,7 +152,7 @@ export function ImportClientsDialog({ onImportComplete }: ImportClientsDialogPro
 
       const clients = Array.from(investorMap.entries()).map(([invCode, data]) => ({
         inv_code: invCode,
-        investor_name: data.investor_name,
+        investor_name: data.investor_name || invCode, // Use inv_code as fallback if no name
         ledger_balance: data.ledger_balance,
         market_value: data.market_value,
         equity: data.market_value + data.ledger_balance,

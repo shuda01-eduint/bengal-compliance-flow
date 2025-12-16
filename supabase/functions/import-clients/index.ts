@@ -9,7 +9,7 @@ const corsHeaders = {
 // Zod schema for client record validation
 const ClientRecordSchema = z.object({
   inv_code: z.string().min(1).max(50).transform(val => val.trim()),
-  investor_name: z.string().min(1).max(200).transform(val => val.trim()),
+  investor_name: z.string().max(200).transform(val => val.trim()).default(''),
   ledger_balance: z.number().finite(),
   accrued_interest: z.number().finite(),
   current_liabilities: z.number().finite(),
@@ -120,9 +120,10 @@ Deno.serve(async (req) => {
       const rawClient = rawClients[i] as Record<string, unknown>;
       
       // Sanitize string fields before validation
+      const invCode = sanitizeString(String(rawClient.inv_code || ''));
       const sanitizedClient = {
-        inv_code: sanitizeString(String(rawClient.inv_code || '')),
-        investor_name: sanitizeString(String(rawClient.investor_name || '')),
+        inv_code: invCode,
+        investor_name: sanitizeString(String(rawClient.investor_name || '')) || invCode, // Use inv_code as fallback
         ledger_balance: typeof rawClient.ledger_balance === 'number' ? rawClient.ledger_balance : 0,
         accrued_interest: typeof rawClient.accrued_interest === 'number' ? rawClient.accrued_interest : 0,
         current_liabilities: typeof rawClient.current_liabilities === 'number' ? rawClient.current_liabilities : 0,
