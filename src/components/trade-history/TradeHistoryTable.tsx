@@ -293,38 +293,45 @@ export function TradeHistoryTable() {
       const from = (currentPage - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      const { data, error, count } = await query
+      // Fetch trades without count first (count is expensive on large tables)
+      const { data, error } = await query
         .order("uploaded_at", { ascending: false })
         .range(from, to);
 
       if (error) throw error;
       
       // Get unique client codes from trades to fetch investor data
-      const clientCodes = [...new Set((data || []).map(t => t.client_code).filter(Boolean))];
+      const clientCodes = [...new Set((data || []).map(t => t.client_code).filter(Boolean))] as string[];
       
-      // Fetch investor data for commission rates and account info
+      // Initialize empty maps
       let investorMap: Record<string, { 
         brokerage_commission: number | null; 
         interest_rate: number | null;
         account_type: string | null;
         investor_type: string | null;
       }> = {};
-      
-      // Fetch client data for ledger balance
       let clientMap: Record<string, { ledger_balance: number | null }> = {};
-      
-      // Fetch transaction aggregates
       let transactionMap: Record<string, { total_deposits: number; total_withdrawals: number }> = {};
       
+      // Fetch enrichment data in parallel (only if we have client codes)
       if (clientCodes.length > 0) {
-        // Fetch investor data
-        const { data: investors } = await supabase
-          .from("investors")
-          .select("investor_code, brokerage_commission, interest_rate, account_type, investor_type")
-          .in("investor_code", clientCodes);
+        const [investorsResult, clientsResult, transactionsResult] = await Promise.all([
+          supabase
+            .from("investors")
+            .select("investor_code, brokerage_commission, interest_rate, account_type, investor_type")
+            .in("investor_code", clientCodes),
+          supabase
+            .from("clients")
+            .select("inv_code, ledger_balance")
+            .in("inv_code", clientCodes),
+          supabase
+            .from("deposits_withdrawals")
+            .select("investor_code, transaction_type, amount")
+            .in("investor_code", clientCodes)
+        ]);
         
-        if (investors) {
-          investorMap = investors.reduce((acc, inv) => {
+        if (investorsResult.data) {
+          investorMap = investorsResult.data.reduce((acc, inv) => {
             acc[inv.investor_code] = {
               brokerage_commission: inv.brokerage_commission,
               interest_rate: inv.interest_rate,
@@ -335,27 +342,15 @@ export function TradeHistoryTable() {
           }, {} as typeof investorMap);
         }
         
-        // Fetch client data for ledger balance
-        const { data: clients } = await supabase
-          .from("clients")
-          .select("inv_code, ledger_balance")
-          .in("inv_code", clientCodes);
-        
-        if (clients) {
-          clientMap = clients.reduce((acc, client) => {
+        if (clientsResult.data) {
+          clientMap = clientsResult.data.reduce((acc, client) => {
             acc[client.inv_code] = { ledger_balance: client.ledger_balance };
             return acc;
           }, {} as typeof clientMap);
         }
         
-        // Fetch deposits/withdrawals aggregates
-        const { data: transactions } = await supabase
-          .from("deposits_withdrawals")
-          .select("investor_code, transaction_type, amount")
-          .in("investor_code", clientCodes);
-        
-        if (transactions) {
-          transactionMap = transactions.reduce((acc, tx) => {
+        if (transactionsResult.data) {
+          transactionMap = transactionsResult.data.reduce((acc, tx) => {
             if (!acc[tx.investor_code]) {
               acc[tx.investor_code] = { total_deposits: 0, total_withdrawals: 0 };
             }
@@ -382,13 +377,12 @@ export function TradeHistoryTable() {
       }));
       
       setTrades(transformedData);
-      // Only update count when we have filters (otherwise show page info only)
-      if (hasFilters && count !== null) {
-        setFilteredCount(count);
-      } else if (!hasFilters) {
-        // For unfiltered view, estimate count based on whether we got a full page
-        setFilteredCount(data?.length === pageSize ? pageSize * 10 : data?.length || 0);
-      }
+      // Estimate count based on returned data (count query is too slow on large tables)
+      // If we got a full page, assume there's more data
+      const estimatedCount = data?.length === pageSize 
+        ? (currentPage * pageSize) + pageSize 
+        : ((currentPage - 1) * pageSize) + (data?.length || 0);
+      setFilteredCount(Math.max(filteredCount, estimatedCount));
     } catch (error) {
       console.error("Error fetching trades:", error);
       toast({
