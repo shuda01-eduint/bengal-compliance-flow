@@ -54,6 +54,28 @@ export interface InstrumentSummary {
   investor_count: number;
 }
 
+export interface PortfolioSummary {
+  portfolio_id: string;
+  portfolio_name: string;
+  description: string | null;
+  investor_codes: string[];
+  investor_count: number;
+  total_qty: number;
+  total_cost: number;
+  total_mv: number;
+  unrealized_pnl: number;
+  pnl_pct: number | null;
+  ledger_balance: number;
+  risk_flag: 'OK' | 'Watch' | 'High';
+}
+
+export interface Portfolio {
+  id: string;
+  name: string;
+  description: string | null;
+  investor_code: string;
+}
+
 // Calculate risk flag based on ledger balance and P&L %
 export function calculateRiskFlag(ledgerBalance: number, pnlPct: number | null): 'OK' | 'Watch' | 'High' {
   if (ledgerBalance < -200000 || (pnlPct !== null && pnlPct < -20)) {
@@ -183,6 +205,63 @@ export function groupByInstrument(rows: EnrichedBalanceRow[]): InstrumentSummary
       unrealized_pnl,
       pnl_pct,
       investor_count,
+    };
+  });
+}
+
+// Group by portfolio
+export function groupByPortfolio(rows: EnrichedBalanceRow[], portfolios: Portfolio[]): PortfolioSummary[] {
+  // Create a map of investor_code -> portfolio
+  const investorToPortfolio: Record<string, Portfolio> = {};
+  portfolios.forEach(p => {
+    investorToPortfolio[p.investor_code] = p;
+  });
+
+  // Group rows by portfolio
+  const grouped: Record<string, { portfolio: Portfolio; rows: EnrichedBalanceRow[]; investorCodes: Set<string> }> = {};
+  
+  rows.forEach(row => {
+    const portfolio = investorToPortfolio[row.investor_code];
+    if (!portfolio) return; // Skip rows without portfolio assignment
+    
+    if (!grouped[portfolio.id]) {
+      grouped[portfolio.id] = { portfolio, rows: [], investorCodes: new Set() };
+    }
+    grouped[portfolio.id].rows.push(row);
+    grouped[portfolio.id].investorCodes.add(row.investor_code);
+  });
+
+  return Object.entries(grouped).map(([portfolioId, data]) => {
+    const total_qty = data.rows.reduce((sum, r) => sum + r.total_stock, 0);
+    const total_cost = data.rows.reduce((sum, r) => sum + r.total_cost, 0);
+    const total_mv = data.rows.reduce((sum, r) => sum + r.total_mv, 0);
+    const unrealized_pnl = total_mv - total_cost;
+    const pnl_pct = total_cost !== 0 ? (unrealized_pnl / total_cost) * 100 : null;
+    
+    // Sum unique ledger balances per investor
+    const ledgerByInvestor: Record<string, number> = {};
+    data.rows.forEach(r => {
+      ledgerByInvestor[r.investor_code] = r.ledger_balance;
+    });
+    const ledger_balance = Object.values(ledgerByInvestor).reduce((sum, v) => sum + v, 0);
+    
+    // Highest risk flag
+    const riskFlags = data.rows.map(r => r.risk_flag);
+    const risk_flag = riskFlags.includes('High') ? 'High' : riskFlags.includes('Watch') ? 'Watch' : 'OK';
+
+    return {
+      portfolio_id: portfolioId,
+      portfolio_name: data.portfolio.name,
+      description: data.portfolio.description,
+      investor_codes: Array.from(data.investorCodes),
+      investor_count: data.investorCodes.size,
+      total_qty,
+      total_cost,
+      total_mv,
+      unrealized_pnl,
+      pnl_pct,
+      ledger_balance,
+      risk_flag,
     };
   });
 }
