@@ -17,7 +17,6 @@ import StockExchangeDataPage from "./pages/StockExchangeDataPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
 import SecuritiesPage from "./pages/SecuritiesPage";
 import PortfolioPage from "./pages/PortfolioPage";
-import UserManagementPage from "./pages/UserManagementPage";
 import InvestorsPage from "./pages/InvestorsPage";
 import InvestorLedgerPage from "./pages/InvestorLedgerPage";
 import AuthPage from "./pages/AuthPage";
@@ -42,7 +41,6 @@ const App = () => (
             <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
             <Route path="/admin/balances" element={<ProtectedRoute><AdminBalancesPage /></ProtectedRoute>} />
-            <Route path="/admin/users" element={<ProtectedRoute><UserManagementPage /></ProtectedRoute>} />
             <Route path="/stock-exchange" element={<ProtectedRoute><StockExchangeDataPage /></ProtectedRoute>} />
             <Route path="/trade-history" element={<ProtectedRoute><TradeHistoryPage /></ProtectedRoute>} />
             <Route path="/securities" element={<ProtectedRoute><SecuritiesPage /></ProtectedRoute>} />

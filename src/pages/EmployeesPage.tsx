@@ -3,9 +3,10 @@ import { EmployeeCard } from "@/components/employees/EmployeeCard";
 import { EmployeeFilters } from "@/components/employees/EmployeeFilters";
 import { EmployeeAgentCodes } from "@/components/employees/EmployeeAgentCodes";
 import { AgentTradeDetailsTable } from "@/components/trade-history/AgentTradeDetailsTable";
+import { UserManagementTab } from "@/components/organization/UserManagementTab";
 import { employees, departments } from "@/data/employees";
 import { useState, useMemo } from "react";
-import { Mail, Phone, User, Building2, Users, ChevronRight } from "lucide-react";
+import { Mail, Phone, User, Building2, Users, ChevronRight, UserCog } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const EmployeesPage = () => {
@@ -31,10 +32,10 @@ const EmployeesPage = () => {
   return (
     <MainLayout 
       title="Organization" 
-      subtitle="Manage employees, departments, and agents"
+      subtitle="Manage employees, departments, agents and users"
     >
       <Tabs defaultValue="employees" className="space-y-6">
-        <TabsList className="grid w-full max-w-md grid-cols-3">
+        <TabsList className="grid w-full max-w-2xl grid-cols-4">
           <TabsTrigger value="employees" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
             Employees
@@ -46,6 +47,10 @@ const EmployeesPage = () => {
           <TabsTrigger value="agents" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             Agents
+          </TabsTrigger>
+          <TabsTrigger value="users" className="flex items-center gap-2">
+            <UserCog className="h-4 w-4" />
+            Users
           </TabsTrigger>
         </TabsList>
 
@@ -172,6 +177,11 @@ const EmployeesPage = () => {
         {/* Agents Tab */}
         <TabsContent value="agents">
           <AgentTradeDetailsTable />
+        </TabsContent>
+
+        {/* Users Tab */}
+        <TabsContent value="users">
+          <UserManagementTab />
         </TabsContent>
       </Tabs>
     </MainLayout>
