@@ -75,11 +75,117 @@ const AdminBalancesPage = () => {
     },
   });
 
-  const rmList = useMemo(() => {
+  // Fetch deposits/withdrawals grouped by investor_code
+  const { data: depositsWithdrawals } = useQuery({
+    queryKey: ['deposits-withdrawals-summary'],
+    queryFn: async () => {
+      let allData: { investor_code: string; transaction_type: string; amount: number }[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      
+      while (true) {
+        const { data, error } = await supabase
+          .from('deposits_withdrawals')
+          .select('investor_code, transaction_type, amount')
+          .range(from, from + batchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allData = [...allData, ...data];
+        if (data.length < batchSize) break;
+        from += batchSize;
+      }
+      
+      // Group by investor_code
+      const grouped: Record<string, { deposits: number; withdrawals: number }> = {};
+      allData.forEach(item => {
+        if (!grouped[item.investor_code]) {
+          grouped[item.investor_code] = { deposits: 0, withdrawals: 0 };
+        }
+        if (item.transaction_type === 'Deposit') {
+          grouped[item.investor_code].deposits += Number(item.amount) || 0;
+        } else if (item.transaction_type === 'Withdrawal') {
+          grouped[item.investor_code].withdrawals += Number(item.amount) || 0;
+        }
+      });
+      
+      return grouped;
+    },
+  });
+
+  // Fetch trade data to calculate net sell per client
+  const { data: tradeSummary } = useQuery({
+    queryKey: ['trade-summary'],
+    queryFn: async () => {
+      let allTrades: { client_code: string | null; side: string | null; value: number | null }[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      
+      while (true) {
+        const { data, error } = await supabase
+          .from('trade_history')
+          .select('client_code, side, value')
+          .range(from, from + batchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allTrades = [...allTrades, ...data];
+        if (data.length < batchSize) break;
+        from += batchSize;
+      }
+      
+      // Group by client_code and calculate net sell
+      const grouped: Record<string, { buyValue: number; sellValue: number; netSell: number }> = {};
+      allTrades.forEach(trade => {
+        if (!trade.client_code) return;
+        if (!grouped[trade.client_code]) {
+          grouped[trade.client_code] = { buyValue: 0, sellValue: 0, netSell: 0 };
+        }
+        const value = Number(trade.value) || 0;
+        if (trade.side === 'BUY') {
+          grouped[trade.client_code].buyValue += value;
+        } else if (trade.side === 'SELL') {
+          grouped[trade.client_code].sellValue += value;
+        }
+      });
+      
+      // Calculate net sell for each client
+      Object.keys(grouped).forEach(code => {
+        grouped[code].netSell = grouped[code].sellValue - grouped[code].buyValue;
+      });
+      
+      return grouped;
+    },
+  });
+
+  // Calculate dynamic ledger for each client
+  const clientsWithDynamicLedger = useMemo(() => {
     if (!clients) return [];
-    const rms = [...new Set(clients.map(c => c.rm_name))];
+    
+    return clients.map(client => {
+      const dw = depositsWithdrawals?.[client.inv_code] || { deposits: 0, withdrawals: 0 };
+      const trade = tradeSummary?.[client.inv_code] || { netSell: 0 };
+      
+      // Dynamic ledger = base ledger + deposits - withdrawals + net sell
+      const dynamicLedger = Number(client.ledger_balance) + dw.deposits - dw.withdrawals + trade.netSell;
+      
+      return {
+        ...client,
+        dynamic_ledger: dynamicLedger,
+        total_deposits: dw.deposits,
+        total_withdrawals: dw.withdrawals,
+        net_sell: trade.netSell,
+      };
+    });
+  }, [clients, depositsWithdrawals, tradeSummary]);
+
+  const rmList = useMemo(() => {
+    if (!clientsWithDynamicLedger) return [];
+    const rms = [...new Set(clientsWithDynamicLedger.map(c => c.rm_name))];
     return rms.sort();
-  }, [clients]);
+  }, [clientsWithDynamicLedger]);
 
   const { data: agentCodes } = useAgentCodes();
   
@@ -98,7 +204,7 @@ const AdminBalancesPage = () => {
   }, []);
 
   const rmSummary = useMemo(() => {
-    if (!clients) return [];
+    if (!clientsWithDynamicLedger) return [];
     
     const summary: Record<string, {
       rm_name: string;
@@ -109,7 +215,7 @@ const AdminBalancesPage = () => {
       total_market_value: number;
     }> = {};
 
-    clients.forEach(client => {
+    clientsWithDynamicLedger.forEach(client => {
       if (!summary[client.rm_name]) {
         summary[client.rm_name] = {
           rm_name: client.rm_name,
@@ -121,18 +227,18 @@ const AdminBalancesPage = () => {
         };
       }
       summary[client.rm_name].client_count++;
-      summary[client.rm_name].total_ledger += Number(client.ledger_balance);
+      summary[client.rm_name].total_ledger += client.dynamic_ledger;
       summary[client.rm_name].total_equity += Number(client.equity);
       summary[client.rm_name].total_market_value += Number(client.market_value);
     });
 
     return Object.values(summary).sort((a, b) => b.total_equity - a.total_equity);
-  }, [clients]);
+  }, [clientsWithDynamicLedger]);
 
   const filteredClients = useMemo(() => {
-    if (!clients) return [];
+    if (!clientsWithDynamicLedger) return [];
     
-    return clients.filter((client) => {
+    return clientsWithDynamicLedger.filter((client) => {
       const matchesSearch = 
         client.investor_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         client.inv_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -142,11 +248,11 @@ const AdminBalancesPage = () => {
 
       return matchesSearch && matchesRM;
     });
-  }, [clients, searchQuery, selectedRM]);
+  }, [clientsWithDynamicLedger, searchQuery, selectedRM]);
 
   const totals = useMemo(() => {
     return filteredClients.reduce((acc, client) => ({
-      ledger: acc.ledger + Number(client.ledger_balance),
+      ledger: acc.ledger + client.dynamic_ledger,
       equity: acc.equity + Number(client.equity),
       marketValue: acc.marketValue + Number(client.market_value),
       liabilities: acc.liabilities + Number(client.current_liabilities),
@@ -226,7 +332,7 @@ const AdminBalancesPage = () => {
         <div className="glass-card rounded-xl p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Ledger Balance</p>
+              <p className="text-sm text-muted-foreground">Dynamic Ledger</p>
               <p className="text-2xl font-semibold text-foreground mt-1">
                 {formatCurrency(totals.ledger)}
               </p>
@@ -250,7 +356,7 @@ const AdminBalancesPage = () => {
                 <TableHead className="text-muted-foreground text-right">Agent Codes</TableHead>
                 <TableHead className="text-muted-foreground text-right">Total Equity</TableHead>
                 <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
-                <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
+                <TableHead className="text-muted-foreground text-right">Dynamic Ledger</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -338,7 +444,7 @@ const AdminBalancesPage = () => {
                   <TableHead className="text-muted-foreground">Client Code</TableHead>
                   <TableHead className="text-muted-foreground">Investor Name</TableHead>
                   <TableHead className="text-muted-foreground">RM</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
+                  <TableHead className="text-muted-foreground text-right">Dynamic Ledger</TableHead>
                   <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
                   <TableHead className="text-muted-foreground text-right">Equity</TableHead>
                   <TableHead className="text-muted-foreground">Status</TableHead>
@@ -351,7 +457,7 @@ const AdminBalancesPage = () => {
                     <TableCell className="font-medium text-foreground">{client.investor_name}</TableCell>
                     <TableCell className="text-muted-foreground">{client.rm_name}</TableCell>
                     <TableCell className="text-right text-foreground">
-                      {formatCurrency(Number(client.ledger_balance))}
+                      {formatCurrency(client.dynamic_ledger)}
                     </TableCell>
                     <TableCell className="text-right text-foreground">
                       {formatCurrency(Number(client.market_value))}
