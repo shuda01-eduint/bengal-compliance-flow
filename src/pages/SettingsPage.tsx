@@ -4,17 +4,69 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { User, Bell, Shield, Database, Mail } from "lucide-react";
+import { User, Bell, Shield, LogOut, Loader2 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { toast } from "sonner";
 
 const SettingsPage = () => {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await signOut();
+      toast.success("Signed out successfully");
+      navigate("/auth");
+    } catch (error) {
+      toast.error("Failed to sign out");
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
   return (
     <MainLayout 
       title="Settings" 
       subtitle="Manage your account and system preferences"
     >
       <div className="max-w-3xl space-y-8">
+        {/* Active Session */}
+        <div className="glass-card rounded-xl p-6 animate-slide-up border-l-4 border-l-primary">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/20 text-primary">
+                <User className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Signed in as</p>
+                <p className="text-lg font-semibold text-foreground">{user?.email || "Not signed in"}</p>
+                <p className="text-xs text-muted-foreground">
+                  Last sign in: {user?.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : "N/A"}
+                </p>
+              </div>
+            </div>
+            <Button 
+              variant="destructive" 
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="gap-2"
+            >
+              {signingOut ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <LogOut className="h-4 w-4" />
+              )}
+              Sign Out
+            </Button>
+          </div>
+        </div>
+
         {/* Profile Settings */}
-        <div className="glass-card rounded-xl p-6 animate-slide-up">
+        <div className="glass-card rounded-xl p-6 animate-slide-up" style={{ animationDelay: "50ms" }}>
           <div className="flex items-center gap-3 mb-6">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg btn-gradient-gold">
               <User className="h-5 w-5 text-primary-foreground" />
@@ -27,16 +79,23 @@ const SettingsPage = () => {
 
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input id="name" defaultValue="Admin User" className="bg-secondary border-border" />
-            </div>
-            <div className="grid gap-2">
               <Label htmlFor="email">Email Address</Label>
-              <Input id="email" type="email" defaultValue="admin@ucbstock.com.bd" className="bg-secondary border-border" />
+              <Input 
+                id="email" 
+                type="email" 
+                value={user?.email || ""} 
+                disabled 
+                className="bg-muted border-border" 
+              />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="role">Role</Label>
-              <Input id="role" defaultValue="Compliance Officer" disabled className="bg-muted border-border" />
+              <Label htmlFor="user-id">User ID</Label>
+              <Input 
+                id="user-id" 
+                value={user?.id || ""} 
+                disabled 
+                className="bg-muted border-border font-mono text-xs" 
+              />
             </div>
           </div>
         </div>
@@ -103,13 +162,6 @@ const SettingsPage = () => {
               View Login History
             </Button>
           </div>
-        </div>
-
-        {/* Save Button */}
-        <div className="flex justify-end">
-          <Button className="btn-gradient-gold text-primary-foreground px-8">
-            Save Changes
-          </Button>
         </div>
       </div>
     </MainLayout>
