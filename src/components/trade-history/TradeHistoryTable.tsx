@@ -126,6 +126,12 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     // Replace field references with actual values
     let expression = formula;
     
+    // Computed fields
+    const buyValue = trade.side === "BUY" ? (trade.value || 0) : 0;
+    const sellValue = trade.side === "SELL" ? (trade.value || 0) : 0;
+    const netBuy = buyValue - sellValue; // positive means net buy
+    const adjustedBalance = (trade.ledger_balance_snapshot || 0) + (trade.total_deposits || 0) - (trade.total_withdrawals || 0);
+    
     // Available fields for formulas (denormalized investor data stored on trade)
     const fields: Record<string, number | string | null> = {
       quantity: trade.quantity,
@@ -140,10 +146,17 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
       total_deposits: trade.total_deposits,
       total_withdrawals: trade.total_withdrawals,
       net_deposit: trade.net_deposit,
+      // Computed fields
+      buy_value: buyValue,
+      sell_value: sellValue,
+      net_buy: netBuy,
+      adjusted_balance: adjustedBalance,
     };
 
-    // Replace field names with values
-    Object.entries(fields).forEach(([key, val]) => {
+    // Replace field names with values (longer names first to avoid partial matches)
+    const sortedKeys = Object.keys(fields).sort((a, b) => b.length - a.length);
+    sortedKeys.forEach((key) => {
+      const val = fields[key];
       const regex = new RegExp(`\\b${key}\\b`, 'gi');
       if (typeof val === 'number') {
         expression = expression.replace(regex, String(val || 0));
@@ -164,8 +177,12 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     expression = expression.replace(/POW\(/gi, 'Math.pow(');
     expression = expression.replace(/SQRT\(/gi, 'Math.sqrt(');
 
-    // Support IF statements: IF(condition, trueVal, falseVal)
-    expression = expression.replace(/IF\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)/gi, '($1 ? $2 : $3)');
+    // Support IF statements: IF(condition, trueVal, falseVal) - handle nested IFs
+    let maxIterations = 10;
+    while (expression.includes('IF(') && maxIterations > 0) {
+      expression = expression.replace(/IF\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi, '($1 ? $2 : $3)');
+      maxIterations--;
+    }
 
     // Validate - only allow safe characters (digits, operators, Math functions, quotes)
     if (!/^[\d\s\+\-\*\/\(\)\.\,\?\:\<\>\=\!\&\|\"\w]+$/i.test(expression)) {
@@ -176,6 +193,7 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     const result = new Function(`return ${expression}`)();
     return typeof result === 'number' ? (isNaN(result) ? 0 : result) : result;
   } catch (e) {
+    console.error('Formula error:', e, formula);
     return 'Error';
   }
 };
@@ -464,8 +482,12 @@ export function TradeHistoryTable() {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Add Custom Formula Column</DialogTitle>
-                  <DialogDescription>
-                    Create a calculated column using formulas. Available fields: quantity, price, value, side, brokerage_commission, interest_rate, account_type, investor_type, ledger_balance, total_deposits, total_withdrawals
+                  <DialogDescription className="space-y-2">
+                    <p>Create a calculated column using formulas.</p>
+                    <p className="text-xs"><strong>Fields:</strong> quantity, price, value, side, ledger_balance, total_deposits, total_withdrawals, net_deposit, brokerage_commission, interest_rate</p>
+                    <p className="text-xs"><strong>Computed:</strong> buy_value, sell_value, net_buy, adjusted_balance</p>
+                    <p className="text-xs"><strong>Functions:</strong> IF(cond, true, false), ABS(), ROUND(), MIN(), MAX()</p>
+                    <p className="text-xs"><strong>Example:</strong> IF(ledger_balance &gt; 0, adjusted_balance - IF(net_buy &gt; 0, net_buy, 0), 0)</p>
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
