@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Trash2, Eye } from "lucide-react";
+import { Plus, Search, Trash2, Eye, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { PortfolioDetailDialog } from "./PortfolioDetailDialog";
 
@@ -43,9 +43,13 @@ interface CustomField {
   options: string[];
 }
 
+const PAGE_SIZE = 50;
+
 export function PortfolioList() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
   const [newPortfolio, setNewPortfolio] = useState({
@@ -55,17 +59,51 @@ export function PortfolioList() {
   });
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
 
-// Fetch portfolios with client data
-  const { data: portfolios = [], isLoading } = useQuery({
-    queryKey: ["portfolios-with-clients"],
+  // Debounce search
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    setCurrentPage(1);
+    setTimeout(() => setDebouncedSearch(value), 300);
+  };
+
+  // Fetch total count for pagination
+  const { data: totalCount = 0 } = useQuery({
+    queryKey: ["portfolios-count", debouncedSearch],
     queryFn: async () => {
-      const { data: portfolioData, error: portfolioError } = await supabase
+      let query = supabase.from("portfolios").select("id", { count: "exact", head: true });
+      
+      if (debouncedSearch) {
+        query = query.or(`investor_code.eq.${debouncedSearch},name.ilike.%${debouncedSearch}%`);
+      }
+      
+      const { count, error } = await query;
+      if (error) throw error;
+      return count || 0;
+    }
+  });
+
+  // Fetch portfolios with server-side pagination and filtering
+  const { data: portfolios = [], isLoading } = useQuery({
+    queryKey: ["portfolios-with-clients", debouncedSearch, currentPage],
+    queryFn: async () => {
+      const from = (currentPage - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      let query = supabase
         .from("portfolios")
         .select("*")
-        .order("created_at", { ascending: false });
-      if (portfolioError) throw portfolioError;
+        .order("investor_code", { ascending: true })
+        .range(from, to);
+      
+      if (debouncedSearch) {
+        query = query.or(`investor_code.eq.${debouncedSearch},name.ilike.%${debouncedSearch}%`);
+      }
 
-      // Fetch client data for all investor codes
+      const { data: portfolioData, error: portfolioError } = await query;
+      if (portfolioError) throw portfolioError;
+      if (!portfolioData?.length) return [];
+
+      // Fetch client data for these investor codes
       const investorCodes = [...new Set(portfolioData.map(p => p.investor_code))];
       const { data: clientsData, error: clientsError } = await supabase
         .from("clients")
@@ -106,7 +144,8 @@ export function PortfolioList() {
       const { data, error } = await supabase
         .from("clients")
         .select("inv_code, investor_name")
-        .order("investor_name");
+        .order("investor_name")
+        .limit(1000);
       if (error) throw error;
       return data;
     }
@@ -131,7 +170,6 @@ export function PortfolioList() {
   // Create portfolio mutation
   const createMutation = useMutation({
     mutationFn: async () => {
-      // Create portfolio
       const { data: portfolio, error: portfolioError } = await supabase
         .from("portfolios")
         .insert({
@@ -144,7 +182,6 @@ export function PortfolioList() {
 
       if (portfolioError) throw portfolioError;
 
-      // Create field values
       const fieldValueInserts = Object.entries(fieldValues)
         .filter(([_, value]) => value)
         .map(([fieldId, value]) => ({
@@ -163,7 +200,8 @@ export function PortfolioList() {
       return portfolio;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["portfolios"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolios-with-clients"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolios-count"] });
       setIsCreateOpen(false);
       setNewPortfolio({ name: "", description: "", investor_code: "" });
       setFieldValues({});
@@ -181,7 +219,8 @@ export function PortfolioList() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["portfolios"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolios-with-clients"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolios-count"] });
       toast.success("Portfolio deleted");
     },
     onError: (error) => {
@@ -189,21 +228,22 @@ export function PortfolioList() {
     }
   });
 
-  const filteredPortfolios = portfolios.filter(p =>
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.investor_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.client?.investor_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
   const formatCurrency = (value: number | null | undefined) => {
     if (value === null || value === undefined) return "-";
     return new Intl.NumberFormat("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
   };
 
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+
   return (
     <Card className="bg-card border-border">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-foreground">Customer Portfolios</CardTitle>
+        <div>
+          <CardTitle className="text-foreground">Customer Portfolios</CardTitle>
+          <p className="text-sm text-muted-foreground mt-1">
+            {totalCount.toLocaleString()} portfolios total
+          </p>
+        </div>
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogTrigger asChild>
             <Button className="btn-gradient-gold">
@@ -291,23 +331,47 @@ export function PortfolioList() {
         </Dialog>
       </CardHeader>
       <CardContent>
-        <div className="mb-4">
-          <div className="relative max-w-sm">
+        <div className="mb-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+          <div className="relative w-full sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search by code or name..."
+              placeholder="Search by exact code or name..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="pl-9 bg-background border-border"
             />
           </div>
+          
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm text-muted-foreground min-w-[100px] text-center">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
 
         {isLoading ? (
           <div className="text-center py-8 text-muted-foreground">Loading portfolios...</div>
-        ) : filteredPortfolios.length === 0 ? (
+        ) : portfolios.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
-            No portfolios found. Create your first portfolio to get started.
+            {debouncedSearch ? `No portfolios found for "${debouncedSearch}"` : "No portfolios found. Create your first portfolio to get started."}
           </div>
         ) : (
           <div className="rounded-md border border-border overflow-x-auto">
@@ -326,13 +390,13 @@ export function PortfolioList() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredPortfolios.map((portfolio) => (
+                {portfolios.map((portfolio) => (
                   <TableRow key={portfolio.id} className="hover:bg-muted/30">
                     <TableCell className="font-medium text-foreground">
                       {portfolio.investor_code}
                     </TableCell>
                     <TableCell className="text-foreground">
-                      {portfolio.client?.investor_name || "-"}
+                      {portfolio.client?.investor_name || portfolio.name}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {portfolio.client?.rm_name || "-"}
@@ -375,6 +439,34 @@ export function PortfolioList() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-4">
+            <p className="text-sm text-muted-foreground">
+              Showing {((currentPage - 1) * PAGE_SIZE) + 1} - {Math.min(currentPage * PAGE_SIZE, totalCount)} of {totalCount.toLocaleString()}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
           </div>
         )}
 
