@@ -995,6 +995,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_accounting_trade_sums: {
+        Args: { _from_trade_date: string; _to_trade_date: string }
+        Returns: {
+          buy_sum: number
+          client_code: string
+          sell_sum: number
+        }[]
+      }
       get_employee_id_for_user: { Args: never; Returns: string }
       get_trade_file_stats: {
         Args: never

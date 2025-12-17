@@ -213,15 +213,15 @@ const AccountingTab = () => {
     },
   });
 
-  // Fetch trades for date range (trade_date stored as YYYYMMDD text)
-  const { data: trades = [], isLoading: loadingTrades } = useQuery({
-    queryKey: ['accounting-trades', fromTradeDateStr, toTradeDateStr],
+  // Fetch aggregated trades for date range using RPC function (avoids 1000-row limit)
+  const { data: tradeSums = [], isLoading: loadingTrades } = useQuery({
+    queryKey: ['accounting-trade-sums', fromTradeDateStr, toTradeDateStr],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('trade_history')
-        .select('client_code, side, value')
-        .gte('trade_date', fromTradeDateStr)
-        .lte('trade_date', toTradeDateStr);
+        .rpc('get_accounting_trade_sums', {
+          _from_trade_date: fromTradeDateStr,
+          _to_trade_date: toTradeDateStr,
+        });
       if (error) throw error;
       return data || [];
     },
@@ -246,18 +246,14 @@ const AccountingTab = () => {
       }
     });
 
-    // Aggregate trades per investor
+    // Build trade map from aggregated RPC results
     const tradeMap: Record<string, { buy: number; sell: number }> = {};
-    trades.forEach(t => {
-      const code = t.client_code;
-      if (!code) return;
-      if (!tradeMap[code]) {
-        tradeMap[code] = { buy: 0, sell: 0 };
-      }
-      if (t.side?.toUpperCase() === 'B' || t.side?.toUpperCase() === 'BUY') {
-        tradeMap[code].buy += t.value || 0;
-      } else if (t.side?.toUpperCase() === 'S' || t.side?.toUpperCase() === 'SELL') {
-        tradeMap[code].sell += t.value || 0;
+    tradeSums.forEach((t: { client_code: string; buy_sum: number; sell_sum: number }) => {
+      if (t.client_code) {
+        tradeMap[t.client_code] = { 
+          buy: Number(t.buy_sum) || 0, 
+          sell: Number(t.sell_sum) || 0 
+        };
       }
     });
 
@@ -319,7 +315,7 @@ const AccountingTab = () => {
     });
 
     return rows;
-  }, [investors, clients, balancesRaw, transactions, trades, customFields]);
+  }, [investors, clients, balancesRaw, transactions, tradeSums, customFields]);
 
   // Filter data
   const filteredData = useMemo(() => {
