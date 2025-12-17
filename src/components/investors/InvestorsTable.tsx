@@ -77,7 +77,7 @@ export function InvestorsTable() {
 
       // Apply search filter
       if (search) {
-        query = query.or(`investor_code.ilike.%${search}%,investor_name.ilike.%${search}%,bo_id.ilike.%${search}%,cell_no.ilike.%${search}%`);
+        query = query.or(`investor_code.eq.${search},investor_name.ilike.%${search}%,bo_id.ilike.%${search}%,cell_no.ilike.%${search}%`);
       }
 
       // Apply status filter
@@ -143,7 +143,7 @@ export function InvestorsTable() {
       let query = supabase.from("investors").select("*");
       
       if (search) {
-        query = query.or(`investor_code.ilike.%${search}%,investor_name.ilike.%${search}%`);
+        query = query.or(`investor_code.eq.${search},investor_name.ilike.%${search}%`);
       }
       if (statusFilter !== "all") {
         query = query.eq("status", statusFilter);
