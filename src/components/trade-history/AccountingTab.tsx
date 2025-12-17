@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,8 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Search, Download, Wallet, TrendingUp, Percent, Users } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings } from "lucide-react";
 import { formatCurrency } from "@/lib/balance-utils";
+import { toast } from "sonner";
 
 interface AccountingRow {
   investor_code: string;
@@ -22,10 +25,83 @@ interface AccountingRow {
   adjusted_ledger: number;
   accrued_interest: number;
   receivable_payable: number;
+  [key: string]: string | number;
 }
+
+interface CustomField {
+  id: string;
+  name: string;
+  formula: string;
+}
+
+const STORAGE_KEY = 'accounting-custom-fields';
+
+const evaluateFormula = (formula: string, row: AccountingRow): number => {
+  try {
+    // Replace field names with values
+    let expression = formula.toLowerCase();
+    
+    const fieldMap: Record<string, number> = {
+      'ledger_balance': row.ledger_balance,
+      'ledger': row.ledger_balance,
+      'deposits': row.total_deposits,
+      'total_deposits': row.total_deposits,
+      'withdrawals': row.total_withdrawals,
+      'total_withdrawals': row.total_withdrawals,
+      'net_sell': row.net_sell,
+      'adjusted_ledger': row.adjusted_ledger,
+      'adjusted': row.adjusted_ledger,
+      'accrued_interest': row.accrued_interest,
+      'interest': row.accrued_interest,
+      'receivable_payable': row.receivable_payable,
+      'recv_pay': row.receivable_payable,
+      'interest_rate': row.interest_rate,
+      'rate': row.interest_rate,
+      'brokerage_commission': row.brokerage_commission,
+      'commission': row.brokerage_commission,
+    };
+
+    Object.entries(fieldMap).forEach(([key, value]) => {
+      const regex = new RegExp(`\\b${key}\\b`, 'gi');
+      expression = expression.replace(regex, String(value || 0));
+    });
+
+    // Handle ABS function
+    expression = expression.replace(/abs\(([^)]+)\)/gi, (_, inner) => {
+      return `Math.abs(${inner})`;
+    });
+
+    // Safe eval
+    const result = new Function(`return ${expression}`)();
+    return typeof result === 'number' && !isNaN(result) ? result : 0;
+  } catch {
+    return 0;
+  }
+};
 
 const AccountingTab = () => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [customFields, setCustomFields] = useState<CustomField[]>([]);
+  const [isFieldDialogOpen, setIsFieldDialogOpen] = useState(false);
+  const [newFieldName, setNewFieldName] = useState("");
+  const [newFieldFormula, setNewFieldFormula] = useState("");
+
+  // Load custom fields from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        setCustomFields(JSON.parse(saved));
+      } catch {
+        console.error('Failed to load custom fields');
+      }
+    }
+  }, []);
+
+  // Save custom fields to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(customFields));
+  }, [customFields]);
 
   // Fetch investors with their rates
   const { data: investors = [], isLoading: loadingInvestors } = useQuery({
@@ -128,7 +204,7 @@ const AccountingTab = () => {
       }
     });
 
-    // Build rows for margin accounts
+    // Build rows for all investors
     const rows: AccountingRow[] = [];
     
     investors.forEach(inv => {
@@ -148,7 +224,7 @@ const AccountingTab = () => {
         accrued_interest = (inv.interest_rate / 365) * Math.abs(adjusted_ledger) / 100;
       }
 
-      rows.push({
+      const row: AccountingRow = {
         investor_code: inv.investor_code,
         investor_name: inv.investor_name || client?.investor_name || '',
         account_type: inv.account_type || '',
@@ -161,11 +237,18 @@ const AccountingTab = () => {
         adjusted_ledger,
         accrued_interest,
         receivable_payable: net_sell,
+      };
+
+      // Calculate custom fields
+      customFields.forEach(field => {
+        row[field.id] = evaluateFormula(field.formula, row);
       });
+
+      rows.push(row);
     });
 
     return rows;
-  }, [investors, clients, transactions, trades]);
+  }, [investors, clients, transactions, trades, customFields]);
 
   // Filter data
   const filteredData = useMemo(() => {
@@ -194,22 +277,52 @@ const AccountingTab = () => {
 
   const isLoading = loadingInvestors || loadingClients || loadingTx || loadingTrades;
 
+  const handleAddField = () => {
+    if (!newFieldName.trim() || !newFieldFormula.trim()) {
+      toast.error('Please enter both field name and formula');
+      return;
+    }
+
+    const field: CustomField = {
+      id: `custom_${Date.now()}`,
+      name: newFieldName.trim(),
+      formula: newFieldFormula.trim(),
+    };
+
+    setCustomFields([...customFields, field]);
+    setNewFieldName("");
+    setNewFieldFormula("");
+    toast.success(`Added custom field: ${field.name}`);
+  };
+
+  const handleRemoveField = (id: string) => {
+    setCustomFields(customFields.filter(f => f.id !== id));
+    toast.success('Custom field removed');
+  };
+
   const handleExport = () => {
-    const headers = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Recv/Pay'];
-    const csvData = filteredData.map(row => [
-      row.investor_code,
-      row.investor_name,
-      row.account_type,
-      row.interest_rate,
-      row.brokerage_commission,
-      row.ledger_balance,
-      row.total_deposits,
-      row.total_withdrawals,
-      row.net_sell,
-      row.adjusted_ledger,
-      row.accrued_interest,
-      row.receivable_payable,
-    ]);
+    const baseHeaders = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Recv/Pay'];
+    const customHeaders = customFields.map(f => f.name);
+    const headers = [...baseHeaders, ...customHeaders];
+    
+    const csvData = filteredData.map(row => {
+      const baseData = [
+        row.investor_code,
+        row.investor_name,
+        row.account_type,
+        row.interest_rate,
+        row.brokerage_commission,
+        row.ledger_balance,
+        row.total_deposits,
+        row.total_withdrawals,
+        row.net_sell,
+        row.adjusted_ledger,
+        row.accrued_interest,
+        row.receivable_payable,
+      ];
+      const customData = customFields.map(f => row[f.id] || 0);
+      return [...baseData, ...customData];
+    });
     
     const csv = [headers.join(','), ...csvData.map(row => row.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -286,7 +399,7 @@ const AccountingTab = () => {
       </div>
 
       {/* Controls */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -296,10 +409,75 @@ const AccountingTab = () => {
             className="pl-9"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {latestTradeDate && (
             <span className="text-sm text-muted-foreground">Trade Date: {latestTradeDate}</span>
           )}
+          
+          <Dialog open={isFieldDialogOpen} onOpenChange={setIsFieldDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Settings className="h-4 w-4 mr-2" />
+                Custom Fields
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Manage Custom Fields</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-3">
+                  <div>
+                    <Label>Field Name</Label>
+                    <Input
+                      placeholder="e.g., Daily Interest"
+                      value={newFieldName}
+                      onChange={(e) => setNewFieldName(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>Formula</Label>
+                    <Input
+                      placeholder="e.g., accrued_interest * 30"
+                      value={newFieldFormula}
+                      onChange={(e) => setNewFieldFormula(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Available: ledger_balance, deposits, withdrawals, net_sell, adjusted_ledger, accrued_interest, interest_rate, commission, ABS()
+                    </p>
+                  </div>
+                  <Button onClick={handleAddField} size="sm">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Field
+                  </Button>
+                </div>
+
+                {customFields.length > 0 && (
+                  <div className="border-t pt-4">
+                    <Label className="mb-2 block">Current Fields</Label>
+                    <div className="space-y-2">
+                      {customFields.map(field => (
+                        <div key={field.id} className="flex items-center justify-between p-2 bg-muted rounded">
+                          <div>
+                            <span className="font-medium">{field.name}</span>
+                            <span className="text-xs text-muted-foreground ml-2">= {field.formula}</span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveField(field.id)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="h-4 w-4 mr-2" />
             Export
@@ -336,6 +514,11 @@ const AccountingTab = () => {
                     <TableHead className="text-right">Adj. Ledger</TableHead>
                     <TableHead className="text-right">Accrued Int.</TableHead>
                     <TableHead className="text-right">Recv/Pay</TableHead>
+                    {customFields.map(field => (
+                      <TableHead key={field.id} className="text-right text-primary">
+                        {field.name}
+                      </TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -367,6 +550,14 @@ const AccountingTab = () => {
                       <TableCell className={`text-right ${row.receivable_payable > 0 ? 'text-green-400' : row.receivable_payable < 0 ? 'text-red-400' : ''}`}>
                         {formatCurrency(row.receivable_payable)}
                       </TableCell>
+                      {customFields.map(field => {
+                        const value = row[field.id] as number;
+                        return (
+                          <TableCell key={field.id} className={`text-right ${value < 0 ? 'text-red-400' : value > 0 ? 'text-primary' : ''}`}>
+                            {formatCurrency(value)}
+                          </TableCell>
+                        );
+                      })}
                     </TableRow>
                   ))}
                 </TableBody>
