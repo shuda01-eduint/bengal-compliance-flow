@@ -42,10 +42,33 @@ const COLUMN_MAPPINGS: Record<string, string[]> = {
 };
 
 const findColumnName = (headers: string[], targetMappings: string[]): string | null => {
+  // First try exact match
   for (const mapping of targetMappings) {
     const found = headers.find(h => h.toLowerCase().trim() === mapping.toLowerCase().trim());
     if (found) return found;
   }
+  
+  // Then try fuzzy match - header starts with mapping (for truncated headers)
+  for (const mapping of targetMappings) {
+    const mappingLower = mapping.toLowerCase().trim();
+    const found = headers.find(h => {
+      const headerLower = h.toLowerCase().trim();
+      // Check if header starts with mapping or mapping starts with header (both directions)
+      return headerLower.startsWith(mappingLower) || mappingLower.startsWith(headerLower);
+    });
+    if (found) return found;
+  }
+  
+  // Finally try contains match for partial matches
+  for (const mapping of targetMappings) {
+    const mappingLower = mapping.toLowerCase().trim();
+    // Only for longer mappings to avoid false positives
+    if (mappingLower.length >= 4) {
+      const found = headers.find(h => h.toLowerCase().trim().includes(mappingLower));
+      if (found) return found;
+    }
+  }
+  
   return null;
 };
 
