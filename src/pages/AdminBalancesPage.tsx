@@ -1,7 +1,7 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -87,6 +87,55 @@ const AdminBalancesPage = () => {
     }
   }, [availableDates, selectedDate]);
 
+  // Helper function to fetch balance data for a specific date (used for prefetching)
+  const fetchBalanceData = useCallback(async (dateStr: string): Promise<BalanceRawRow[]> => {
+    let allData: BalanceRawRow[] = [];
+    let from = 0;
+    const batchSize = 1000;
+    const maxRetries = 3;
+
+    while (true) {
+      let lastError: Error | null = null;
+      let data: BalanceRawRow[] | null = null;
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const result = await supabase
+            .from('balances_raw')
+            .select('*')
+            .eq('as_of_date', dateStr)
+            .range(from, from + batchSize - 1);
+
+          if (result.error) {
+            lastError = new Error(result.error.message);
+            if (attempt < maxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
+            }
+            continue;
+          }
+          
+          data = result.data as BalanceRawRow[];
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error('Unknown error');
+          if (attempt < maxRetries - 1) {
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
+          }
+        }
+      }
+
+      if (lastError) throw lastError;
+      if (!data || data.length === 0) break;
+
+      allData = [...allData, ...data];
+      if (data.length < batchSize) break;
+      from += batchSize;
+    }
+
+    return allData;
+  }, []);
+
   // Fetch raw balance data for selected date with retry logic
   const { data: rawBalances, isLoading, error, refetch: refetchBalances } = useQuery({
     queryKey: ['balances-raw', selectedDate?.toISOString()],
@@ -153,6 +202,34 @@ const AdminBalancesPage = () => {
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
     gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
   });
+
+  // Prefetch adjacent dates in background after current data loads
+  useEffect(() => {
+    if (!rawBalances || !availableDates || availableDates.length === 0 || !selectedDate) return;
+
+    const currentDateStr = format(selectedDate, 'yyyy-MM-dd');
+    const currentIndex = availableDates.indexOf(currentDateStr);
+    
+    // Prefetch next 2 and previous 2 available dates
+    const datesToPrefetch: string[] = [];
+    
+    if (currentIndex > 0) datesToPrefetch.push(availableDates[currentIndex - 1]);
+    if (currentIndex > 1) datesToPrefetch.push(availableDates[currentIndex - 2]);
+    if (currentIndex < availableDates.length - 1) datesToPrefetch.push(availableDates[currentIndex + 1]);
+    if (currentIndex < availableDates.length - 2) datesToPrefetch.push(availableDates[currentIndex + 2]);
+
+    // Prefetch each date with a small delay to avoid overwhelming the server
+    datesToPrefetch.forEach((dateStr, index) => {
+      setTimeout(() => {
+        const prefetchDate = parseISO(dateStr);
+        queryClient.prefetchQuery({
+          queryKey: ['balances-raw', prefetchDate.toISOString()],
+          queryFn: () => fetchBalanceData(dateStr),
+          staleTime: 5 * 60 * 1000,
+        });
+      }, (index + 1) * 2000); // Stagger prefetches by 2 seconds
+    });
+  }, [rawBalances, availableDates, selectedDate, queryClient, fetchBalanceData]);
 
   // Fetch next day's deposits/withdrawals
   const { data: nextDayTransactions } = useQuery({
