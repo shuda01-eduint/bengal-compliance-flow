@@ -1037,9 +1037,12 @@ export type Database = {
           margin_accounts: number
           total_accounts: number
           total_accrued_interest: number
+          total_buy: number
           total_margin_loan: number
           total_payable: number
           total_receivable: number
+          total_sell: number
+          total_trade_value: number
         }[]
       }
       get_accounting_trade_sums: {

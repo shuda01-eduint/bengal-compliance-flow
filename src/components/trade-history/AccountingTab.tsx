@@ -12,7 +12,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format, subDays } from "date-fns";
-import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { formatCurrency } from "@/lib/balance-utils";
 import { toast } from "sonner";
@@ -279,6 +279,9 @@ const AccountingTab = () => {
         totalAccruedInterest: 0,
         totalReceivable: 0,
         totalPayable: 0,
+        totalBuy: 0,
+        totalSell: 0,
+        totalTradeValue: 0,
       };
     }
     return {
@@ -288,6 +291,9 @@ const AccountingTab = () => {
       totalAccruedInterest: Number(summaryResult.total_accrued_interest) || 0,
       totalReceivable: Number(summaryResult.total_receivable) || 0,
       totalPayable: Number(summaryResult.total_payable) || 0,
+      totalBuy: Number(summaryResult.total_buy) || 0,
+      totalSell: Number(summaryResult.total_sell) || 0,
+      totalTradeValue: Number(summaryResult.total_trade_value) || 0,
     };
   }, [summaryResult]);
 
@@ -411,64 +417,94 @@ const AccountingTab = () => {
     <div className="space-y-6 w-full overflow-x-hidden">
       {/* Summary Cards - Sticky */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-4 -mx-4 px-4 pt-2">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-3">
           <Card className="glass-card">
-            <CardContent className="p-4">
+            <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-1">
                 <Users className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Total Accounts</span>
+                <span className="text-xs text-muted-foreground">Accounts</span>
               </div>
-              <p className="text-xl font-semibold">{summary.totalAccounts.toLocaleString()}</p>
+              <p className="text-lg font-semibold">{summary.totalAccounts.toLocaleString()}</p>
             </CardContent>
           </Card>
 
           <Card className="glass-card">
-            <CardContent className="p-4">
+            <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-1">
                 <Percent className="h-4 w-4 text-blue-400" />
-                <span className="text-xs text-muted-foreground">Margin Accounts</span>
+                <span className="text-xs text-muted-foreground">Margin</span>
               </div>
-              <p className="text-xl font-semibold text-blue-400">{summary.marginAccounts.toLocaleString()}</p>
+              <p className="text-lg font-semibold text-blue-400">{summary.marginAccounts.toLocaleString()}</p>
             </CardContent>
           </Card>
 
           <Card className="glass-card">
-            <CardContent className="p-4">
+            <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-1">
                 <Wallet className="h-4 w-4 text-red-400" />
                 <span className="text-xs text-muted-foreground">Margin Loan</span>
               </div>
-              <p className="text-xl font-semibold text-red-400">{formatCurrency(summary.totalMarginLoan)}</p>
+              <p className="text-lg font-semibold text-red-400">{formatCurrency(summary.totalMarginLoan)}</p>
             </CardContent>
           </Card>
 
           <Card className="glass-card">
-            <CardContent className="p-4">
+            <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-1">
                 <TrendingUp className="h-4 w-4 text-orange-400" />
-                <span className="text-xs text-muted-foreground">Accrued Interest</span>
+                <span className="text-xs text-muted-foreground">Accrued Int.</span>
               </div>
-              <p className="text-xl font-semibold text-orange-400">{formatCurrency(summary.totalAccruedInterest)}</p>
+              <p className="text-lg font-semibold text-orange-400">{formatCurrency(summary.totalAccruedInterest)}</p>
             </CardContent>
           </Card>
 
           <Card className="glass-card">
-            <CardContent className="p-4">
+            <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-1">
                 <ArrowDownToLine className="h-4 w-4 text-green-400" />
                 <span className="text-xs text-muted-foreground">Receivable</span>
               </div>
-              <p className="text-xl font-semibold text-green-400">{formatCurrency(summary.totalReceivable)}</p>
+              <p className="text-lg font-semibold text-green-400">{formatCurrency(summary.totalReceivable)}</p>
             </CardContent>
           </Card>
 
           <Card className="glass-card">
-            <CardContent className="p-4">
+            <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-1">
                 <ArrowUpFromLine className="h-4 w-4 text-amber-400" />
                 <span className="text-xs text-muted-foreground">Payable</span>
               </div>
-              <p className="text-xl font-semibold text-amber-400">{formatCurrency(summary.totalPayable)}</p>
+              <p className="text-lg font-semibold text-amber-400">{formatCurrency(summary.totalPayable)}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card border-red-500/30">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingDown className="h-4 w-4 text-red-400" />
+                <span className="text-xs text-muted-foreground">Total Buy</span>
+              </div>
+              <p className="text-lg font-semibold text-red-400">{formatCurrency(summary.totalBuy)}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card border-green-500/30">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingUp className="h-4 w-4 text-green-400" />
+                <span className="text-xs text-muted-foreground">Total Sell</span>
+              </div>
+              <p className="text-lg font-semibold text-green-400">{formatCurrency(summary.totalSell)}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card border-primary/30">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Calculator className="h-4 w-4 text-primary" />
+                <span className="text-xs text-muted-foreground">Turnover</span>
+              </div>
+              <p className="text-lg font-semibold text-primary">{formatCurrency(summary.totalTradeValue)}</p>
             </CardContent>
           </Card>
         </div>
