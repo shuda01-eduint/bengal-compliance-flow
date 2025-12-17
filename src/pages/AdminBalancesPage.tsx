@@ -654,7 +654,7 @@ const AdminBalancesPage = () => {
         </div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
           <div className="glass-card rounded-xl p-4">
             <div className="flex items-center gap-2 mb-1">
               <Users className="h-4 w-4 text-muted-foreground" />
@@ -708,6 +708,16 @@ const AdminBalancesPage = () => {
             </div>
             <p className="text-xl font-semibold text-amber-400">
               {formatCurrency(summary.receivable_sum + summary.cq_sum)}
+            </p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingDown className="h-4 w-4 text-orange-400" />
+              <span className="text-xs text-muted-foreground">Accrued Interest</span>
+            </div>
+            <p className="text-xl font-semibold text-orange-400">
+              {formatCurrency(summary.total_accrued_interest)}
             </p>
           </div>
         </div>
