@@ -18,23 +18,9 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format, addDays, differenceInDays } from "date-fns";
-import { CalendarIcon, Download, ArrowRight, TrendingUp, TrendingDown, Minus, User, Wallet, Activity } from "lucide-react";
+import { CalendarIcon, Download, ArrowRight, TrendingUp, TrendingDown, Minus, User, Wallet, Activity, Receipt } from "lucide-react";
 import { formatCurrency } from "@/lib/balance-utils";
-
-interface AccountingRow {
-  investor_code: string;
-  investor_name: string;
-  account_type: string;
-  interest_rate: number;
-  brokerage_commission: number;
-  ledger_balance: number;
-  total_deposits: number;
-  total_withdrawals: number;
-  net_sell: number;
-  adjusted_ledger: number;
-  accrued_interest: number;
-  receivable_payable: number;
-}
+import type { AccountingRow } from "./AccountingTab";
 
 interface AccountingReconciliationDialogProps {
   investor: AccountingRow | null;
@@ -71,6 +57,16 @@ interface BalanceChange {
   closing: number;
   change: number;
   explanation: string;
+}
+
+interface BrokerageCharge {
+  date: string;
+  gross_buy: number;
+  gross_sell: number;
+  brokerage: number;
+  exchange_fees: number;
+  other_fees: number;
+  net_cash: number;
 }
 
 export function AccountingReconciliationDialog({
@@ -235,6 +231,43 @@ export function AccountingReconciliationDialog({
     );
   }, [trades, selectedToDate]);
 
+  // Calculate brokerage & charges per day
+  const brokerageCharges = useMemo((): BrokerageCharge[] => {
+    const groupedByDate: Record<string, { buy: number; sell: number }> = {};
+    
+    trades.forEach(t => {
+      if (!t.trade_date) return;
+      if (!groupedByDate[t.trade_date]) {
+        groupedByDate[t.trade_date] = { buy: 0, sell: 0 };
+      }
+      if (t.side?.toUpperCase() === 'B' || t.side?.toUpperCase() === 'BUY') {
+        groupedByDate[t.trade_date].buy += t.value || 0;
+      } else {
+        groupedByDate[t.trade_date].sell += t.value || 0;
+      }
+    });
+
+    const commission = investor?.brokerage_commission || 0.25;
+    
+    return Object.entries(groupedByDate).map(([date, { buy, sell }]) => {
+      const totalVolume = buy + sell;
+      const brokerage = totalVolume * commission / 100;
+      const exchange_fees = totalVolume * 0.015 / 100; // ~0.015% exchange fees estimate
+      const other_fees = totalVolume * 0.005 / 100; // ~0.005% other fees estimate
+      const net_cash = sell - buy - brokerage - exchange_fees - other_fees;
+      
+      return {
+        date,
+        gross_buy: buy,
+        gross_sell: sell,
+        brokerage,
+        exchange_fees,
+        other_fees,
+        net_cash,
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date));
+  }, [trades, investor?.brokerage_commission]);
+
   // Calculate summary totals
   const summaryBefore = useMemo(() => {
     return {
@@ -281,6 +314,18 @@ export function AccountingReconciliationDialog({
       return acc;
     }, { buy: 0, sell: 0, buySettled: 0, sellSettled: 0 });
   }, [tradeActivity]);
+
+  // Brokerage totals
+  const brokerageTotals = useMemo(() => {
+    return brokerageCharges.reduce((acc, b) => ({
+      gross_buy: acc.gross_buy + b.gross_buy,
+      gross_sell: acc.gross_sell + b.gross_sell,
+      brokerage: acc.brokerage + b.brokerage,
+      exchange_fees: acc.exchange_fees + b.exchange_fees,
+      other_fees: acc.other_fees + b.other_fees,
+      net_cash: acc.net_cash + b.net_cash,
+    }), { gross_buy: 0, gross_sell: 0, brokerage: 0, exchange_fees: 0, other_fees: 0, net_cash: 0 });
+  }, [brokerageCharges]);
 
   // Calculate accrued interest
   const accruedInterest = useMemo(() => {
@@ -358,6 +403,10 @@ export function AccountingReconciliationDialog({
       'TRADE ACTIVITY',
       'Date,Security,Side,Quantity,Value,Settlement Date,Settled',
       ...tradeActivity.map(t => `${t.trade_date},${t.security_code},${t.side},${t.quantity},${t.value},${t.settlement_date},${t.is_settled}`),
+      '',
+      'BROKERAGE & CHARGES',
+      'Date,Gross Buy,Gross Sell,Brokerage,Exchange Fees,Other Fees,Net Cash',
+      ...brokerageCharges.map(b => `${b.date},${b.gross_buy},${b.gross_sell},${b.brokerage},${b.exchange_fees},${b.other_fees},${b.net_cash}`),
     ];
     
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
@@ -447,10 +496,11 @@ export function AccountingReconciliationDialog({
           </div>
         ) : (
           <Tabs defaultValue="summary" className="space-y-4">
-            <TabsList>
+            <TabsList className="flex-wrap h-auto gap-1">
               <TabsTrigger value="summary">Summary</TabsTrigger>
               <TabsTrigger value="holdings">Holdings</TabsTrigger>
               <TabsTrigger value="trades">Trades</TabsTrigger>
+              <TabsTrigger value="brokerage">Brokerage & Charges</TabsTrigger>
               <TabsTrigger value="waterfall">Waterfall</TabsTrigger>
             </TabsList>
 
@@ -679,6 +729,101 @@ export function AccountingReconciliationDialog({
               </Card>
             </TabsContent>
 
+            {/* Brokerage & Charges Tab */}
+            <TabsContent value="brokerage">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Receipt className="h-4 w-4" />
+                    Brokerage & Charges Breakdown
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+                    <div className="p-3 bg-red-500/10 rounded-lg">
+                      <span className="text-xs text-muted-foreground">Gross Buy</span>
+                      <p className="text-lg font-semibold text-red-400">{formatCurrency(brokerageTotals.gross_buy)}</p>
+                    </div>
+                    <div className="p-3 bg-green-500/10 rounded-lg">
+                      <span className="text-xs text-muted-foreground">Gross Sell</span>
+                      <p className="text-lg font-semibold text-green-400">{formatCurrency(brokerageTotals.gross_sell)}</p>
+                    </div>
+                    <div className="p-3 bg-amber-500/10 rounded-lg">
+                      <span className="text-xs text-muted-foreground">Brokerage</span>
+                      <p className="text-lg font-semibold text-amber-400">{formatCurrency(brokerageTotals.brokerage)}</p>
+                    </div>
+                    <div className="p-3 bg-blue-500/10 rounded-lg">
+                      <span className="text-xs text-muted-foreground">Exchange Fees</span>
+                      <p className="text-lg font-semibold text-blue-400">{formatCurrency(brokerageTotals.exchange_fees)}</p>
+                    </div>
+                    <div className="p-3 bg-purple-500/10 rounded-lg">
+                      <span className="text-xs text-muted-foreground">Other Fees</span>
+                      <p className="text-lg font-semibold text-purple-400">{formatCurrency(brokerageTotals.other_fees)}</p>
+                    </div>
+                    <div className="p-3 bg-muted/30 rounded-lg">
+                      <span className="text-xs text-muted-foreground">Net Cash</span>
+                      <p className={cn("text-lg font-semibold", brokerageTotals.net_cash >= 0 ? 'text-green-400' : 'text-red-400')}>
+                        {formatCurrency(brokerageTotals.net_cash)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Daily Breakdown Table */}
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead className="text-right">Gross Buy</TableHead>
+                          <TableHead className="text-right">Gross Sell</TableHead>
+                          <TableHead className="text-right">Brokerage</TableHead>
+                          <TableHead className="text-right">Exchange Fees</TableHead>
+                          <TableHead className="text-right">Other Fees</TableHead>
+                          <TableHead className="text-right">Net Cash</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {brokerageCharges.map((b) => (
+                          <TableRow key={b.date}>
+                            <TableCell className="font-medium">{b.date}</TableCell>
+                            <TableCell className="text-right text-red-400">{formatCurrency(b.gross_buy)}</TableCell>
+                            <TableCell className="text-right text-green-400">{formatCurrency(b.gross_sell)}</TableCell>
+                            <TableCell className="text-right text-amber-400">{formatCurrency(b.brokerage)}</TableCell>
+                            <TableCell className="text-right text-blue-400">{formatCurrency(b.exchange_fees)}</TableCell>
+                            <TableCell className="text-right text-purple-400">{formatCurrency(b.other_fees)}</TableCell>
+                            <TableCell className={cn("text-right font-medium", b.net_cash >= 0 ? 'text-green-400' : 'text-red-400')}>
+                              {formatCurrency(b.net_cash)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {brokerageCharges.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                              No trades in selected period
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {brokerageCharges.length > 0 && (
+                          <TableRow className="bg-muted/30 font-semibold">
+                            <TableCell>Total</TableCell>
+                            <TableCell className="text-right text-red-400">{formatCurrency(brokerageTotals.gross_buy)}</TableCell>
+                            <TableCell className="text-right text-green-400">{formatCurrency(brokerageTotals.gross_sell)}</TableCell>
+                            <TableCell className="text-right text-amber-400">{formatCurrency(brokerageTotals.brokerage)}</TableCell>
+                            <TableCell className="text-right text-blue-400">{formatCurrency(brokerageTotals.exchange_fees)}</TableCell>
+                            <TableCell className="text-right text-purple-400">{formatCurrency(brokerageTotals.other_fees)}</TableCell>
+                            <TableCell className={cn("text-right", brokerageTotals.net_cash >= 0 ? 'text-green-400' : 'text-red-400')}>
+                              {formatCurrency(brokerageTotals.net_cash)}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
             {/* Waterfall Tab */}
             <TabsContent value="waterfall">
               <Card>
@@ -715,9 +860,16 @@ export function AccountingReconciliationDialog({
                     </div>
                     
                     <div className="flex justify-between items-center p-3 border-l-4 border-amber-500 bg-amber-500/10 rounded-r-lg">
-                      <span>- Brokerage (estimated)</span>
+                      <span>- Brokerage ({investor.brokerage_commission}%)</span>
                       <span className="text-amber-400">
-                        {formatCurrency((tradeTotals.buy + tradeTotals.sell) * (investor.brokerage_commission || 0.25) / 100)}
+                        {formatCurrency(brokerageTotals.brokerage)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center p-3 border-l-4 border-blue-500 bg-blue-500/10 rounded-r-lg">
+                      <span>- Exchange & Other Fees</span>
+                      <span className="text-blue-400">
+                        {formatCurrency(brokerageTotals.exchange_fees + brokerageTotals.other_fees)}
                       </span>
                     </div>
                     
