@@ -8,11 +8,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { format, subDays } from "date-fns";
+import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText } from "lucide-react";
 import { formatCurrency } from "@/lib/balance-utils";
 import { toast } from "sonner";
+import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
 
-interface AccountingRow {
+export interface AccountingRow {
   investor_code: string;
   investor_name: string;
   account_type: string;
@@ -85,6 +90,9 @@ const AccountingTab = () => {
   const [isFieldDialogOpen, setIsFieldDialogOpen] = useState(false);
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldFormula, setNewFieldFormula] = useState("");
+  const [selectedInvestor, setSelectedInvestor] = useState<AccountingRow | null>(null);
+  const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 2));
+  const [toDate, setToDate] = useState<Date>(new Date());
 
   // Load custom fields from localStorage
   useEffect(() => {
@@ -410,8 +418,45 @@ const AccountingTab = () => {
           />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Date Range Selection */}
+          <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="w-[130px]">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(fromDate, 'dd MMM yyyy')}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={fromDate}
+                  onSelect={(d) => d && setFromDate(d)}
+                  className="pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
+            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="w-[130px]">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(toDate, 'dd MMM yyyy')}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar
+                  mode="single"
+                  selected={toDate}
+                  onSelect={(d) => d && setToDate(d)}
+                  className="pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
           {latestTradeDate && (
-            <span className="text-sm text-muted-foreground">Trade Date: {latestTradeDate}</span>
+            <span className="text-sm text-muted-foreground">Trade: {latestTradeDate}</span>
           )}
           
           <Dialog open={isFieldDialogOpen} onOpenChange={setIsFieldDialogOpen}>
@@ -488,7 +533,13 @@ const AccountingTab = () => {
       {/* Data Table */}
       <Card className="glass-card">
         <CardHeader>
-          <CardTitle className="text-lg">Accounting Details</CardTitle>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Accounting Details
+            <span className="text-sm font-normal text-muted-foreground ml-2">
+              (Click row to view reconciliation)
+            </span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -523,7 +574,11 @@ const AccountingTab = () => {
                 </TableHeader>
                 <TableBody>
                   {filteredData.slice(0, 100).map((row) => (
-                    <TableRow key={row.investor_code}>
+                    <TableRow 
+                      key={row.investor_code}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setSelectedInvestor(row)}
+                    >
                       <TableCell className="font-mono">{row.investor_code}</TableCell>
                       <TableCell className="max-w-[200px] truncate">{row.investor_name}</TableCell>
                       <TableCell>{row.account_type}</TableCell>
@@ -571,6 +626,14 @@ const AccountingTab = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Reconciliation Dialog */}
+      <AccountingReconciliationDialog
+        investor={selectedInvestor}
+        onClose={() => setSelectedInvestor(null)}
+        fromDate={fromDate}
+        toDate={toDate}
+      />
     </div>
   );
 };
