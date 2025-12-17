@@ -34,6 +34,7 @@ export interface AccountingRow {
   receivable: number;
   payable: number;
   brokerage_amount: number;
+  final_balance: number;
   gross_buy: number;
   gross_sell: number;
   [key: string]: string | number;
@@ -70,9 +71,10 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'net_sell', label: 'Net Sell', visible: true, align: 'right' },
   { id: 'adjusted_ledger', label: 'Adj. Ledger', visible: true, align: 'right' },
   { id: 'accrued_interest', label: 'Accrued Int.', visible: true, align: 'right', colorClass: 'text-orange-400' },
+  { id: 'brokerage_amount', label: 'Brokerage', visible: true, align: 'right' },
+  { id: 'final_balance', label: 'Final Bal', visible: true, align: 'right', colorClass: 'text-blue-400' },
   { id: 'receivable', label: 'Receivable', visible: true, align: 'right', colorClass: 'text-green-400' },
   { id: 'payable', label: 'Payable', visible: true, align: 'right', colorClass: 'text-amber-400' },
-  { id: 'brokerage_amount', label: 'Brokerage', visible: true, align: 'right' },
 ];
 
 const evaluateFormula = (formula: string, row: AccountingRow): number => {
@@ -97,6 +99,7 @@ const evaluateFormula = (formula: string, row: AccountingRow): number => {
       'rate': row.interest_rate,
       'brokerage_commission': row.brokerage_commission,
       'brokerage_amount': row.brokerage_amount,
+      'final_balance': row.final_balance,
       'commission': row.brokerage_commission,
       'gross_buy': row.gross_buy,
       'gross_sell': row.gross_sell,
@@ -359,6 +362,7 @@ const AccountingTab = () => {
         receivable,
         payable,
         brokerage_amount,
+        final_balance,
       };
 
       // Calculate custom fields
