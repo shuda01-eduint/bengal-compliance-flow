@@ -12,7 +12,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format, subDays } from "date-fns";
-import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText } from "lucide-react";
+import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import { formatCurrency } from "@/lib/balance-utils";
 import { toast } from "sonner";
 import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
@@ -29,7 +29,11 @@ export interface AccountingRow {
   net_sell: number;
   adjusted_ledger: number;
   accrued_interest: number;
-  receivable_payable: number;
+  receivable: number;
+  payable: number;
+  brokerage_amount: number;
+  gross_buy: number;
+  gross_sell: number;
   [key: string]: string | number;
 }
 
@@ -43,7 +47,6 @@ const STORAGE_KEY = 'accounting-custom-fields';
 
 const evaluateFormula = (formula: string, row: AccountingRow): number => {
   try {
-    // Replace field names with values
     let expression = formula.toLowerCase();
     
     const fieldMap: Record<string, number> = {
@@ -58,17 +61,30 @@ const evaluateFormula = (formula: string, row: AccountingRow): number => {
       'adjusted': row.adjusted_ledger,
       'accrued_interest': row.accrued_interest,
       'interest': row.accrued_interest,
-      'receivable_payable': row.receivable_payable,
-      'recv_pay': row.receivable_payable,
+      'receivable': row.receivable,
+      'payable': row.payable,
       'interest_rate': row.interest_rate,
       'rate': row.interest_rate,
       'brokerage_commission': row.brokerage_commission,
+      'brokerage_amount': row.brokerage_amount,
       'commission': row.brokerage_commission,
+      'gross_buy': row.gross_buy,
+      'gross_sell': row.gross_sell,
     };
 
     Object.entries(fieldMap).forEach(([key, value]) => {
       const regex = new RegExp(`\\b${key}\\b`, 'gi');
       expression = expression.replace(regex, String(value || 0));
+    });
+
+    // Handle MAX function
+    expression = expression.replace(/max\(([^,]+),\s*([^)]+)\)/gi, (_, a, b) => {
+      return `Math.max(${a}, ${b})`;
+    });
+
+    // Handle MIN function
+    expression = expression.replace(/min\(([^,]+),\s*([^)]+)\)/gi, (_, a, b) => {
+      return `Math.min(${a}, ${b})`;
     });
 
     // Handle ABS function
@@ -223,8 +239,17 @@ const AccountingTab = () => {
       const ledger_balance = client?.ledger_balance || 0;
       const total_deposits = tx.deposits;
       const total_withdrawals = tx.withdrawals;
-      const net_sell = trade.sell - trade.buy;
+      const gross_buy = trade.buy;
+      const gross_sell = trade.sell;
+      const net_sell = gross_sell - gross_buy;
       const adjusted_ledger = ledger_balance + total_deposits - total_withdrawals + net_sell;
+      
+      // Brokerage amount calculation
+      const brokerage_amount = (gross_buy + gross_sell) * (inv.brokerage_commission || 0) / 100;
+      
+      // Calculate receivable (from broker - when net_sell > 0) and payable (to broker - when net_sell < 0)
+      const receivable = Math.max(0, net_sell);
+      const payable = Math.max(0, -net_sell);
       
       // Calculate accrued interest for margin accounts with negative balance
       let accrued_interest = 0;
@@ -241,10 +266,14 @@ const AccountingTab = () => {
         ledger_balance,
         total_deposits,
         total_withdrawals,
+        gross_buy,
+        gross_sell,
         net_sell,
         adjusted_ledger,
         accrued_interest,
-        receivable_payable: net_sell,
+        receivable,
+        payable,
+        brokerage_amount,
       };
 
       // Calculate custom fields
@@ -278,8 +307,8 @@ const AccountingTab = () => {
       marginAccounts: marginAccounts.length,
       totalMarginLoan: marginWithNegative.reduce((sum, r) => sum + Math.abs(r.adjusted_ledger), 0),
       totalAccruedInterest: marginWithNegative.reduce((sum, r) => sum + r.accrued_interest, 0),
-      totalReceivable: accountingData.filter(r => r.receivable_payable > 0).reduce((sum, r) => sum + r.receivable_payable, 0),
-      totalPayable: accountingData.filter(r => r.receivable_payable < 0).reduce((sum, r) => sum + Math.abs(r.receivable_payable), 0),
+      totalReceivable: accountingData.reduce((sum, r) => sum + r.receivable, 0),
+      totalPayable: accountingData.reduce((sum, r) => sum + r.payable, 0),
     };
   }, [accountingData]);
 
@@ -309,7 +338,7 @@ const AccountingTab = () => {
   };
 
   const handleExport = () => {
-    const baseHeaders = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Recv/Pay'];
+    const baseHeaders = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Gross Buy', 'Gross Sell', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Receivable (from Broker)', 'Payable (to Broker)', 'Brokerage Amt'];
     const customHeaders = customFields.map(f => f.name);
     const headers = [...baseHeaders, ...customHeaders];
     
@@ -323,10 +352,14 @@ const AccountingTab = () => {
         row.ledger_balance,
         row.total_deposits,
         row.total_withdrawals,
+        row.gross_buy,
+        row.gross_sell,
         row.net_sell,
         row.adjusted_ledger,
         row.accrued_interest,
-        row.receivable_payable,
+        row.receivable,
+        row.payable,
+        row.brokerage_amount,
       ];
       const customData = customFields.map(f => row[f.id] || 0);
       return [...baseData, ...customData];
@@ -343,67 +376,69 @@ const AccountingTab = () => {
 
   return (
     <div className="space-y-6 w-full overflow-x-hidden">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Users className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Total Accounts</span>
-            </div>
-            <p className="text-xl font-semibold">{summary.totalAccounts.toLocaleString()}</p>
-          </CardContent>
-        </Card>
+      {/* Summary Cards - Sticky */}
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-4 -mx-4 px-4 pt-2">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <Card className="glass-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Users className="h-4 w-4 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">Total Accounts</span>
+              </div>
+              <p className="text-xl font-semibold">{summary.totalAccounts.toLocaleString()}</p>
+            </CardContent>
+          </Card>
 
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Percent className="h-4 w-4 text-blue-400" />
-              <span className="text-xs text-muted-foreground">Margin Accounts</span>
-            </div>
-            <p className="text-xl font-semibold text-blue-400">{summary.marginAccounts.toLocaleString()}</p>
-          </CardContent>
-        </Card>
+          <Card className="glass-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Percent className="h-4 w-4 text-blue-400" />
+                <span className="text-xs text-muted-foreground">Margin Accounts</span>
+              </div>
+              <p className="text-xl font-semibold text-blue-400">{summary.marginAccounts.toLocaleString()}</p>
+            </CardContent>
+          </Card>
 
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Wallet className="h-4 w-4 text-red-400" />
-              <span className="text-xs text-muted-foreground">Margin Loan</span>
-            </div>
-            <p className="text-xl font-semibold text-red-400">{formatCurrency(summary.totalMarginLoan)}</p>
-          </CardContent>
-        </Card>
+          <Card className="glass-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Wallet className="h-4 w-4 text-red-400" />
+                <span className="text-xs text-muted-foreground">Margin Loan</span>
+              </div>
+              <p className="text-xl font-semibold text-red-400">{formatCurrency(summary.totalMarginLoan)}</p>
+            </CardContent>
+          </Card>
 
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp className="h-4 w-4 text-orange-400" />
-              <span className="text-xs text-muted-foreground">Accrued Interest</span>
-            </div>
-            <p className="text-xl font-semibold text-orange-400">{formatCurrency(summary.totalAccruedInterest)}</p>
-          </CardContent>
-        </Card>
+          <Card className="glass-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingUp className="h-4 w-4 text-orange-400" />
+                <span className="text-xs text-muted-foreground">Accrued Interest</span>
+              </div>
+              <p className="text-xl font-semibold text-orange-400">{formatCurrency(summary.totalAccruedInterest)}</p>
+            </CardContent>
+          </Card>
 
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp className="h-4 w-4 text-green-400" />
-              <span className="text-xs text-muted-foreground">Receivable</span>
-            </div>
-            <p className="text-xl font-semibold text-green-400">{formatCurrency(summary.totalReceivable)}</p>
-          </CardContent>
-        </Card>
+          <Card className="glass-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <ArrowDownToLine className="h-4 w-4 text-green-400" />
+                <span className="text-xs text-muted-foreground">Receivable</span>
+              </div>
+              <p className="text-xl font-semibold text-green-400">{formatCurrency(summary.totalReceivable)}</p>
+            </CardContent>
+          </Card>
 
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp className="h-4 w-4 text-amber-400" />
-              <span className="text-xs text-muted-foreground">Payable</span>
-            </div>
-            <p className="text-xl font-semibold text-amber-400">{formatCurrency(summary.totalPayable)}</p>
-          </CardContent>
-        </Card>
+          <Card className="glass-card">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <ArrowUpFromLine className="h-4 w-4 text-amber-400" />
+                <span className="text-xs text-muted-foreground">Payable</span>
+              </div>
+              <p className="text-xl font-semibold text-amber-400">{formatCurrency(summary.totalPayable)}</p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* Controls */}
@@ -483,12 +518,15 @@ const AccountingTab = () => {
                   <div>
                     <Label>Formula</Label>
                     <Input
-                      placeholder="e.g., accrued_interest * 30"
+                      placeholder="e.g., max(0, net_sell)"
                       value={newFieldFormula}
                       onChange={(e) => setNewFieldFormula(e.target.value)}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Available: ledger_balance, deposits, withdrawals, net_sell, adjusted_ledger, accrued_interest, interest_rate, commission, ABS()
+                      Fields: ledger, deposits, withdrawals, net_sell, adjusted_ledger, accrued_interest, interest_rate, receivable, payable, gross_buy, gross_sell, brokerage_amount
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Functions: ABS(), MAX(a, b), MIN(a, b)
                     </p>
                   </div>
                   <Button onClick={handleAddField} size="sm">
@@ -541,84 +579,126 @@ const AccountingTab = () => {
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {isLoading ? (
-            <div className="space-y-2">
+            <div className="space-y-2 p-6">
               {Array.from({ length: 10 }).map((_, i) => (
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Code</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-right">Interest %</TableHead>
-                    <TableHead className="text-right">Commission %</TableHead>
-                    <TableHead className="text-right">Ledger Bal</TableHead>
-                    <TableHead className="text-right">Deposits</TableHead>
-                    <TableHead className="text-right">Withdrawals</TableHead>
-                    <TableHead className="text-right">Net Sell</TableHead>
-                    <TableHead className="text-right">Adj. Ledger</TableHead>
-                    <TableHead className="text-right">Accrued Int.</TableHead>
-                    <TableHead className="text-right">Recv/Pay</TableHead>
-                    {customFields.map(field => (
-                      <TableHead key={field.id} className="text-right text-primary">
-                        {field.name}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredData.slice(0, 100).map((row) => (
-                    <TableRow 
-                      key={row.investor_code}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setSelectedInvestor(row)}
-                    >
-                      <TableCell className="font-mono">{row.investor_code}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{row.investor_name}</TableCell>
-                      <TableCell>{row.account_type}</TableCell>
-                      <TableCell className="text-right">{row.interest_rate.toFixed(2)}</TableCell>
-                      <TableCell className="text-right">{row.brokerage_commission.toFixed(2)}</TableCell>
-                      <TableCell className={`text-right ${row.ledger_balance < 0 ? 'text-red-400' : ''}`}>
-                        {formatCurrency(row.ledger_balance)}
-                      </TableCell>
-                      <TableCell className="text-right text-green-400">
-                        {row.total_deposits > 0 ? formatCurrency(row.total_deposits) : '-'}
-                      </TableCell>
-                      <TableCell className="text-right text-amber-400">
-                        {row.total_withdrawals > 0 ? formatCurrency(row.total_withdrawals) : '-'}
-                      </TableCell>
-                      <TableCell className={`text-right ${row.net_sell > 0 ? 'text-green-400' : row.net_sell < 0 ? 'text-red-400' : ''}`}>
-                        {formatCurrency(row.net_sell)}
-                      </TableCell>
-                      <TableCell className={`text-right font-medium ${row.adjusted_ledger < 0 ? 'text-red-400' : ''}`}>
-                        {formatCurrency(row.adjusted_ledger)}
-                      </TableCell>
-                      <TableCell className="text-right text-orange-400">
-                        {row.accrued_interest > 0 ? formatCurrency(row.accrued_interest) : '-'}
-                      </TableCell>
-                      <TableCell className={`text-right ${row.receivable_payable > 0 ? 'text-green-400' : row.receivable_payable < 0 ? 'text-red-400' : ''}`}>
-                        {formatCurrency(row.receivable_payable)}
-                      </TableCell>
-                      {customFields.map(field => {
-                        const value = row[field.id] as number;
-                        return (
-                          <TableCell key={field.id} className={`text-right ${value < 0 ? 'text-red-400' : value > 0 ? 'text-primary' : ''}`}>
-                            {formatCurrency(value)}
+            <div className="relative">
+              {/* Frozen columns wrapper */}
+              <div className="flex">
+                {/* Frozen left columns */}
+                <div className="flex-shrink-0 border-r border-border bg-background z-10 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.15)]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="w-[100px] min-w-[100px] bg-muted/50">Code</TableHead>
+                        <TableHead className="w-[180px] min-w-[180px] bg-muted/50">Name</TableHead>
+                        <TableHead className="w-[80px] min-w-[80px] bg-muted/50">Type</TableHead>
+                        <TableHead className="w-[80px] min-w-[80px] text-right bg-muted/50">Int %</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredData.slice(0, 100).map((row) => (
+                        <TableRow 
+                          key={row.investor_code}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => setSelectedInvestor(row)}
+                        >
+                          <TableCell className="font-mono w-[100px]">{row.investor_code}</TableCell>
+                          <TableCell className="w-[180px] truncate">{row.investor_name}</TableCell>
+                          <TableCell className="w-[80px]">{row.account_type}</TableCell>
+                          <TableCell className="w-[80px] text-right">{row.interest_rate.toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Scrollable right columns */}
+                <div className="overflow-x-auto flex-1">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="text-right min-w-[90px]">Comm %</TableHead>
+                        <TableHead className="text-right min-w-[110px]">Ledger Bal</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Deposits</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Withdrawals</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Gross Buy</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Gross Sell</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Net Sell</TableHead>
+                        <TableHead className="text-right min-w-[110px]">Adj. Ledger</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Accrued Int.</TableHead>
+                        <TableHead className="text-right min-w-[120px] text-green-400">Receivable</TableHead>
+                        <TableHead className="text-right min-w-[120px] text-amber-400">Payable</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Brokerage</TableHead>
+                        {customFields.map(field => (
+                          <TableHead key={field.id} className="text-right min-w-[100px] text-primary">
+                            {field.name}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredData.slice(0, 100).map((row) => (
+                        <TableRow 
+                          key={row.investor_code}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => setSelectedInvestor(row)}
+                        >
+                          <TableCell className="text-right">{row.brokerage_commission.toFixed(2)}</TableCell>
+                          <TableCell className={cn("text-right", row.ledger_balance < 0 && "text-red-400")}>
+                            {formatCurrency(row.ledger_balance)}
                           </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                          <TableCell className="text-right text-green-400">
+                            {row.total_deposits > 0 ? formatCurrency(row.total_deposits) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right text-amber-400">
+                            {row.total_withdrawals > 0 ? formatCurrency(row.total_withdrawals) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right text-red-400">
+                            {row.gross_buy > 0 ? formatCurrency(row.gross_buy) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right text-green-400">
+                            {row.gross_sell > 0 ? formatCurrency(row.gross_sell) : '-'}
+                          </TableCell>
+                          <TableCell className={cn("text-right", row.net_sell > 0 ? 'text-green-400' : row.net_sell < 0 ? 'text-red-400' : '')}>
+                            {formatCurrency(row.net_sell)}
+                          </TableCell>
+                          <TableCell className={cn("text-right font-medium", row.adjusted_ledger < 0 && "text-red-400")}>
+                            {formatCurrency(row.adjusted_ledger)}
+                          </TableCell>
+                          <TableCell className="text-right text-orange-400">
+                            {row.accrued_interest > 0 ? formatCurrency(row.accrued_interest) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right text-green-400 font-medium">
+                            {row.receivable > 0 ? formatCurrency(row.receivable) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right text-amber-400 font-medium">
+                            {row.payable > 0 ? formatCurrency(row.payable) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {row.brokerage_amount > 0 ? formatCurrency(row.brokerage_amount) : '-'}
+                          </TableCell>
+                          {customFields.map(field => {
+                            const value = row[field.id] as number;
+                            return (
+                              <TableCell key={field.id} className={cn("text-right", value < 0 ? 'text-red-400' : value > 0 ? 'text-primary' : '')}>
+                                {formatCurrency(value)}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
               {filteredData.length > 100 && (
-                <p className="text-sm text-muted-foreground mt-4 text-center">
+                <p className="text-sm text-muted-foreground mt-4 text-center p-4">
                   Showing 100 of {filteredData.length} records
                 </p>
               )}
