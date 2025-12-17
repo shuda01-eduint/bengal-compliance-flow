@@ -56,7 +56,7 @@ interface ColumnConfig {
 }
 
 const STORAGE_KEY = 'accounting-custom-fields';
-const COLUMNS_STORAGE_KEY = 'accounting-columns-config';
+const COLUMNS_STORAGE_KEY = 'accounting-columns-config-v2';
 const PAGE_SIZE = 50;
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
@@ -73,10 +73,10 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'net_sell', label: 'Net Sell', visible: false, align: 'right' },
   { id: 'adjusted_ledger', label: 'Adj. Ledger', visible: false, align: 'right' },
   { id: 'accrued_interest', label: 'Accrued Int.', visible: true, align: 'right', colorClass: 'text-orange-400' },
-  { id: 'receivable', label: 'Receivable', visible: false, align: 'right', colorClass: 'text-green-400' },
   { id: 'payable', label: 'Payable', visible: false, align: 'right', colorClass: 'text-red-400' },
+  { id: 'final_balance', label: 'Final Bal (Pre-Interest)', visible: false, align: 'right' },
   { id: 'brokerage_amount', label: 'Brokerage', visible: true, align: 'right' },
-  { id: 'final_balance', label: 'Closing Balance', visible: true, align: 'right', colorClass: 'text-blue-400' },
+  { id: 'receivable', label: 'Closing Balance', visible: true, align: 'right', colorClass: 'text-blue-400' },
 ];
 
 const evaluateFormula = (formula: string, row: AccountingRow): number => {
