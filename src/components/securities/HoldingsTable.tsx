@@ -79,7 +79,7 @@ export function HoldingsTable() {
       let query = supabase.from("holdings").select("*", { count: "exact" });
 
       if (searchTerm) {
-        query = query.or(`trading_code.ilike.%${searchTerm}%,investor_code.ilike.%${searchTerm}%,investor_name.ilike.%${searchTerm}%`);
+        query = query.or(`trading_code.ilike.%${searchTerm}%,investor_code.eq.${searchTerm},investor_name.ilike.%${searchTerm}%`);
       }
 
       if (rmFilter !== "all") {

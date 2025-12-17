@@ -84,7 +84,7 @@ export const DepositsWithdrawalsTable = () => {
 
     if (debouncedSearch) {
       query = query.or(
-        `investor_code.ilike.%${debouncedSearch}%,investor_name.ilike.%${debouncedSearch}%`
+        `investor_code.eq.${debouncedSearch},investor_name.ilike.%${debouncedSearch}%`
       );
     }
 
@@ -108,7 +108,7 @@ export const DepositsWithdrawalsTable = () => {
 
       if (debouncedSearch) {
         query = query.or(
-          `investor_code.ilike.%${debouncedSearch}%,investor_name.ilike.%${debouncedSearch}%`
+          `investor_code.eq.${debouncedSearch},investor_name.ilike.%${debouncedSearch}%`
         );
       }
 

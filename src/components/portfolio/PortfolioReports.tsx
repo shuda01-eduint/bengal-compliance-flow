@@ -60,7 +60,7 @@ export function PortfolioReports() {
         .order("investor_code");
 
       if (debouncedSearch) {
-        query = query.or(`investor_code.ilike.%${debouncedSearch}%,trading_code.ilike.%${debouncedSearch}%,investor_name.ilike.%${debouncedSearch}%`);
+        query = query.or(`investor_code.eq.${debouncedSearch},trading_code.ilike.%${debouncedSearch}%,investor_name.ilike.%${debouncedSearch}%`);
       }
 
       if (rmFilter && rmFilter !== "all") {
