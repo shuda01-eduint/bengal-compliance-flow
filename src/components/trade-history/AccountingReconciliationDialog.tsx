@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { format, addDays, differenceInDays } from "date-fns";
+import { format, addDays, differenceInDays, parse } from "date-fns";
 import { CalendarIcon, Download, ArrowRight, TrendingUp, TrendingDown, Minus, User, Wallet, Activity, Receipt } from "lucide-react";
 import { formatCurrency } from "@/lib/balance-utils";
 import type { AccountingRow } from "./AccountingTab";
@@ -80,6 +80,8 @@ export function AccountingReconciliationDialog({
 
   const fromDateStr = format(selectedFromDate, 'yyyy-MM-dd');
   const toDateStr = format(selectedToDate, 'yyyy-MM-dd');
+  const fromTradeDateStr = format(selectedFromDate, 'yyyyMMdd');
+  const toTradeDateStr = format(selectedToDate, 'yyyyMMdd');
   const daysDiff = differenceInDays(selectedToDate, selectedFromDate);
 
   // Fetch investor details
@@ -103,13 +105,34 @@ export function AccountingReconciliationDialog({
     queryKey: ['reconciliation-balances-before', investor?.investor_code, fromDateStr],
     queryFn: async () => {
       if (!investor?.investor_code) return [];
-      const { data, error } = await supabase
+
+      // Prefer exact snapshot date; if missing, fall back to the nearest prior snapshot.
+      const { data: exact, error: exactErr } = await supabase
         .from('balances_raw')
         .select('*')
         .eq('investor_code', investor.investor_code)
         .eq('as_of_date', fromDateStr);
-      if (error) throw error;
-      return data || [];
+      if (exactErr) throw exactErr;
+      if (exact && exact.length) return exact;
+
+      const { data: nearest, error: nearestErr } = await supabase
+        .from('balances_raw')
+        .select('as_of_date')
+        .eq('investor_code', investor.investor_code)
+        .lte('as_of_date', fromDateStr)
+        .order('as_of_date', { ascending: false })
+        .limit(1);
+      if (nearestErr) throw nearestErr;
+      const nearestDate = nearest?.[0]?.as_of_date;
+      if (!nearestDate) return [];
+
+      const { data: fallback, error: fallbackErr } = await supabase
+        .from('balances_raw')
+        .select('*')
+        .eq('investor_code', investor.investor_code)
+        .eq('as_of_date', nearestDate);
+      if (fallbackErr) throw fallbackErr;
+      return fallback || [];
     },
     enabled: !!investor?.investor_code,
   });
@@ -118,28 +141,48 @@ export function AccountingReconciliationDialog({
     queryKey: ['reconciliation-balances-after', investor?.investor_code, toDateStr],
     queryFn: async () => {
       if (!investor?.investor_code) return [];
-      const { data, error } = await supabase
+
+      const { data: exact, error: exactErr } = await supabase
         .from('balances_raw')
         .select('*')
         .eq('investor_code', investor.investor_code)
         .eq('as_of_date', toDateStr);
-      if (error) throw error;
-      return data || [];
+      if (exactErr) throw exactErr;
+      if (exact && exact.length) return exact;
+
+      const { data: nearest, error: nearestErr } = await supabase
+        .from('balances_raw')
+        .select('as_of_date')
+        .eq('investor_code', investor.investor_code)
+        .lte('as_of_date', toDateStr)
+        .order('as_of_date', { ascending: false })
+        .limit(1);
+      if (nearestErr) throw nearestErr;
+      const nearestDate = nearest?.[0]?.as_of_date;
+      if (!nearestDate) return [];
+
+      const { data: fallback, error: fallbackErr } = await supabase
+        .from('balances_raw')
+        .select('*')
+        .eq('investor_code', investor.investor_code)
+        .eq('as_of_date', nearestDate);
+      if (fallbackErr) throw fallbackErr;
+      return fallback || [];
     },
     enabled: !!investor?.investor_code,
   });
 
   // Fetch trades between dates
   const { data: trades = [], isLoading: loadingTrades } = useQuery({
-    queryKey: ['reconciliation-trades', investor?.investor_code, fromDateStr, toDateStr],
+    queryKey: ['reconciliation-trades', investor?.investor_code, fromTradeDateStr, toTradeDateStr],
     queryFn: async () => {
       if (!investor?.investor_code) return [];
       const { data, error } = await supabase
         .from('trade_history')
         .select('trade_date, security_code, side, quantity, value, category')
         .eq('client_code', investor.investor_code)
-        .gte('trade_date', fromDateStr)
-        .lte('trade_date', toDateStr)
+        .gte('trade_date', fromTradeDateStr)
+        .lte('trade_date', toTradeDateStr)
         .order('trade_date', { ascending: true });
       if (error) throw error;
       return data || [];
@@ -207,9 +250,12 @@ export function AccountingReconciliationDialog({
     trades.forEach(t => {
       const key = `${t.trade_date}-${t.security_code}-${t.side}`;
       if (!grouped[key]) {
-        const isZCategory = t.category?.toUpperCase() === 'Z';
-        const settlementDays = isZCategory ? 3 : 2;
-        const tradeDate = new Date(t.trade_date || '');
+          const isZCategory = t.category?.toUpperCase() === 'Z';
+          const settlementDays = isZCategory ? 3 : 2;
+          const rawTradeDate = t.trade_date || '';
+          const tradeDate = rawTradeDate.includes('-')
+            ? new Date(rawTradeDate)
+            : parse(rawTradeDate, 'yyyyMMdd', new Date());
         const settlementDate = addDays(tradeDate, settlementDays);
         
         grouped[key] = {
@@ -834,7 +880,7 @@ export function AccountingReconciliationDialog({
                 <CardContent>
                   <div className="space-y-3">
                     <div className="flex justify-between items-center p-3 bg-muted/30 rounded-lg">
-                      <span className="font-medium">Opening Ledger Balance</span>
+                      <span className="font-medium">Opening Ledger Balance ({balancesBefore[0]?.as_of_date || 'No snapshot'})</span>
                       <span className={cn("font-semibold", summaryBefore.ledger_balance < 0 && "text-red-400")}>
                         {formatCurrency(summaryBefore.ledger_balance)}
                       </span>
@@ -906,7 +952,7 @@ export function AccountingReconciliationDialog({
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-primary/10 rounded-lg">
-                            <span className="font-medium">= Actual Closing (from system)</span>
+                            <span className="font-medium">= Actual Closing (from system) ({balancesAfter[0]?.as_of_date || 'No snapshot'})</span>
                             <span className={cn("font-semibold text-lg", summaryAfter.ledger_balance < 0 && "text-red-400")}>
                               {formatCurrency(summaryAfter.ledger_balance)}
                             </span>
