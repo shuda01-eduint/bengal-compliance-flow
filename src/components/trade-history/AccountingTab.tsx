@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -174,12 +174,31 @@ const AccountingTab = () => {
   // Load columns config from localStorage
   useEffect(() => {
     const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
-    if (saved) {
-      try {
-        setColumns(JSON.parse(saved));
-      } catch {
-        console.error('Failed to load columns config');
-      }
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved) as ColumnConfig[];
+
+      // Merge saved config with new defaults so newly-added columns (e.g. Closing Balance)
+      // always appear without wiping the user's saved visibility/order.
+      const defaultsById = new Map(DEFAULT_COLUMNS.map((c) => [c.id, c] as const));
+      const seen = new Set<string>();
+      const merged: ColumnConfig[] = [];
+
+      parsed.forEach((c) => {
+        const def = defaultsById.get(c.id);
+        if (!def || seen.has(c.id)) return;
+        merged.push({ ...def, visible: typeof c.visible === "boolean" ? c.visible : def.visible });
+        seen.add(c.id);
+      });
+
+      DEFAULT_COLUMNS.forEach((def) => {
+        if (!seen.has(def.id)) merged.push(def);
+      });
+
+      setColumns(merged);
+    } catch {
+      console.error('Failed to load columns config');
     }
   }, []);
 
@@ -594,6 +613,9 @@ const AccountingTab = () => {
               <DialogContent className="max-w-lg">
                 <DialogHeader>
                   <DialogTitle>Manage Custom Fields</DialogTitle>
+                  <DialogDescription className="text-sm text-muted-foreground">
+                    Add formula-based fields that appear as extra columns in the table.
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="space-y-3">
@@ -662,6 +684,9 @@ const AccountingTab = () => {
               <DialogContent className="max-w-md">
                 <DialogHeader>
                   <DialogTitle>Configure Columns</DialogTitle>
+                  <DialogDescription className="text-sm text-muted-foreground">
+                    Toggle visibility and reorder columns. Closing Balance is at the end.
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2 max-h-[400px] overflow-y-auto">
                   {columns.map((column, index) => (
