@@ -139,13 +139,55 @@ const AccountingTab = () => {
     },
   });
 
-  // Fetch client balances
+  // Fetch initial ledger balances from balances_raw (admin data)
+  const { data: balancesRaw = [], isLoading: loadingBalances } = useQuery({
+    queryKey: ['accounting-balances-raw'],
+    queryFn: async () => {
+      // First get the latest available date in balances_raw
+      const { data: dateData, error: dateError } = await supabase
+        .from('balances_raw')
+        .select('as_of_date')
+        .order('as_of_date', { ascending: false })
+        .limit(1);
+      
+      if (dateError) throw dateError;
+      const latestBalanceDate = dateData?.[0]?.as_of_date;
+      
+      if (!latestBalanceDate) return [];
+      
+      // Fetch aggregated ledger balances per investor for that date
+      const { data, error } = await supabase
+        .from('balances_raw')
+        .select('investor_code, ledger_balance')
+        .eq('as_of_date', latestBalanceDate);
+      
+      if (error) throw error;
+      
+      // Aggregate ledger_balance per investor (sum across instruments)
+      const balanceMap: Record<string, number> = {};
+      data?.forEach(row => {
+        if (!balanceMap[row.investor_code]) {
+          balanceMap[row.investor_code] = 0;
+        }
+        // Only count ledger_balance once per investor (it's the same across instruments)
+        balanceMap[row.investor_code] = row.ledger_balance || 0;
+      });
+      
+      return Object.entries(balanceMap).map(([investor_code, ledger_balance]) => ({
+        investor_code,
+        ledger_balance,
+        as_of_date: latestBalanceDate,
+      }));
+    },
+  });
+
+  // Fetch client names as fallback
   const { data: clients = [], isLoading: loadingClients } = useQuery({
     queryKey: ['accounting-clients'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('clients')
-        .select('inv_code, investor_name, ledger_balance');
+        .select('inv_code, investor_name');
       if (error) throw error;
       return data || [];
     },
@@ -199,6 +241,7 @@ const AccountingTab = () => {
   const accountingData = useMemo(() => {
     const investorMap = new Map(investors.map(i => [i.investor_code, i]));
     const clientMap = new Map(clients.map(c => [c.inv_code, c]));
+    const balanceMap = new Map(balancesRaw.map(b => [b.investor_code, b.ledger_balance]));
 
     // Aggregate transactions per investor
     const txMap: Record<string, { deposits: number; withdrawals: number }> = {};
@@ -236,7 +279,8 @@ const AccountingTab = () => {
       const tx = txMap[inv.investor_code] || { deposits: 0, withdrawals: 0 };
       const trade = tradeMap[inv.investor_code] || { buy: 0, sell: 0 };
       
-      const ledger_balance = client?.ledger_balance || 0;
+      // Get ledger balance from balances_raw (admin data) instead of clients
+      const ledger_balance = balanceMap.get(inv.investor_code) || 0;
       const total_deposits = tx.deposits;
       const total_withdrawals = tx.withdrawals;
       const gross_buy = trade.buy;
@@ -285,7 +329,7 @@ const AccountingTab = () => {
     });
 
     return rows;
-  }, [investors, clients, transactions, trades, customFields]);
+  }, [investors, clients, balancesRaw, transactions, trades, customFields]);
 
   // Filter data
   const filteredData = useMemo(() => {
@@ -312,7 +356,7 @@ const AccountingTab = () => {
     };
   }, [accountingData]);
 
-  const isLoading = loadingInvestors || loadingClients || loadingTx || loadingTrades;
+  const isLoading = loadingInvestors || loadingClients || loadingBalances || loadingTx || loadingTrades;
 
   const handleAddField = () => {
     if (!newFieldName.trim() || !newFieldFormula.trim()) {
