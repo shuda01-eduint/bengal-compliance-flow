@@ -382,7 +382,7 @@ const AccountingTab = () => {
   };
 
   const handleExport = () => {
-    const baseHeaders = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Gross Buy', 'Gross Sell', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Receivable (from Broker)', 'Payable (to Broker)', 'Brokerage Amt'];
+    const baseHeaders = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Buy', 'Sell', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Receivable (from Broker)', 'Payable (to Broker)', 'Brokerage Amt'];
     const customHeaders = customFields.map(f => f.name);
     const headers = [...baseHeaders, ...customHeaders];
     
@@ -671,8 +671,8 @@ const AccountingTab = () => {
                         <TableHead className="text-right min-w-[110px]">Ledger Bal</TableHead>
                         <TableHead className="text-right min-w-[100px]">Deposits</TableHead>
                         <TableHead className="text-right min-w-[100px]">Withdrawals</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Gross Buy</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Gross Sell</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Buy</TableHead>
+                        <TableHead className="text-right min-w-[100px]">Sell</TableHead>
                         <TableHead className="text-right min-w-[100px]">Net Sell</TableHead>
                         <TableHead className="text-right min-w-[110px]">Adj. Ledger</TableHead>
                         <TableHead className="text-right min-w-[100px]">Accrued Int.</TableHead>
