@@ -670,6 +670,19 @@ const AccountingTab = () => {
                             {field.name}
                           </TableHead>
                         ))}
+                        <TableHead className="w-[40px] min-w-[40px]">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-6 w-6 p-0 hover:bg-primary/20"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsFieldDialogOpen(true);
+                            }}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -721,6 +734,7 @@ const AccountingTab = () => {
                               </TableCell>
                             );
                           })}
+                          <TableCell className="w-[40px]"></TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
