@@ -342,7 +342,7 @@ const AccountingTab = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full overflow-x-hidden">
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <Card className="glass-card">
@@ -407,8 +407,8 @@ const AccountingTab = () => {
       </div>
 
       {/* Controls */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search by code or name..."
@@ -417,17 +417,17 @@ const AccountingTab = () => {
             className="pl-9"
           />
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
           {/* Date Range Selection */}
-          <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg">
+          <div className="flex items-center gap-1 sm:gap-2 p-2 bg-muted/30 rounded-lg flex-wrap">
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="w-[130px]">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(fromDate, 'dd MMM yyyy')}
+                <Button variant="outline" size="sm" className="w-[110px] sm:w-[130px] text-xs sm:text-sm">
+                  <CalendarIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  {format(fromDate, 'dd MMM yy')}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
+              <PopoverContent className="w-auto p-0 z-50 bg-background border">
                 <Calendar
                   mode="single"
                   selected={fromDate}
@@ -436,15 +436,15 @@ const AccountingTab = () => {
                 />
               </PopoverContent>
             </Popover>
-            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="w-[130px]">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(toDate, 'dd MMM yyyy')}
+                <Button variant="outline" size="sm" className="w-[110px] sm:w-[130px] text-xs sm:text-sm">
+                  <CalendarIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  {format(toDate, 'dd MMM yy')}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
+              <PopoverContent className="w-auto p-0 z-50 bg-background border">
                 <Calendar
                   mode="single"
                   selected={toDate}
