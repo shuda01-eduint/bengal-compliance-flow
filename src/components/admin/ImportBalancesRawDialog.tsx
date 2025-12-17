@@ -161,18 +161,47 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
 
       setProgress(50);
 
-      // Delete ALL existing records before importing new data
-      const { error: deleteError } = await supabase
-        .from('balances_raw')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
-
-      if (deleteError) {
-        console.error('Delete error:', deleteError);
-        throw new Error(`Failed to clear existing data: ${deleteError.message}`);
+      // Delete ALL existing records in batches to avoid timeout
+      console.log('Clearing all existing balance data in batches...');
+      let deletedTotal = 0;
+      let hasMore = true;
+      
+      while (hasMore) {
+        // Get a batch of IDs to delete
+        const { data: idsToDelete, error: selectError } = await supabase
+          .from('balances_raw')
+          .select('id')
+          .limit(5000);
+        
+        if (selectError) {
+          console.error('Select error:', selectError);
+          throw new Error(`Failed to fetch records for deletion: ${selectError.message}`);
+        }
+        
+        if (!idsToDelete || idsToDelete.length === 0) {
+          hasMore = false;
+          break;
+        }
+        
+        // Delete this batch
+        const { error: deleteError } = await supabase
+          .from('balances_raw')
+          .delete()
+          .in('id', idsToDelete.map(r => r.id));
+        
+        if (deleteError) {
+          console.error('Delete error:', deleteError);
+          throw new Error(`Failed to clear existing data: ${deleteError.message}`);
+        }
+        
+        deletedTotal += idsToDelete.length;
+        console.log(`Deleted ${deletedTotal} records...`);
+        
+        // Yield to UI
+        await new Promise(resolve => requestAnimationFrame(resolve));
       }
       
-      console.log('Cleared all existing balance data');
+      console.log(`Cleared all existing balance data (${deletedTotal} records)`);
 
       setProgress(60);
 
