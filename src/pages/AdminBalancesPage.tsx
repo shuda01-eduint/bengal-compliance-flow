@@ -1,7 +1,8 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, Users, TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
@@ -62,6 +63,7 @@ const AdminBalancesPage = () => {
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, isLoading: false });
 
   // Fetch available dates
   const { data: availableDates } = useQuery({
@@ -91,6 +93,7 @@ const AdminBalancesPage = () => {
     queryFn: async () => {
       if (!selectedDate) return [];
       
+      setLoadingProgress({ loaded: 0, isLoading: true });
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
       let allData: BalanceRawRow[] = [];
       let from = 0;
@@ -112,7 +115,6 @@ const AdminBalancesPage = () => {
 
             if (result.error) {
               lastError = new Error(result.error.message);
-              // Wait before retry with exponential backoff
               if (attempt < maxRetries - 1) {
                 await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
               }
@@ -130,14 +132,19 @@ const AdminBalancesPage = () => {
           }
         }
 
-        if (lastError) throw lastError;
+        if (lastError) {
+          setLoadingProgress({ loaded: allData.length, isLoading: false });
+          throw lastError;
+        }
         if (!data || data.length === 0) break;
 
         allData = [...allData, ...data];
+        setLoadingProgress({ loaded: allData.length, isLoading: true });
         if (data.length < batchSize) break;
         from += batchSize;
       }
 
+      setLoadingProgress({ loaded: allData.length, isLoading: false });
       return allData;
     },
     enabled: !!selectedDate,
@@ -601,7 +608,13 @@ const AdminBalancesPage = () => {
             {isLoading ? (
               <div className="p-12 text-center">
                 <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-                <p className="text-muted-foreground">Loading balance data...</p>
+                <p className="text-muted-foreground mb-3">Loading balance data...</p>
+                <div className="max-w-xs mx-auto space-y-2">
+                  <Progress value={loadingProgress.loaded > 0 ? Math.min((loadingProgress.loaded / 25000) * 100, 95) : 5} className="h-2" />
+                  <p className="text-sm font-medium text-foreground">
+                    {loadingProgress.loaded.toLocaleString()} records loaded
+                  </p>
+                </div>
               </div>
             ) : sortedData.length === 0 ? (
               <div className="p-12 text-center">
