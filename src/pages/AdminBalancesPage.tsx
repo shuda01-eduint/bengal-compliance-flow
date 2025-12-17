@@ -298,37 +298,45 @@ const AdminBalancesPage = () => {
     return map;
   }, [securities]);
 
-  // DSE Settlement Rules: Z Category = T+3, Others = T+2
-  // Fetch matured trades based on settlement rules
-  const { data: maturedTrades, isLoading: tradesLoading } = useQuery({
-    queryKey: ['matured-trades', selectedDate?.toISOString()],
+  // Fetch latest trade date from trade_history
+  const { data: latestTradeDate } = useQuery({
+    queryKey: ['latest-trade-date'],
     queryFn: async () => {
-      if (!selectedDate) return [];
+      const { data, error } = await supabase
+        .from('trade_history')
+        .select('trade_date')
+        .not('trade_date', 'is', null)
+        .order('trade_date', { ascending: false })
+        .limit(1);
       
-      // T+2 trades (matured for non-Z categories) - trades from 2 days ago
-      const t2Day = addDays(selectedDate, -2);
-      const t2DateStr = format(t2Day, 'yyyyMMdd');
+      if (error) throw error;
+      return data?.[0]?.trade_date || null;
+    },
+  });
+
+  // DSE Settlement Rules: Use latest trade date for calculations
+  // Fetch all trades from the latest trade date
+  const { data: maturedTrades, isLoading: tradesLoading } = useQuery({
+    queryKey: ['matured-trades', latestTradeDate],
+    queryFn: async () => {
+      if (!latestTradeDate) return [];
       
-      // T+3 trades (matured for Z category) - trades from 3 days ago
-      const t3Day = addDays(selectedDate, -3);
-      const t3DateStr = format(t3Day, 'yyyyMMdd');
+      console.log('Fetching trades for latest trade date:', latestTradeDate);
       
-      console.log('Fetching T+2 trades for:', t2DateStr, 'and T+3 trades for:', t3DateStr);
-      
-      // Fetch trades from both T-2 and T-3
+      // Fetch all trades from the latest trade date
       const { data, error } = await supabase
         .from('trade_history')
         .select('client_code, side, value, security_code, trade_date')
-        .in('trade_date', [t2DateStr, t3DateStr]);
+        .eq('trade_date', latestTradeDate);
       
       if (error) throw error;
-      console.log('Trades found for settlement:', data?.length || 0);
+      console.log('Trades found for latest date:', data?.length || 0);
       return data || [];
     },
-    enabled: !!selectedDate,
+    enabled: !!latestTradeDate,
   });
 
-  // Calculate adjustments per investor from next day's data and matured trades
+  // Calculate adjustments per investor from next day's data and latest trades
   const investorAdjustments = useMemo(() => {
     const adjustments: Record<string, InvestorAdjustment> = {};
     
@@ -344,29 +352,10 @@ const AdminBalancesPage = () => {
       }
     });
     
-    if (!selectedDate) return adjustments;
-    
-    // T+2 date string for non-Z categories
-    const t2DateStr = format(addDays(selectedDate, -2), 'yyyyMMdd');
-    // T+3 date string for Z category
-    const t3DateStr = format(addDays(selectedDate, -3), 'yyyyMMdd');
-    
-    // Process matured trades based on DSE settlement rules
+    // Process all trades from the latest trade date
     maturedTrades?.forEach(trade => {
       const clientCode = trade.client_code;
       if (!clientCode) return;
-      
-      const securityCode = trade.security_code?.toUpperCase() || '';
-      const category = categoryMap[securityCode] || '';
-      const tradeDate = trade.trade_date;
-      
-      // DSE Settlement Rule: Z Category = T+3, Others = T+2
-      const isZCategory = category === 'Z';
-      const isMatured = isZCategory 
-        ? tradeDate === t3DateStr  // Z category: only T-3 trades matured
-        : tradeDate === t2DateStr; // Others: only T-2 trades matured
-      
-      if (!isMatured) return;
       
       if (!adjustments[clientCode]) {
         adjustments[clientCode] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0 };
@@ -383,7 +372,7 @@ const AdminBalancesPage = () => {
     });
     
     return adjustments;
-  }, [nextDayTransactions, maturedTrades, categoryMap, selectedDate]);
+  }, [nextDayTransactions, maturedTrades]);
 
   // Fetch portfolios for grouping
   const { data: portfolios } = useQuery({
