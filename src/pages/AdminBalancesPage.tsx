@@ -88,23 +88,30 @@ const AdminBalancesPage = () => {
   }, [availableDates, selectedDate]);
 
   // Helper function to fetch balance data for a specific date (used for prefetching)
+  // Uses keyset pagination (no OFFSET) to avoid timeouts on large datasets.
   const fetchBalanceData = useCallback(async (dateStr: string): Promise<BalanceRawRow[]> => {
     let allData: BalanceRawRow[] = [];
-    let from = 0;
     const batchSize = 1000;
     const maxRetries = 3;
+
+    let lastId: string | null = null;
 
     while (true) {
       let lastError: Error | null = null;
       let data: BalanceRawRow[] | null = null;
-      
+
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-          const result = await supabase
+          let query = supabase
             .from('balances_raw')
             .select('*')
             .eq('as_of_date', dateStr)
-            .range(from, from + batchSize - 1);
+            .order('id', { ascending: true })
+            .limit(batchSize);
+
+          if (lastId) query = query.gt('id', lastId);
+
+          const result = await query;
 
           if (result.error) {
             lastError = new Error(result.error.message);
@@ -113,7 +120,7 @@ const AdminBalancesPage = () => {
             }
             continue;
           }
-          
+
           data = result.data as BalanceRawRow[];
           lastError = null;
           break;
@@ -129,38 +136,48 @@ const AdminBalancesPage = () => {
       if (!data || data.length === 0) break;
 
       allData = [...allData, ...data];
+
       if (data.length < batchSize) break;
-      from += batchSize;
+      lastId = data[data.length - 1]?.id ?? null;
+      if (!lastId) break;
     }
 
     return allData;
   }, []);
 
   // Fetch raw balance data for selected date with retry logic
+  // Uses keyset pagination (no OFFSET) to avoid timeouts on large datasets.
   const { data: rawBalances, isLoading, error, refetch: refetchBalances } = useQuery({
-    queryKey: ['balances-raw', selectedDate?.toISOString()],
+    queryKey: ['balances-raw', selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined],
     queryFn: async () => {
       if (!selectedDate) return [];
-      
+
       setLoadingProgress({ loaded: 0, isLoading: true });
+
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
       let allData: BalanceRawRow[] = [];
-      let from = 0;
       const batchSize = 1000;
       const maxRetries = 3;
+
+      let lastId: string | null = null;
 
       while (true) {
         let lastError: Error | null = null;
         let data: BalanceRawRow[] | null = null;
-        
+
         // Retry logic for each batch
         for (let attempt = 0; attempt < maxRetries; attempt++) {
           try {
-            const result = await supabase
+            let query = supabase
               .from('balances_raw')
               .select('*')
               .eq('as_of_date', dateStr)
-              .range(from, from + batchSize - 1);
+              .order('id', { ascending: true })
+              .limit(batchSize);
+
+            if (lastId) query = query.gt('id', lastId);
+
+            const result = await query;
 
             if (result.error) {
               lastError = new Error(result.error.message);
@@ -169,7 +186,7 @@ const AdminBalancesPage = () => {
               }
               continue;
             }
-            
+
             data = result.data as BalanceRawRow[];
             lastError = null;
             break;
@@ -189,8 +206,10 @@ const AdminBalancesPage = () => {
 
         allData = [...allData, ...data];
         setLoadingProgress({ loaded: allData.length, isLoading: true });
+
         if (data.length < batchSize) break;
-        from += batchSize;
+        lastId = data[data.length - 1]?.id ?? null;
+        if (!lastId) break;
       }
 
       setLoadingProgress({ loaded: allData.length, isLoading: false });
@@ -207,28 +226,34 @@ const AdminBalancesPage = () => {
   useEffect(() => {
     if (!rawBalances || !availableDates || availableDates.length === 0 || !selectedDate) return;
 
+    // Avoid heavy background work when the current date dataset is large
+    if (rawBalances.length > 15000) return;
+
     const currentDateStr = format(selectedDate, 'yyyy-MM-dd');
     const currentIndex = availableDates.indexOf(currentDateStr);
-    
-    // Prefetch next 2 and previous 2 available dates
-    const datesToPrefetch: string[] = [];
-    
-    if (currentIndex > 0) datesToPrefetch.push(availableDates[currentIndex - 1]);
-    if (currentIndex > 1) datesToPrefetch.push(availableDates[currentIndex - 2]);
-    if (currentIndex < availableDates.length - 1) datesToPrefetch.push(availableDates[currentIndex + 1]);
-    if (currentIndex < availableDates.length - 2) datesToPrefetch.push(availableDates[currentIndex + 2]);
 
-    // Prefetch each date with a small delay to avoid overwhelming the server
+    // Prefetch just the nearest previous + next dates (common navigation)
+    const datesToPrefetch: string[] = [];
+    if (currentIndex > 0) datesToPrefetch.push(availableDates[currentIndex - 1]);
+    if (currentIndex < availableDates.length - 1) datesToPrefetch.push(availableDates[currentIndex + 1]);
+
+    const timeouts: number[] = [];
+
     datesToPrefetch.forEach((dateStr, index) => {
-      setTimeout(() => {
-        const prefetchDate = parseISO(dateStr);
+      const t = window.setTimeout(() => {
         queryClient.prefetchQuery({
-          queryKey: ['balances-raw', prefetchDate.toISOString()],
+          queryKey: ['balances-raw', dateStr],
           queryFn: () => fetchBalanceData(dateStr),
           staleTime: 5 * 60 * 1000,
         });
-      }, (index + 1) * 2000); // Stagger prefetches by 2 seconds
+      }, (index + 1) * 4000); // stagger more gently
+
+      timeouts.push(t);
     });
+
+    return () => {
+      timeouts.forEach(t => window.clearTimeout(t));
+    };
   }, [rawBalances, availableDates, selectedDate, queryClient, fetchBalanceData]);
 
   // Fetch next day's deposits/withdrawals
