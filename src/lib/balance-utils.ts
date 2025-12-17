@@ -25,6 +25,12 @@ export interface InvestorAdjustment {
   net_buy: number;
 }
 
+export interface InvestorData {
+  interest_rate: number;
+  brokerage_commission: number;
+  account_type: string | null;
+}
+
 export interface EnrichedBalanceRow extends BalanceRawRow {
   unrealized_pnl: number;
   pnl_pct: number | null;
@@ -35,6 +41,9 @@ export interface EnrichedBalanceRow extends BalanceRawRow {
   withdrawals: number;
   net_sell: number;
   net_buy: number;
+  accrued_interest: number;
+  receivable_payable: number;
+  brokerage_commission_rate: number;
 }
 
 export interface BalanceSummary {
@@ -59,6 +68,8 @@ export interface InvestorGroupedRow {
   withdrawals: number;
   net_sell: number;
   net_buy: number;
+  accrued_interest: number;
+  receivable_payable: number;
   risk_flag: 'OK' | 'Watch' | 'High';
   instruments: EnrichedBalanceRow[];
 }
@@ -127,15 +138,28 @@ export function calculateRiskFlag(adjustedLedger: number, pnlPct: number | null)
 // Enrich raw balance row with computed fields including next-day adjustments
 export function enrichBalanceRow(
   row: BalanceRawRow, 
-  adjustments?: Record<string, InvestorAdjustment>
+  adjustments?: Record<string, InvestorAdjustment>,
+  investorDataMap?: Record<string, InvestorData>
 ): EnrichedBalanceRow {
   const adjustment = adjustments?.[row.investor_code] || { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0 };
+  const investorData = investorDataMap?.[row.investor_code] || { interest_rate: 0, brokerage_commission: 0, account_type: null };
   
   const unrealized_pnl = row.total_mv - row.total_cost;
   const pnl_pct = row.total_cost !== 0 ? (unrealized_pnl / row.total_cost) * 100 : null;
   
   // Adjusted ledger = ledger_balance + deposits - withdrawals + net_sell
   const adjusted_ledger = row.ledger_balance + adjustment.deposits - adjustment.withdrawals + adjustment.net_sell;
+  
+  // Accrued Interest: Only for margin accounts with negative adjusted ledger
+  // Formula: (interest_rate / 365) * abs(negative_adjusted_ledger)
+  const isMarginAccount = investorData.account_type?.toLowerCase() === 'margin';
+  const accrued_interest = isMarginAccount && adjusted_ledger < 0 
+    ? (investorData.interest_rate / 365) * Math.abs(adjusted_ledger) / 100
+    : 0;
+  
+  // Receivable/Payable: net_sell = receivable (positive), net_buy = payable (negative when buying)
+  // Positive = receivable from broker, Negative = payable to broker
+  const receivable_payable = adjustment.net_sell;
   
   // Net available = matured + (saleable * price per unit) - receivable - cq
   const pricePerUnit = row.total_stock > 0 ? row.total_mv / row.total_stock : 0;
@@ -155,6 +179,9 @@ export function enrichBalanceRow(
     withdrawals: adjustment.withdrawals,
     net_sell: adjustment.net_sell,
     net_buy: adjustment.net_buy,
+    accrued_interest,
+    receivable_payable,
+    brokerage_commission_rate: investorData.brokerage_commission,
   };
 }
 
@@ -216,6 +243,8 @@ export function groupByInvestor(rows: EnrichedBalanceRow[]): InvestorGroupedRow[
     const withdrawals = instruments[0]?.withdrawals || 0;
     const net_sell = instruments[0]?.net_sell || 0;
     const net_buy = instruments[0]?.net_buy || 0;
+    const accrued_interest = instruments[0]?.accrued_interest || 0;
+    const receivable_payable = instruments[0]?.receivable_payable || 0;
     
     // Highest risk flag
     const riskFlags = instruments.map(i => i.risk_flag);
@@ -233,6 +262,8 @@ export function groupByInvestor(rows: EnrichedBalanceRow[]): InvestorGroupedRow[
       withdrawals,
       net_sell,
       net_buy,
+      accrued_interest,
+      receivable_payable,
       risk_flag,
       instruments,
     };
