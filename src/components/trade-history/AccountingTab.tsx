@@ -193,9 +193,11 @@ const AccountingTab = () => {
     },
   });
 
-  // Format dates for queries
-  const fromDateStr = format(fromDate, 'yyyy-MM-dd');
+  // Format dates for queries - different formats for different tables
+  const fromDateStr = format(fromDate, 'yyyy-MM-dd'); // For deposits_withdrawals (date column)
   const toDateStr = format(toDate, 'yyyy-MM-dd');
+  const fromTradeDateStr = format(fromDate, 'yyyyMMdd'); // For trade_history (text column YYYYMMDD)
+  const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
   // Fetch deposits/withdrawals for date range
   const { data: transactions = [], isLoading: loadingTx } = useQuery({
@@ -211,15 +213,15 @@ const AccountingTab = () => {
     },
   });
 
-  // Fetch trades for date range
+  // Fetch trades for date range (trade_date stored as YYYYMMDD text)
   const { data: trades = [], isLoading: loadingTrades } = useQuery({
-    queryKey: ['accounting-trades', fromDateStr, toDateStr],
+    queryKey: ['accounting-trades', fromTradeDateStr, toTradeDateStr],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('trade_history')
         .select('client_code, side, value')
-        .gte('trade_date', fromDateStr)
-        .lte('trade_date', toDateStr);
+        .gte('trade_date', fromTradeDateStr)
+        .lte('trade_date', toTradeDateStr);
       if (error) throw error;
       return data || [];
     },
