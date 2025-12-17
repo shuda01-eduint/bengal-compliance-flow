@@ -26,17 +26,17 @@ interface ImportBalancesRawDialogProps {
 
 // Column name variations for flexible mapping
 const COLUMN_MAPPINGS: Record<string, string[]> = {
-  investor_code: ['Investor Code', 'Inv. Code', 'Inv Code', 'Code', 'investor_code', 'InvCode', 'Client Code', 'Account'],
+  investor_code: ['Investor Code', 'Investor Cod', 'Inv. Code', 'Inv Code', 'Code', 'investor_code', 'InvCode', 'Client Code', 'Account'],
   instrument: ['Instrument', 'Trading Code', 'Script', 'Security', 'instrument', 'Symbol', 'Stock'],
   total_stock: ['TotalStock', 'Total Stock', 'Total Qty', 'Qty', 'total_stock', 'Quantity', 'Holdings'],
   saleable: ['Saleable', 'Saleable Qty', 'saleable', 'SaleableQty', 'Sellable', 'Available'],
   avg_cost: ['AvgCost', 'Avg Cost', 'Average Cost', 'avg_cost', 'Avg. Cost', 'Unit Cost'],
   total_cost: ['Total Cost', 'TotalCost', 'Cost', 'total_cost', 'Cost Value'],
   total_mv: ['Total M.V.', 'Total MV', 'Market Value', 'M.V.', 'MV', 'total_mv', 'TotalMV', 'Market Val'],
-  ledger_balance: ['Ledger Balance', 'Ledger', 'ledger_balance', 'Balance', 'Cash Balance'],
-  matured_balance: ['Matured Balance', 'Matured', 'matured_balance', 'MaturedBalance', 'Matured Bal', 'Matured Value', 'Mature Balance', 'Mature Bal'],
-  receivable_sale: ['Receivable sales', 'Receivable Sale', 'receivable_sale', 'Receivables', 'Rec. Sale', 'Receivable', 'Sales Receivable', 'Sale Receivable'],
-  cq_in_transit: ['CQ in transit', 'CQ Transit', 'cq_in_transit', 'CQInTransit', 'CQ', 'In Transit', 'Transit'],
+  ledger_balance: ['Ledger Balance', 'Ledger Balar', 'Ledger Bal', 'Ledger', 'ledger_balance', 'Balance', 'Cash Balance'],
+  matured_balance: ['Matured Balance', 'Matured Balanc', 'Matured Bal', 'Matured', 'matured_balance', 'MaturedBalance', 'Matured Value', 'Mature Balance', 'Mature Bal'],
+  receivable_sale: ['Receivable sales', 'Receivable s', 'Receivable Sale', 'Receivable sal', 'receivable_sale', 'Receivables', 'Rec. Sale', 'Receivable', 'Sales Receivable', 'Sale Receivable'],
+  cq_in_transit: ['CQ in transit', 'CQ in transi', 'CQ in trans', 'CQ Transit', 'cq_in_transit', 'CQInTransit', 'CQ', 'In Transit', 'Transit'],
   rm_name: ['RM', 'RM Name', 'rm_name', 'rm', 'Relationship Manager', 'Manager'],
   rm_id: ['RM ID', 'RM Id', 'rm_id', 'RMID', 'Employee ID', 'EmpID'],
 };
