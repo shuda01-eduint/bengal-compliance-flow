@@ -113,6 +113,14 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
         console.warn('Unmapped columns:', unmappedColumns);
       }
 
+      // Surface critical unmapped fields in UI (common cause of "not updating")
+      const criticalMissing: string[] = [];
+      if (!columnMap.receivable_sale) criticalMissing.push('Receivable Sale');
+      if (!columnMap.cq_in_transit) criticalMissing.push('CQ in transit');
+      if (criticalMissing.length > 0) {
+        toast.warning(`Warning: ${criticalMissing.join(' & ')} column not detected. Values will import as 0.`);
+      }
+
       // Validate required columns
       if (!columnMap.investor_code) {
         throw new Error('Required column "Investor Code" not found');
