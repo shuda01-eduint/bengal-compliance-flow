@@ -17,6 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { formatCurrency } from "@/lib/balance-utils";
 import { toast } from "sonner";
 import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
+import { TradeDetailsDialog } from "./TradeDetailsDialog";
 
 export interface AccountingRow {
   investor_code: string;
@@ -140,6 +141,9 @@ const AccountingTab = () => {
   const [selectedInvestor, setSelectedInvestor] = useState<AccountingRow | null>(null);
   const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 2));
   const [toDate, setToDate] = useState<Date>(new Date());
+  const [tradeDetailsOpen, setTradeDetailsOpen] = useState(false);
+  const [selectedTradeType, setSelectedTradeType] = useState<'BUY' | 'SELL'>('BUY');
+  const [selectedTradeInvestor, setSelectedTradeInvestor] = useState<AccountingRow | null>(null);
 
   // Load custom fields from localStorage
   useEffect(() => {
@@ -834,11 +838,37 @@ const AccountingTab = () => {
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelectedInvestor(row)}
                       >
-                        {visibleColumns.map(column => (
-                          <TableCell key={column.id} className={getCellClassName(row, column)}>
-                            {getCellValue(row, column.id)}
-                          </TableCell>
-                        ))}
+                        {visibleColumns.map(column => {
+                          const isClickableTrade = column.id === 'gross_buy' || column.id === 'gross_sell';
+                          const cellValue = row[column.id];
+                          const hasValue = typeof cellValue === 'number' && cellValue > 0;
+                          
+                          if (isClickableTrade && hasValue) {
+                            return (
+                              <TableCell 
+                                key={column.id} 
+                                className={cn(
+                                  getCellClassName(row, column),
+                                  "cursor-pointer hover:underline hover:bg-primary/10 transition-colors"
+                                )}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedTradeInvestor(row);
+                                  setSelectedTradeType(column.id === 'gross_buy' ? 'BUY' : 'SELL');
+                                  setTradeDetailsOpen(true);
+                                }}
+                              >
+                                {getCellValue(row, column.id)}
+                              </TableCell>
+                            );
+                          }
+                          
+                          return (
+                            <TableCell key={column.id} className={getCellClassName(row, column)}>
+                              {getCellValue(row, column.id)}
+                            </TableCell>
+                          );
+                        })}
                         {customFields.map(field => {
                           const value = row[field.id] as number;
                           return (
@@ -870,6 +900,19 @@ const AccountingTab = () => {
         fromDate={fromDate}
         toDate={toDate}
       />
+
+      {/* Trade Details Dialog */}
+      {selectedTradeInvestor && (
+        <TradeDetailsDialog
+          open={tradeDetailsOpen}
+          onOpenChange={setTradeDetailsOpen}
+          investorCode={selectedTradeInvestor.investor_code}
+          investorName={selectedTradeInvestor.investor_name}
+          tradeType={selectedTradeType}
+          fromDate={fromDate}
+          toDate={toDate}
+        />
+      )}
     </div>
   );
 };
