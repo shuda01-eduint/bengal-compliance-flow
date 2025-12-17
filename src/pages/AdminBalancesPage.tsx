@@ -29,6 +29,7 @@ import {
   EnrichedBalanceRow,
   Portfolio,
   InvestorAdjustment,
+  InvestorData,
   enrichBalanceRow,
   calculateSummary,
   groupByInvestor,
@@ -44,7 +45,7 @@ import {
   RMSummary,
 } from "@/lib/balance-utils";
 
-type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'adjusted_ledger' | 'deposits' | 'withdrawals' | 'net_sell' | 'net_buy' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag';
+type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'adjusted_ledger' | 'deposits' | 'withdrawals' | 'net_sell' | 'net_buy' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag' | 'accrued_interest' | 'receivable_payable';
 type SortDirection = 'asc' | 'desc';
 
 const ROWS_PER_PAGE = 50;
@@ -387,11 +388,37 @@ const AdminBalancesPage = () => {
     },
   });
 
+  // Fetch investor data for accrued interest and brokerage commission calculations
+  const { data: investorData } = useQuery({
+    queryKey: ['investor-data-for-balance'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('investors')
+        .select('investor_code, interest_rate, brokerage_commission, account_type');
+      
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Create investor data map for quick lookup
+  const investorDataMap = useMemo(() => {
+    const map: Record<string, InvestorData> = {};
+    investorData?.forEach(inv => {
+      map[inv.investor_code] = {
+        interest_rate: Number(inv.interest_rate) || 0,
+        brokerage_commission: Number(inv.brokerage_commission) || 0,
+        account_type: inv.account_type,
+      };
+    });
+    return map;
+  }, [investorData]);
+
   // Enrich data with computed fields including next-day adjustments
   const enrichedData = useMemo(() => {
     if (!rawBalances) return [];
-    return rawBalances.map(row => enrichBalanceRow(row, investorAdjustments));
-  }, [rawBalances, investorAdjustments]);
+    return rawBalances.map(row => enrichBalanceRow(row, investorAdjustments, investorDataMap));
+  }, [rawBalances, investorAdjustments, investorDataMap]);
 
   // Calculate summary
   const summary = useMemo(() => {
@@ -783,6 +810,8 @@ const AdminBalancesPage = () => {
                       <TableHead className="text-muted-foreground text-right">Net Buy</TableHead>
                       <TableHead className="text-muted-foreground text-right">Net Sell</TableHead>
                       <TableHead className="text-muted-foreground text-right">Adj. Ledger</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Accrued Int.</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Recv/Pay</TableHead>
                       <TableHead className="text-muted-foreground">Risk</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -832,6 +861,12 @@ const AdminBalancesPage = () => {
                           <TableCell className={cn("text-right font-medium", group.adjusted_ledger < 0 ? "text-destructive" : "text-success")}>
                             {formatNumber(group.adjusted_ledger)}
                           </TableCell>
+                          <TableCell className={cn("text-right", group.accrued_interest > 0 && "text-amber-400")}>
+                            {group.accrued_interest > 0 ? formatNumber(group.accrued_interest) : '—'}
+                          </TableCell>
+                          <TableCell className={cn("text-right", group.receivable_payable >= 0 ? "text-success" : "text-destructive")}>
+                            {formatNumber(group.receivable_payable)}
+                          </TableCell>
                           <TableCell>{getRiskBadge(group.risk_flag)}</TableCell>
                         </TableRow>
                         {expandedInvestors.has(group.investor_code) && (
@@ -847,6 +882,13 @@ const AdminBalancesPage = () => {
                               <TableCell className={cn("text-right", (inst.pnl_pct ?? 0) >= 0 ? "text-success/70" : "text-destructive/70")}>
                                 {formatPercent(inst.pnl_pct)}
                               </TableCell>
+                              <TableCell></TableCell>
+                              <TableCell></TableCell>
+                              <TableCell></TableCell>
+                              <TableCell></TableCell>
+                              <TableCell></TableCell>
+                              <TableCell></TableCell>
+                              <TableCell></TableCell>
                               <TableCell></TableCell>
                               <TableCell></TableCell>
                             </TableRow>
@@ -879,6 +921,8 @@ const AdminBalancesPage = () => {
                         <SortableHeader field="net_buy" className="text-right">Net Buy</SortableHeader>
                         <SortableHeader field="net_sell" className="text-right">Net Sell</SortableHeader>
                         <SortableHeader field="adjusted_ledger" className="text-right">Adj. Ledger</SortableHeader>
+                        <SortableHeader field="accrued_interest" className="text-right">Accrued Int.</SortableHeader>
+                        <SortableHeader field="receivable_payable" className="text-right">Recv/Pay</SortableHeader>
                         <SortableHeader field="matured_balance" className="text-right">Matured</SortableHeader>
                         <SortableHeader field="receivable_sale" className="text-right">Receivable</SortableHeader>
                         <SortableHeader field="cq_in_transit" className="text-right">CQ</SortableHeader>
@@ -926,6 +970,12 @@ const AdminBalancesPage = () => {
                           </TableCell>
                           <TableCell className={cn("text-right font-medium", row.adjusted_ledger < 0 ? "text-destructive" : "text-success")}>
                             {formatNumber(row.adjusted_ledger)}
+                          </TableCell>
+                          <TableCell className={cn("text-right", row.accrued_interest > 0 && "text-amber-400")}>
+                            {row.accrued_interest > 0 ? formatNumber(row.accrued_interest) : '—'}
+                          </TableCell>
+                          <TableCell className={cn("text-right", row.receivable_payable >= 0 ? "text-success" : "text-destructive")}>
+                            {formatNumber(row.receivable_payable)}
                           </TableCell>
                           <TableCell className="text-right">{formatNumber(row.matured_balance)}</TableCell>
                           <TableCell className="text-right">
