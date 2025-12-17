@@ -85,8 +85,8 @@ const AdminBalancesPage = () => {
     }
   }, [availableDates, selectedDate]);
 
-  // Fetch raw balance data for selected date
-  const { data: rawBalances, isLoading, error } = useQuery({
+  // Fetch raw balance data for selected date with retry logic
+  const { data: rawBalances, isLoading, error, refetch: refetchBalances } = useQuery({
     queryKey: ['balances-raw', selectedDate?.toISOString()],
     queryFn: async () => {
       if (!selectedDate) return [];
@@ -95,18 +95,45 @@ const AdminBalancesPage = () => {
       let allData: BalanceRawRow[] = [];
       let from = 0;
       const batchSize = 1000;
+      const maxRetries = 3;
 
       while (true) {
-        const { data, error } = await supabase
-          .from('balances_raw')
-          .select('*')
-          .eq('as_of_date', dateStr)
-          .range(from, from + batchSize - 1);
+        let lastError: Error | null = null;
+        let data: BalanceRawRow[] | null = null;
+        
+        // Retry logic for each batch
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          try {
+            const result = await supabase
+              .from('balances_raw')
+              .select('*')
+              .eq('as_of_date', dateStr)
+              .range(from, from + batchSize - 1);
 
-        if (error) throw error;
+            if (result.error) {
+              lastError = new Error(result.error.message);
+              // Wait before retry with exponential backoff
+              if (attempt < maxRetries - 1) {
+                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
+              }
+              continue;
+            }
+            
+            data = result.data as BalanceRawRow[];
+            lastError = null;
+            break;
+          } catch (err) {
+            lastError = err instanceof Error ? err : new Error('Unknown error');
+            if (attempt < maxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
+            }
+          }
+        }
+
+        if (lastError) throw lastError;
         if (!data || data.length === 0) break;
 
-        allData = [...allData, ...data as BalanceRawRow[]];
+        allData = [...allData, ...data];
         if (data.length < batchSize) break;
         from += batchSize;
       }
@@ -114,6 +141,10 @@ const AdminBalancesPage = () => {
       return allData;
     },
     enabled: !!selectedDate,
+    retry: 2,
+    retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 10000),
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
   });
 
   // Fetch next day's deposits/withdrawals
@@ -398,6 +429,10 @@ const AdminBalancesPage = () => {
         <div className="glass-card rounded-xl p-12 text-center">
           <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
           <h3 className="text-lg font-medium text-foreground mb-2">Error loading data</h3>
+          <p className="text-muted-foreground mb-4">{error.message || 'An error occurred'}</p>
+          <Button onClick={() => refetchBalances()} variant="outline">
+            Retry Loading
+          </Button>
           <p className="text-sm text-muted-foreground">{error.message}</p>
         </div>
       </MainLayout>
