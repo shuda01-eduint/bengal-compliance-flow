@@ -3,11 +3,10 @@ import { TradeHistoryTable } from "@/components/trade-history/TradeHistoryTable"
 import { AgentCodesTable } from "@/components/trade-history/AgentCodesTable";
 import { DepositsWithdrawalsTable } from "@/components/trade-history/DepositsWithdrawalsTable";
 import { UploadHistoryTable } from "@/components/trade-history/UploadHistoryTable";
-import AccountingTab from "@/components/trade-history/AccountingTab";
 import { StockExchangeUpload } from "@/components/stock-exchange/StockExchangeUpload";
 import { ClientTradeSearch } from "@/components/stock-exchange/ClientTradeSearch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { History, Users, ArrowDownUp, FileUp, Upload, Calculator } from "lucide-react";
+import { History, Users, ArrowDownUp, FileUp, Upload } from "lucide-react";
 
 const TradeHistoryPage = () => {
   return (
@@ -34,10 +33,6 @@ const TradeHistoryPage = () => {
             <FileUp className="h-4 w-4" />
             Upload History
           </TabsTrigger>
-          <TabsTrigger value="accounting" className="gap-2">
-            <Calculator className="h-4 w-4" />
-            Accounting
-          </TabsTrigger>
         </TabsList>
         <TabsContent value="trades">
           <TradeHistoryTable />
@@ -56,9 +51,6 @@ const TradeHistoryPage = () => {
         </TabsContent>
         <TabsContent value="uploads">
           <UploadHistoryTable />
-        </TabsContent>
-        <TabsContent value="accounting">
-          <AccountingTab />
         </TabsContent>
       </Tabs>
     </MainLayout>

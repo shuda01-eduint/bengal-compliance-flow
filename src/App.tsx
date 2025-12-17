@@ -16,6 +16,7 @@ import AdminBalancesPage from "./pages/AdminBalancesPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
 import SecuritiesPage from "./pages/SecuritiesPage";
 import InvestorsPage from "./pages/InvestorsPage";
+import AccountingPage from "./pages/AccountingPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
@@ -40,6 +41,7 @@ const App = () => (
             <Route path="/admin/balances" element={<ProtectedRoute><AdminBalancesPage /></ProtectedRoute>} />
             <Route path="/trade-history" element={<ProtectedRoute><TradeHistoryPage /></ProtectedRoute>} />
             <Route path="/securities" element={<ProtectedRoute><SecuritiesPage /></ProtectedRoute>} />
+            <Route path="/accounting" element={<ProtectedRoute><AccountingPage /></ProtectedRoute>} />
             <Route path="/investors" element={<ProtectedRoute><InvestorsPage /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
