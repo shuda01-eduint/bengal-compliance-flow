@@ -12,7 +12,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format, subDays } from "date-fns";
-import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, GripVertical, Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { formatCurrency } from "@/lib/balance-utils";
 import { toast } from "sonner";
 import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
@@ -43,7 +44,35 @@ interface CustomField {
   formula: string;
 }
 
+interface ColumnConfig {
+  id: string;
+  label: string;
+  visible: boolean;
+  align?: 'left' | 'right';
+  colorClass?: string;
+}
+
 const STORAGE_KEY = 'accounting-custom-fields';
+const COLUMNS_STORAGE_KEY = 'accounting-columns-config';
+
+const DEFAULT_COLUMNS: ColumnConfig[] = [
+  { id: 'investor_code', label: 'Code', visible: true, align: 'left' },
+  { id: 'investor_name', label: 'Name', visible: true, align: 'left' },
+  { id: 'account_type', label: 'Type', visible: true, align: 'left' },
+  { id: 'interest_rate', label: 'Int %', visible: true, align: 'right' },
+  { id: 'brokerage_commission', label: 'Comm %', visible: true, align: 'right' },
+  { id: 'ledger_balance', label: 'Ledger Bal', visible: true, align: 'right' },
+  { id: 'total_deposits', label: 'Deposits', visible: true, align: 'right', colorClass: 'text-green-400' },
+  { id: 'total_withdrawals', label: 'Withdrawals', visible: true, align: 'right', colorClass: 'text-amber-400' },
+  { id: 'gross_buy', label: 'Buy', visible: true, align: 'right', colorClass: 'text-red-400' },
+  { id: 'gross_sell', label: 'Sell', visible: true, align: 'right', colorClass: 'text-green-400' },
+  { id: 'net_sell', label: 'Net Sell', visible: true, align: 'right' },
+  { id: 'adjusted_ledger', label: 'Adj. Ledger', visible: true, align: 'right' },
+  { id: 'accrued_interest', label: 'Accrued Int.', visible: true, align: 'right', colorClass: 'text-orange-400' },
+  { id: 'receivable', label: 'Receivable', visible: true, align: 'right', colorClass: 'text-green-400' },
+  { id: 'payable', label: 'Payable', visible: true, align: 'right', colorClass: 'text-amber-400' },
+  { id: 'brokerage_amount', label: 'Brokerage', visible: true, align: 'right' },
+];
 
 const evaluateFormula = (formula: string, row: AccountingRow): number => {
   try {
@@ -103,7 +132,9 @@ const evaluateFormula = (formula: string, row: AccountingRow): number => {
 const AccountingTab = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
+  const [columns, setColumns] = useState<ColumnConfig[]>(DEFAULT_COLUMNS);
   const [isFieldDialogOpen, setIsFieldDialogOpen] = useState(false);
+  const [isColumnDialogOpen, setIsColumnDialogOpen] = useState(false);
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldFormula, setNewFieldFormula] = useState("");
   const [selectedInvestor, setSelectedInvestor] = useState<AccountingRow | null>(null);
@@ -122,10 +153,27 @@ const AccountingTab = () => {
     }
   }, []);
 
+  // Load columns config from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
+    if (saved) {
+      try {
+        setColumns(JSON.parse(saved));
+      } catch {
+        console.error('Failed to load columns config');
+      }
+    }
+  }, []);
+
   // Save custom fields to localStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(customFields));
   }, [customFields]);
+
+  // Save columns config to localStorage
+  useEffect(() => {
+    localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(columns));
+  }, [columns]);
 
   // Fetch investors with their rates
   const { data: investors = [], isLoading: loadingInvestors } = useQuery({
@@ -404,6 +452,60 @@ const AccountingTab = () => {
     a.click();
   };
 
+  const toggleColumnVisibility = (columnId: string) => {
+    setColumns(cols => cols.map(c => 
+      c.id === columnId ? { ...c, visible: !c.visible } : c
+    ));
+  };
+
+  const moveColumn = (columnId: string, direction: 'up' | 'down') => {
+    setColumns(cols => {
+      const index = cols.findIndex(c => c.id === columnId);
+      if (index === -1) return cols;
+      if (direction === 'up' && index === 0) return cols;
+      if (direction === 'down' && index === cols.length - 1) return cols;
+      
+      const newCols = [...cols];
+      const swapIndex = direction === 'up' ? index - 1 : index + 1;
+      [newCols[index], newCols[swapIndex]] = [newCols[swapIndex], newCols[index]];
+      return newCols;
+    });
+  };
+
+  const visibleColumns = columns.filter(c => c.visible);
+
+  const getCellValue = (row: AccountingRow, columnId: string) => {
+    const value = row[columnId];
+    if (columnId === 'investor_code' || columnId === 'investor_name' || columnId === 'account_type') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      if (columnId === 'interest_rate' || columnId === 'brokerage_commission') {
+        return value.toFixed(2);
+      }
+      return value > 0 || value < 0 ? formatCurrency(value) : '-';
+    }
+    return value || '-';
+  };
+
+  const getCellClassName = (row: AccountingRow, column: ColumnConfig) => {
+    const value = row[column.id];
+    const baseClass = column.align === 'right' ? 'text-right' : '';
+    
+    if (column.id === 'investor_code') return `${baseClass} font-mono`;
+    if (column.id === 'investor_name') return `${baseClass} truncate max-w-[200px]`;
+    if (column.id === 'ledger_balance' && typeof value === 'number' && value < 0) return `${baseClass} text-red-400`;
+    if (column.id === 'adjusted_ledger' && typeof value === 'number' && value < 0) return `${baseClass} font-medium text-red-400`;
+    if (column.id === 'adjusted_ledger') return `${baseClass} font-medium`;
+    if (column.id === 'net_sell' && typeof value === 'number') {
+      if (value > 0) return `${baseClass} text-green-400`;
+      if (value < 0) return `${baseClass} text-red-400`;
+    }
+    if (column.colorClass && typeof value === 'number' && value !== 0) return `${baseClass} ${column.colorClass}`;
+    
+    return baseClass;
+  };
+
   return (
     <div className="space-y-6 w-full overflow-x-hidden">
       {/* Summary Cards - Sticky */}
@@ -591,6 +693,56 @@ const AccountingTab = () => {
             </DialogContent>
           </Dialog>
 
+          {/* Column Settings Dialog */}
+          <Dialog open={isColumnDialogOpen} onOpenChange={setIsColumnDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Eye className="h-4 w-4 mr-2" />
+                Columns
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Configure Columns</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {columns.map((column, index) => (
+                  <div key={column.id} className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={column.visible}
+                        onCheckedChange={() => toggleColumnVisibility(column.id)}
+                      />
+                      <span className={cn("text-sm", !column.visible && "text-muted-foreground")}>
+                        {column.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => moveColumn(column.id, 'up')}
+                        disabled={index === 0}
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => moveColumn(column.id, 'down')}
+                        disabled={index === columns.length - 1}
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="h-4 w-4 mr-2" />
             Export
@@ -617,129 +769,68 @@ const AccountingTab = () => {
               ))}
             </div>
           ) : (
-            <div className="relative">
-              {/* Frozen columns wrapper */}
-              <div className="flex">
-                {/* Frozen left columns */}
-                <div className="flex-shrink-0 border-r border-border bg-background z-10 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.15)]">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/50">
-                        <TableHead className="w-[100px] min-w-[100px] bg-muted/50">Code</TableHead>
-                        <TableHead className="w-[180px] min-w-[180px] bg-muted/50">Name</TableHead>
-                        <TableHead className="w-[80px] min-w-[80px] bg-muted/50">Type</TableHead>
-                        <TableHead className="w-[80px] min-w-[80px] text-right bg-muted/50">Int %</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredData.slice(0, 100).map((row) => (
-                        <TableRow 
-                          key={row.investor_code}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => setSelectedInvestor(row)}
+            <div>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      {visibleColumns.map(column => (
+                        <TableHead 
+                          key={column.id} 
+                          className={cn(
+                            "min-w-[100px]",
+                            column.align === 'right' && "text-right",
+                            column.colorClass
+                          )}
                         >
-                          <TableCell className="font-mono w-[100px]">{row.investor_code}</TableCell>
-                          <TableCell className="w-[180px] truncate">{row.investor_name}</TableCell>
-                          <TableCell className="w-[80px]">{row.account_type}</TableCell>
-                          <TableCell className="w-[80px] text-right">{row.interest_rate.toFixed(2)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                {/* Scrollable right columns */}
-                <div className="overflow-x-auto flex-1">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/50">
-                        <TableHead className="text-right min-w-[90px]">Comm %</TableHead>
-                        <TableHead className="text-right min-w-[110px]">Ledger Bal</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Deposits</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Withdrawals</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Buy</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Sell</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Net Sell</TableHead>
-                        <TableHead className="text-right min-w-[110px]">Adj. Ledger</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Accrued Int.</TableHead>
-                        <TableHead className="text-right min-w-[120px] text-green-400">Receivable</TableHead>
-                        <TableHead className="text-right min-w-[120px] text-amber-400">Payable</TableHead>
-                        <TableHead className="text-right min-w-[100px]">Brokerage</TableHead>
-                        {customFields.map(field => (
-                          <TableHead key={field.id} className="text-right min-w-[100px] text-primary">
-                            {field.name}
-                          </TableHead>
-                        ))}
-                        <TableHead className="w-[40px] min-w-[40px]">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="h-6 w-6 p-0 hover:bg-primary/20"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setIsFieldDialogOpen(true);
-                            }}
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
+                          {column.label}
                         </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredData.slice(0, 100).map((row) => (
-                        <TableRow 
-                          key={row.investor_code}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => setSelectedInvestor(row)}
-                        >
-                          <TableCell className="text-right">{row.brokerage_commission.toFixed(2)}</TableCell>
-                          <TableCell className={cn("text-right", row.ledger_balance < 0 && "text-red-400")}>
-                            {formatCurrency(row.ledger_balance)}
-                          </TableCell>
-                          <TableCell className="text-right text-green-400">
-                            {row.total_deposits > 0 ? formatCurrency(row.total_deposits) : '-'}
-                          </TableCell>
-                          <TableCell className="text-right text-amber-400">
-                            {row.total_withdrawals > 0 ? formatCurrency(row.total_withdrawals) : '-'}
-                          </TableCell>
-                          <TableCell className="text-right text-red-400">
-                            {row.gross_buy > 0 ? formatCurrency(row.gross_buy) : '-'}
-                          </TableCell>
-                          <TableCell className="text-right text-green-400">
-                            {row.gross_sell > 0 ? formatCurrency(row.gross_sell) : '-'}
-                          </TableCell>
-                          <TableCell className={cn("text-right", row.net_sell > 0 ? 'text-green-400' : row.net_sell < 0 ? 'text-red-400' : '')}>
-                            {formatCurrency(row.net_sell)}
-                          </TableCell>
-                          <TableCell className={cn("text-right font-medium", row.adjusted_ledger < 0 && "text-red-400")}>
-                            {formatCurrency(row.adjusted_ledger)}
-                          </TableCell>
-                          <TableCell className="text-right text-orange-400">
-                            {row.accrued_interest > 0 ? formatCurrency(row.accrued_interest) : '-'}
-                          </TableCell>
-                          <TableCell className="text-right text-green-400 font-medium">
-                            {row.receivable > 0 ? formatCurrency(row.receivable) : '-'}
-                          </TableCell>
-                          <TableCell className="text-right text-amber-400 font-medium">
-                            {row.payable > 0 ? formatCurrency(row.payable) : '-'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {row.brokerage_amount > 0 ? formatCurrency(row.brokerage_amount) : '-'}
-                          </TableCell>
-                          {customFields.map(field => {
-                            const value = row[field.id] as number;
-                            return (
-                              <TableCell key={field.id} className={cn("text-right", value < 0 ? 'text-red-400' : value > 0 ? 'text-primary' : '')}>
-                                {formatCurrency(value)}
-                              </TableCell>
-                            );
-                          })}
-                          <TableCell className="w-[40px]"></TableCell>
-                        </TableRow>
                       ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      {customFields.map(field => (
+                        <TableHead key={field.id} className="text-right min-w-[100px] text-primary">
+                          {field.name}
+                        </TableHead>
+                      ))}
+                      <TableHead className="w-[40px] min-w-[40px]">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-6 w-6 p-0 hover:bg-primary/20"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsFieldDialogOpen(true);
+                          }}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredData.slice(0, 100).map((row) => (
+                      <TableRow 
+                        key={row.investor_code}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => setSelectedInvestor(row)}
+                      >
+                        {visibleColumns.map(column => (
+                          <TableCell key={column.id} className={getCellClassName(row, column)}>
+                            {getCellValue(row, column.id)}
+                          </TableCell>
+                        ))}
+                        {customFields.map(field => {
+                          const value = row[field.id] as number;
+                          return (
+                            <TableCell key={field.id} className={cn("text-right", value < 0 ? 'text-red-400' : value > 0 ? 'text-primary' : '')}>
+                              {formatCurrency(value)}
+                            </TableCell>
+                          );
+                        })}
+                        <TableCell className="w-[40px]"></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
               {filteredData.length > 100 && (
                 <p className="text-sm text-muted-foreground mt-4 text-center p-4">
