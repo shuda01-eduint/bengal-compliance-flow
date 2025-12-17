@@ -574,8 +574,9 @@ const AccountingTab = () => {
       </div>
 
       {/* Controls */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-md group">
+      <div className="space-y-4">
+        {/* Search Row */}
+        <div className="relative w-full max-w-lg group">
           <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/5 rounded-lg blur-sm opacity-0 group-focus-within:opacity-100 transition-opacity" />
           <div className="relative flex items-center">
             <Search className="absolute left-3 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -600,13 +601,15 @@ const AccountingTab = () => {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+
+        {/* Actions Row */}
+        <div className="flex flex-wrap items-center gap-3">
           {/* Date Range Selection */}
-          <div className="flex items-center gap-1 sm:gap-2 p-2 bg-muted/30 rounded-lg flex-wrap">
+          <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="w-[110px] sm:w-[130px] text-xs sm:text-sm">
-                  <CalendarIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <Button variant="ghost" size="sm" className="h-8 px-3">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
                   {format(fromDate, 'dd MMM yy')}
                 </Button>
               </PopoverTrigger>
@@ -619,11 +622,11 @@ const AccountingTab = () => {
                 />
               </PopoverContent>
             </Popover>
-            <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+            <ArrowRight className="h-4 w-4 text-muted-foreground" />
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="w-[110px] sm:w-[130px] text-xs sm:text-sm">
-                  <CalendarIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <Button variant="ghost" size="sm" className="h-8 px-3">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
                   {format(toDate, 'dd MMM yy')}
                 </Button>
               </PopoverTrigger>
@@ -638,131 +641,133 @@ const AccountingTab = () => {
             </Popover>
           </div>
 
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm text-muted-foreground hidden sm:inline">
             Period: {format(fromDate, 'dd MMM')} - {format(toDate, 'dd MMM yyyy')}
           </span>
-          
-          <Dialog open={isFieldDialogOpen} onOpenChange={setIsFieldDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Settings className="h-4 w-4 mr-2" />
-                Custom Fields
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Manage Custom Fields</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-3">
-                  <div>
-                    <Label>Field Name</Label>
-                    <Input
-                      placeholder="e.g., Daily Interest"
-                      value={newFieldName}
-                      onChange={(e) => setNewFieldName(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>Formula</Label>
-                    <Input
-                      placeholder="e.g., max(0, net_sell)"
-                      value={newFieldFormula}
-                      onChange={(e) => setNewFieldFormula(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Fields: ledger, deposits, withdrawals, net_sell, adjusted_ledger, accrued_interest, interest_rate, receivable, payable, gross_buy, gross_sell, brokerage_amount
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Functions: ABS(), MAX(a, b), MIN(a, b)
-                    </p>
-                  </div>
-                  <Button onClick={handleAddField} size="sm">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Field
-                  </Button>
-                </div>
 
-                {customFields.length > 0 && (
-                  <div className="border-t pt-4">
-                    <Label className="mb-2 block">Current Fields</Label>
-                    <div className="space-y-2">
-                      {customFields.map(field => (
-                        <div key={field.id} className="flex items-center justify-between p-2 bg-muted rounded">
-                          <div>
-                            <span className="font-medium">{field.name}</span>
-                            <span className="text-xs text-muted-foreground ml-2">= {field.formula}</span>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveField(field.id)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          {/* Column Settings Dialog */}
-          <Dialog open={isColumnDialogOpen} onOpenChange={setIsColumnDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Eye className="h-4 w-4 mr-2" />
-                Columns
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Configure Columns</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {columns.map((column, index) => (
-                  <div key={column.id} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        checked={column.visible}
-                        onCheckedChange={() => toggleColumnVisibility(column.id)}
+          <div className="flex items-center gap-2 ml-auto">
+            <Dialog open={isFieldDialogOpen} onOpenChange={setIsFieldDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Settings className="h-4 w-4 mr-2" />
+                  Custom Fields
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Manage Custom Fields</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div>
+                      <Label>Field Name</Label>
+                      <Input
+                        placeholder="e.g., Daily Interest"
+                        value={newFieldName}
+                        onChange={(e) => setNewFieldName(e.target.value)}
                       />
-                      <span className={cn("text-sm", !column.visible && "text-muted-foreground")}>
-                        {column.label}
-                      </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={() => moveColumn(column.id, 'up')}
-                        disabled={index === 0}
-                      >
-                        <ChevronUp className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={() => moveColumn(column.id, 'down')}
-                        disabled={index === columns.length - 1}
-                      >
-                        <ChevronDown className="h-4 w-4" />
-                      </Button>
+                    <div>
+                      <Label>Formula</Label>
+                      <Input
+                        placeholder="e.g., max(0, net_sell)"
+                        value={newFieldFormula}
+                        onChange={(e) => setNewFieldFormula(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Fields: ledger, deposits, withdrawals, net_sell, adjusted_ledger, accrued_interest, interest_rate, receivable, payable, gross_buy, gross_sell, brokerage_amount
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Functions: ABS(), MAX(a, b), MIN(a, b)
+                      </p>
                     </div>
+                    <Button onClick={handleAddField} size="sm">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Field
+                    </Button>
                   </div>
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
 
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
+                  {customFields.length > 0 && (
+                    <div className="border-t pt-4">
+                      <Label className="mb-2 block">Current Fields</Label>
+                      <div className="space-y-2">
+                        {customFields.map(field => (
+                          <div key={field.id} className="flex items-center justify-between p-2 bg-muted rounded">
+                            <div>
+                              <span className="font-medium">{field.name}</span>
+                              <span className="text-xs text-muted-foreground ml-2">= {field.formula}</span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveField(field.id)}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Column Settings Dialog */}
+            <Dialog open={isColumnDialogOpen} onOpenChange={setIsColumnDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Eye className="h-4 w-4 mr-2" />
+                  Columns
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Configure Columns</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                  {columns.map((column, index) => (
+                    <div key={column.id} className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={column.visible}
+                          onCheckedChange={() => toggleColumnVisibility(column.id)}
+                        />
+                        <span className={cn("text-sm", !column.visible && "text-muted-foreground")}>
+                          {column.label}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => moveColumn(column.id, 'up')}
+                          disabled={index === 0}
+                        >
+                          <ChevronUp className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => moveColumn(column.id, 'down')}
+                          disabled={index === columns.length - 1}
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </div>
         </div>
       </div>
 
