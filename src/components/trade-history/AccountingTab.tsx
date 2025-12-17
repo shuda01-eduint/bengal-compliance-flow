@@ -329,9 +329,12 @@ const AccountingTab = () => {
       // Brokerage amount calculation
       const brokerage_amount = (gross_buy + gross_sell) * (inv.brokerage_commission || 0) / 100;
       
-      // Calculate receivable (from broker - when net_sell > 0) and payable (to broker - when net_sell < 0)
-      const receivable = Math.max(0, net_sell);
-      const payable = Math.max(0, -net_sell);
+      // Calculate final balance: Ledger + Deposits - Withdrawals + Net Sell - Charges
+      // If positive: broker owes investor (Receivable)
+      // If negative: investor owes broker (Payable)
+      const final_balance = ledger_balance + total_deposits - total_withdrawals + net_sell - brokerage_amount;
+      const receivable = Math.max(0, final_balance);
+      const payable = Math.max(0, -final_balance);
       
       // Calculate accrued interest for margin accounts with negative balance
       let accrued_interest = 0;
