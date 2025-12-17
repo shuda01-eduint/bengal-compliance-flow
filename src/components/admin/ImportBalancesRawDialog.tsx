@@ -61,12 +61,14 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
   const [open, setOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState<string>("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [asOfDate, setAsOfDate] = useState<Date>(new Date());
 
   const processFile = useCallback(async (file: File) => {
     setIsUploading(true);
     setProgress(10);
+    setProgressMessage("Reading file...");
 
     try {
       const data = await file.arrayBuffer();
@@ -160,19 +162,21 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
       console.log(`RM matching: ${matchedRms} matched, ${unmatchedRms} unmatched`);
 
       setProgress(50);
+      setProgressMessage("Clearing existing balance data... (this can take a few minutes)");
 
       // Delete ALL existing records in batches to avoid timeout
       console.log('Clearing all existing balance data in batches...');
       let deletedTotal = 0;
       let hasMore = true;
-      const fetchBatchSize = 500; // Fetch this many IDs at a time
-      const deleteBatchSize = 50; // Delete in smaller chunks to avoid URL length issues
+      const fetchBatchSize = 1000; // Fetch this many IDs at a time
+      const deleteBatchSize = 150; // Delete in chunks to avoid URL length issues
       
       while (hasMore) {
         // Get a batch of IDs to delete
         const { data: idsToDelete, error: selectError } = await supabase
           .from('balances_raw')
           .select('id')
+          .order('id', { ascending: true })
           .limit(fetchBatchSize);
         
         if (selectError) {
@@ -201,6 +205,8 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
         
         deletedTotal += idsToDelete.length;
         console.log(`Deleted ${deletedTotal} records...`);
+        setProgressMessage(`Clearing existing balance data... deleted ${deletedTotal} rows`);
+        setProgress(50 + Math.min(9, Math.floor(deletedTotal / 5000)));
         
         // Yield to UI
         await new Promise(resolve => requestAnimationFrame(resolve));
@@ -209,6 +215,7 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
       console.log(`Cleared all existing balance data (${deletedTotal} records)`);
 
       setProgress(60);
+      setProgressMessage("Uploading new balance data...");
 
       // Insert in batches
       const batchSize = 500;
@@ -226,6 +233,7 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
         }
 
         inserted += batch.length;
+        setProgressMessage(`Uploading new balance data... ${inserted}/${records.length}`);
         setProgress(60 + Math.round((inserted / records.length) * 35));
 
         // Yield to UI
@@ -245,6 +253,7 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
     } finally {
       setIsUploading(false);
       setProgress(0);
+      setProgressMessage("");
       setSelectedFile(null);
     }
   }, [asOfDate, onImportComplete]);
@@ -337,7 +346,7 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
                 />
               </div>
               <p className="text-xs text-muted-foreground text-center">
-                Importing... {progress}%
+                {progressMessage ? `${progressMessage} (${progress}%)` : `Importing... ${progress}%`}
               </p>
             </div>
           )}
