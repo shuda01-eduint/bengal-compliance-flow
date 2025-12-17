@@ -75,7 +75,7 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'accrued_interest', label: 'Accrued Int.', visible: true, align: 'right', colorClass: 'text-orange-400' },
   { id: 'brokerage_amount', label: 'Brokerage', visible: true, align: 'right' },
   { id: 'final_balance', label: 'Final Bal', visible: true, align: 'right', colorClass: 'text-blue-400' },
-  { id: 'receivable', label: 'Receivable', visible: true, align: 'right', colorClass: 'text-green-400' },
+  { id: 'receivable', label: 'Closing Balance', visible: true, align: 'right', colorClass: 'text-green-400' },
   { id: 'payable', label: 'Payable', visible: true, align: 'right', colorClass: 'text-amber-400' },
 ];
 
