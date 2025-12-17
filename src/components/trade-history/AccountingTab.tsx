@@ -193,48 +193,36 @@ const AccountingTab = () => {
     },
   });
 
-  // Fetch latest trade date
-  const { data: latestTradeDate } = useQuery({
-    queryKey: ['accounting-latest-trade-date'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('trade_history')
-        .select('trade_date')
-        .order('trade_date', { ascending: false })
-        .limit(1);
-      if (error) throw error;
-      return data?.[0]?.trade_date || null;
-    },
-  });
+  // Format dates for queries
+  const fromDateStr = format(fromDate, 'yyyy-MM-dd');
+  const toDateStr = format(toDate, 'yyyy-MM-dd');
 
-  // Fetch deposits/withdrawals
+  // Fetch deposits/withdrawals for date range
   const { data: transactions = [], isLoading: loadingTx } = useQuery({
-    queryKey: ['accounting-transactions', latestTradeDate],
+    queryKey: ['accounting-transactions', fromDateStr, toDateStr],
     queryFn: async () => {
-      if (!latestTradeDate) return [];
       const { data, error } = await supabase
         .from('deposits_withdrawals')
         .select('investor_code, transaction_type, amount')
-        .eq('transaction_date', latestTradeDate);
+        .gte('transaction_date', fromDateStr)
+        .lte('transaction_date', toDateStr);
       if (error) throw error;
       return data || [];
     },
-    enabled: !!latestTradeDate,
   });
 
-  // Fetch trades for net sell calculation
+  // Fetch trades for date range
   const { data: trades = [], isLoading: loadingTrades } = useQuery({
-    queryKey: ['accounting-trades', latestTradeDate],
+    queryKey: ['accounting-trades', fromDateStr, toDateStr],
     queryFn: async () => {
-      if (!latestTradeDate) return [];
       const { data, error } = await supabase
         .from('trade_history')
         .select('client_code, side, value')
-        .eq('trade_date', latestTradeDate);
+        .gte('trade_date', fromDateStr)
+        .lte('trade_date', toDateStr);
       if (error) throw error;
       return data || [];
     },
-    enabled: !!latestTradeDate,
   });
 
   // Build accounting data
@@ -414,7 +402,7 @@ const AccountingTab = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `accounting_${latestTradeDate || 'data'}.csv`;
+    a.download = `accounting_${fromDateStr}_to_${toDateStr}.csv`;
     a.click();
   };
 
@@ -534,9 +522,9 @@ const AccountingTab = () => {
             </Popover>
           </div>
 
-          {latestTradeDate && (
-            <span className="text-sm text-muted-foreground">Trade: {latestTradeDate}</span>
-          )}
+          <span className="text-sm text-muted-foreground">
+            Period: {format(fromDate, 'dd MMM')} - {format(toDate, 'dd MMM yyyy')}
+          </span>
           
           <Dialog open={isFieldDialogOpen} onOpenChange={setIsFieldDialogOpen}>
             <DialogTrigger asChild>
