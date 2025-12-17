@@ -165,13 +165,15 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
       console.log('Clearing all existing balance data in batches...');
       let deletedTotal = 0;
       let hasMore = true;
+      const fetchBatchSize = 500; // Fetch this many IDs at a time
+      const deleteBatchSize = 50; // Delete in smaller chunks to avoid URL length issues
       
       while (hasMore) {
         // Get a batch of IDs to delete
         const { data: idsToDelete, error: selectError } = await supabase
           .from('balances_raw')
           .select('id')
-          .limit(5000);
+          .limit(fetchBatchSize);
         
         if (selectError) {
           console.error('Select error:', selectError);
@@ -183,15 +185,18 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
           break;
         }
         
-        // Delete this batch
-        const { error: deleteError } = await supabase
-          .from('balances_raw')
-          .delete()
-          .in('id', idsToDelete.map(r => r.id));
-        
-        if (deleteError) {
-          console.error('Delete error:', deleteError);
-          throw new Error(`Failed to clear existing data: ${deleteError.message}`);
+        // Delete in small chunks to avoid URL length issues
+        for (let i = 0; i < idsToDelete.length; i += deleteBatchSize) {
+          const chunk = idsToDelete.slice(i, i + deleteBatchSize);
+          const { error: deleteError } = await supabase
+            .from('balances_raw')
+            .delete()
+            .in('id', chunk.map(r => r.id));
+          
+          if (deleteError) {
+            console.error('Delete error:', deleteError);
+            throw new Error(`Failed to clear existing data: ${deleteError.message}`);
+          }
         }
         
         deletedTotal += idsToDelete.length;
