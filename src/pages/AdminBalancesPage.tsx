@@ -275,21 +275,24 @@ const AdminBalancesPage = () => {
     enabled: !!selectedDate,
   });
 
-  // Fetch next day's trades
-  const { data: nextDayTrades } = useQuery({
-    queryKey: ['next-day-trades', selectedDate?.toISOString()],
+  // Fetch previous day's trades (T-1 trades settle into T balance)
+  const { data: prevDayTrades, isLoading: tradesLoading } = useQuery({
+    queryKey: ['prev-day-trades', selectedDate?.toISOString()],
     queryFn: async () => {
       if (!selectedDate) return [];
-      const nextDay = addDays(selectedDate, 1);
+      const prevDay = addDays(selectedDate, -1);
       // trade_date is stored as YYYYMMDD format (no dashes)
-      const nextDayStr = format(nextDay, 'yyyyMMdd');
+      const tradeDateStr = format(prevDay, 'yyyyMMdd');
+      
+      console.log('Fetching trades for previous day:', tradeDateStr);
       
       const { data, error } = await supabase
         .from('trade_history')
         .select('client_code, side, value')
-        .eq('trade_date', nextDayStr);
+        .eq('trade_date', tradeDateStr);
       
       if (error) throw error;
+      console.log('Previous day trades found:', data?.length || 0);
       return data || [];
     },
     enabled: !!selectedDate,
@@ -312,7 +315,7 @@ const AdminBalancesPage = () => {
     });
     
     // Process trades - net_sell = sell_value - buy_value, net_buy = buy_value - sell_value
-    nextDayTrades?.forEach(trade => {
+    prevDayTrades?.forEach(trade => {
       const clientCode = trade.client_code;
       if (!clientCode) return;
       
@@ -330,7 +333,7 @@ const AdminBalancesPage = () => {
     });
     
     return adjustments;
-  }, [nextDayTransactions, nextDayTrades]);
+  }, [nextDayTransactions, prevDayTrades]);
 
   // Fetch portfolios for grouping
   const { data: portfolios } = useQuery({
