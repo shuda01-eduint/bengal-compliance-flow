@@ -55,6 +55,7 @@ export interface BalanceSummary {
   cq_sum: number;
   total_clients: number;
   total_accrued_interest: number;
+  total_margin_loan: number;
 }
 
 export interface InvestorGroupedRow {
@@ -191,6 +192,7 @@ export function calculateSummary(rows: EnrichedBalanceRow[]): BalanceSummary {
   const uniqueInvestors = new Set<string>();
   const negativeInvestors = new Set<string>();
   const marginInvestorsInterest: Record<string, number> = {};
+  const marginInvestorsLoan: Record<string, number> = {};
 
   let total_cost_sum = 0;
   let total_mv_sum = 0;
@@ -211,14 +213,18 @@ export function calculateSummary(rows: EnrichedBalanceRow[]): BalanceSummary {
       negativeInvestors.add(row.investor_code);
     }
     
-    // Track accrued interest per investor (to avoid double counting across instruments)
+    // Track accrued interest and loan per investor (to avoid double counting across instruments)
+    // accrued_interest > 0 indicates margin account with negative balance
     if (row.accrued_interest > 0) {
       marginInvestorsInterest[row.investor_code] = row.accrued_interest;
+      marginInvestorsLoan[row.investor_code] = Math.abs(row.adjusted_ledger);
     }
   });
 
   // Sum unique accrued interest per investor
   const total_accrued_interest = Object.values(marginInvestorsInterest).reduce((sum, val) => sum + val, 0);
+  // Sum total loan (negative balances of margin accounts)
+  const total_margin_loan = Object.values(marginInvestorsLoan).reduce((sum, val) => sum + val, 0);
 
   return {
     total_cost_sum,
@@ -229,6 +235,7 @@ export function calculateSummary(rows: EnrichedBalanceRow[]): BalanceSummary {
     cq_sum,
     total_clients: uniqueInvestors.size,
     total_accrued_interest,
+    total_margin_loan,
   };
 }
 
