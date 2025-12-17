@@ -329,8 +329,8 @@ const AccountingTab = () => {
       const net_sell = gross_sell - gross_buy;
       const adjusted_ledger = ledger_balance + total_deposits - total_withdrawals + net_sell;
       
-      // Brokerage amount calculation
-      const brokerage_amount = (gross_buy + gross_sell) * (inv.brokerage_commission || 0) / 100;
+      // Brokerage amount calculation (brokerage_commission is already stored as decimal e.g. 0.0018 = 0.18%)
+      const brokerage_amount = (gross_buy + gross_sell) * (inv.brokerage_commission || 0);
       
       // Calculate final balance: Ledger + Deposits - Withdrawals + Net Sell - Charges
       // If positive: broker owes investor (Receivable)
