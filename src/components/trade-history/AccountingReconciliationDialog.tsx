@@ -380,11 +380,11 @@ export function AccountingReconciliationDialog({
 
   return (
     <Dialog open={!!investor} onOpenChange={() => onClose()}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span>Reconciliation: {investor.investor_code}</span>
+          <DialogTitle className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm sm:text-base">Reconciliation: {investor.investor_code}</span>
               <Badge variant={investor.account_type?.toLowerCase() === 'margin' ? 'destructive' : 'default'}>
                 {investor.account_type || 'Cash'}
               </Badge>
@@ -397,17 +397,17 @@ export function AccountingReconciliationDialog({
         </DialogHeader>
 
         {/* Date Selection */}
-        <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-lg">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">From:</span>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 p-3 sm:p-4 bg-muted/30 rounded-lg">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <span className="text-xs sm:text-sm text-muted-foreground">From:</span>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="w-[140px]">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(selectedFromDate, 'dd MMM yyyy')}
+                <Button variant="outline" size="sm" className="w-[100px] sm:w-[130px] text-xs sm:text-sm">
+                  <CalendarIcon className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+                  {format(selectedFromDate, 'dd MMM yy')}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
+              <PopoverContent className="w-auto p-0 z-50 bg-background border">
                 <Calendar
                   mode="single"
                   selected={selectedFromDate}
@@ -417,17 +417,17 @@ export function AccountingReconciliationDialog({
               </PopoverContent>
             </Popover>
           </div>
-          <ArrowRight className="h-4 w-4 text-muted-foreground" />
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">To:</span>
+          <ArrowRight className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+          <div className="flex items-center gap-1 sm:gap-2">
+            <span className="text-xs sm:text-sm text-muted-foreground">To:</span>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="w-[140px]">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(selectedToDate, 'dd MMM yyyy')}
+                <Button variant="outline" size="sm" className="w-[100px] sm:w-[130px] text-xs sm:text-sm">
+                  <CalendarIcon className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+                  {format(selectedToDate, 'dd MMM yy')}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
+              <PopoverContent className="w-auto p-0 z-50 bg-background border">
                 <Calendar
                   mode="single"
                   selected={selectedToDate}
@@ -437,7 +437,7 @@ export function AccountingReconciliationDialog({
               </PopoverContent>
             </Popover>
           </div>
-          <Badge variant="secondary">{daysDiff} days</Badge>
+          <Badge variant="secondary" className="text-xs">{daysDiff} days</Badge>
         </div>
 
         {isLoading ? (
@@ -495,6 +495,7 @@ export function AccountingReconciliationDialog({
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -531,6 +532,7 @@ export function AccountingReconciliationDialog({
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -542,6 +544,7 @@ export function AccountingReconciliationDialog({
                   <CardTitle className="text-base">Holdings Comparison</CardTitle>
                 </CardHeader>
                 <CardContent>
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -589,6 +592,7 @@ export function AccountingReconciliationDialog({
                       )}
                     </TableBody>
                   </Table>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -628,6 +632,7 @@ export function AccountingReconciliationDialog({
                     </div>
                   </div>
 
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -669,6 +674,7 @@ export function AccountingReconciliationDialog({
                       )}
                     </TableBody>
                   </Table>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
