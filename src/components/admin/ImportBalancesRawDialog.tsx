@@ -26,17 +26,17 @@ interface ImportBalancesRawDialogProps {
 
 // Column name variations for flexible mapping
 const COLUMN_MAPPINGS: Record<string, string[]> = {
-  investor_code: ['Investor Code', 'Inv. Code', 'Inv Code', 'Code', 'investor_code', 'InvCode'],
-  instrument: ['Instrument', 'Trading Code', 'Script', 'Security', 'instrument'],
-  total_stock: ['TotalStock', 'Total Stock', 'Total Qty', 'Qty', 'total_stock', 'Quantity'],
-  saleable: ['Saleable', 'Saleable Qty', 'saleable', 'SaleableQty'],
-  avg_cost: ['AvgCost', 'Avg Cost', 'Average Cost', 'avg_cost', 'Avg. Cost'],
-  total_cost: ['Total Cost', 'TotalCost', 'Cost', 'total_cost'],
-  total_mv: ['Total M.V.', 'Total MV', 'Market Value', 'M.V.', 'MV', 'total_mv', 'TotalMV'],
-  ledger_balance: ['Ledger Balance', 'Ledger', 'ledger_balance', 'Balance'],
-  matured_balance: ['Matured Balance', 'Matured', 'matured_balance', 'MaturedBalance'],
-  receivable_sale: ['Receivable sales', 'Receivable Sale', 'receivable_sale', 'Receivables'],
-  cq_in_transit: ['CQ in transit', 'CQ Transit', 'cq_in_transit', 'CQInTransit', 'CQ'],
+  investor_code: ['Investor Code', 'Inv. Code', 'Inv Code', 'Code', 'investor_code', 'InvCode', 'Client Code', 'Account'],
+  instrument: ['Instrument', 'Trading Code', 'Script', 'Security', 'instrument', 'Symbol', 'Stock'],
+  total_stock: ['TotalStock', 'Total Stock', 'Total Qty', 'Qty', 'total_stock', 'Quantity', 'Holdings'],
+  saleable: ['Saleable', 'Saleable Qty', 'saleable', 'SaleableQty', 'Sellable', 'Available'],
+  avg_cost: ['AvgCost', 'Avg Cost', 'Average Cost', 'avg_cost', 'Avg. Cost', 'Unit Cost'],
+  total_cost: ['Total Cost', 'TotalCost', 'Cost', 'total_cost', 'Cost Value'],
+  total_mv: ['Total M.V.', 'Total MV', 'Market Value', 'M.V.', 'MV', 'total_mv', 'TotalMV', 'Market Val'],
+  ledger_balance: ['Ledger Balance', 'Ledger', 'ledger_balance', 'Balance', 'Cash Balance'],
+  matured_balance: ['Matured Balance', 'Matured', 'matured_balance', 'MaturedBalance', 'Matured Bal', 'Matured Value', 'Mature Balance', 'Mature Bal'],
+  receivable_sale: ['Receivable sales', 'Receivable Sale', 'receivable_sale', 'Receivables', 'Rec. Sale', 'Receivable', 'Sales Receivable', 'Sale Receivable'],
+  cq_in_transit: ['CQ in transit', 'CQ Transit', 'cq_in_transit', 'CQInTransit', 'CQ', 'In Transit', 'Transit'],
   rm_name: ['RM', 'RM Name', 'rm_name', 'rm', 'Relationship Manager', 'Manager'],
   rm_id: ['RM ID', 'RM Id', 'rm_id', 'RMID', 'Employee ID', 'EmpID'],
 };
@@ -96,11 +96,19 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
       setProgress(30);
 
       const headers = Object.keys(jsonData[0] as object);
+      console.log('Excel headers found:', headers);
       
       // Map columns
       const columnMap: Record<string, string | null> = {};
       for (const [dbCol, variations] of Object.entries(COLUMN_MAPPINGS)) {
         columnMap[dbCol] = findColumnName(headers, variations);
+      }
+      
+      // Log column mapping results
+      console.log('Column mapping results:', columnMap);
+      const unmappedColumns = Object.entries(columnMap).filter(([_, v]) => !v).map(([k]) => k);
+      if (unmappedColumns.length > 0) {
+        console.warn('Unmapped columns:', unmappedColumns);
       }
 
       // Validate required columns
