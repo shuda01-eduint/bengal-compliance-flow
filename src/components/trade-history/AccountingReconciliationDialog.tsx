@@ -247,13 +247,14 @@ export function AccountingReconciliationDialog({
       }
     });
 
-    const commission = investor?.brokerage_commission || 0.25;
+    const commission = investor?.brokerage_commission || 0.0018;
     
     return Object.entries(groupedByDate).map(([date, { buy, sell }]) => {
       const totalVolume = buy + sell;
-      const brokerage = totalVolume * commission / 100;
-      const exchange_fees = totalVolume * 0.015 / 100; // ~0.015% exchange fees estimate
-      const other_fees = totalVolume * 0.005 / 100; // ~0.005% other fees estimate
+      // brokerage_commission is stored as decimal (e.g., 0.0018 = 0.18%)
+      const brokerage = totalVolume * commission;
+      const exchange_fees = totalVolume * 0.00015; // ~0.015% exchange fees estimate
+      const other_fees = totalVolume * 0.00005; // ~0.005% other fees estimate
       const net_cash = sell - buy - brokerage - exchange_fees - other_fees;
       
       return {
@@ -860,7 +861,7 @@ export function AccountingReconciliationDialog({
                     </div>
                     
                     <div className="flex justify-between items-center p-3 border-l-4 border-amber-500 bg-amber-500/10 rounded-r-lg">
-                      <span>- Brokerage ({investor.brokerage_commission}%)</span>
+                      <span>- Brokerage ({((investor?.brokerage_commission || 0) * 100).toFixed(2)}%)</span>
                       <span className="text-amber-400">
                         {formatCurrency(brokerageTotals.brokerage)}
                       </span>
@@ -882,16 +883,50 @@ export function AccountingReconciliationDialog({
 
                     <Separator />
                     
-                    <div className="flex justify-between items-center p-3 bg-primary/10 rounded-lg">
-                      <span className="font-medium">= Closing Ledger Balance</span>
-                      <span className={cn("font-semibold text-lg", summaryAfter.ledger_balance < 0 && "text-red-400")}>
-                        {formatCurrency(summaryAfter.ledger_balance)}
-                      </span>
-                    </div>
+                    {(() => {
+                      const settledReceivables = Math.max(0, summaryBefore.receivable_sale - summaryAfter.receivable_sale);
+                      const calculatedClosing = summaryBefore.ledger_balance 
+                        + txTotals.deposits 
+                        - txTotals.withdrawals 
+                        + tradeTotals.sell 
+                        - tradeTotals.buy 
+                        - brokerageTotals.brokerage 
+                        - brokerageTotals.exchange_fees 
+                        - brokerageTotals.other_fees 
+                        + settledReceivables;
+                      const diff = summaryAfter.ledger_balance - calculatedClosing;
+                      
+                      return (
+                        <>
+                          <div className="flex justify-between items-center p-3 bg-muted/50 rounded-lg">
+                            <span className="text-sm text-muted-foreground">= Calculated Closing</span>
+                            <span className={cn("font-medium", calculatedClosing < 0 && "text-red-400")}>
+                              {formatCurrency(calculatedClosing)}
+                            </span>
+                          </div>
+                          
+                          <div className="flex justify-between items-center p-3 bg-primary/10 rounded-lg">
+                            <span className="font-medium">= Actual Closing (from system)</span>
+                            <span className={cn("font-semibold text-lg", summaryAfter.ledger_balance < 0 && "text-red-400")}>
+                              {formatCurrency(summaryAfter.ledger_balance)}
+                            </span>
+                          </div>
+                          
+                          {Math.abs(diff) > 0.01 && (
+                            <div className="flex justify-between items-center p-3 border-l-4 border-yellow-500 bg-yellow-500/10 rounded-r-lg">
+                              <span className="text-sm">Variance</span>
+                              <span className={cn("font-medium", diff > 0 ? "text-green-400" : "text-red-400")}>
+                                {diff > 0 ? '+' : ''}{formatCurrency(diff)}
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
 
                     {accruedInterest > 0 && (
                       <div className="flex justify-between items-center p-3 border-l-4 border-orange-500 bg-orange-500/10 rounded-r-lg">
-                        <span>+ Accrued Interest ({daysDiff} days @ {investor.interest_rate}%)</span>
+                        <span>+ Accrued Interest ({daysDiff} days @ {investor?.interest_rate}%)</span>
                         <span className="text-orange-400">{formatCurrency(accruedInterest)}</span>
                       </div>
                     )}
