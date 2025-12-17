@@ -116,6 +116,7 @@ export type Database = {
           ledger_balance: number | null
           matured_balance: number | null
           receivable_sale: number | null
+          rm_email: string | null
           rm_id: string | null
           rm_name: string | null
           saleable: number | null
@@ -135,6 +136,7 @@ export type Database = {
           ledger_balance?: number | null
           matured_balance?: number | null
           receivable_sale?: number | null
+          rm_email?: string | null
           rm_id?: string | null
           rm_name?: string | null
           saleable?: number | null
@@ -154,6 +156,7 @@ export type Database = {
           ledger_balance?: number | null
           matured_balance?: number | null
           receivable_sale?: number | null
+          rm_email?: string | null
           rm_id?: string | null
           rm_name?: string | null
           saleable?: number | null
@@ -992,6 +995,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_employee_id_for_user: { Args: never; Returns: string }
       get_trade_file_stats: {
         Args: never
         Returns: {

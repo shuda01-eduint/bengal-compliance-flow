@@ -4,15 +4,18 @@ import { EmployeeFilters } from "@/components/employees/EmployeeFilters";
 import { EmployeeAgentCodes } from "@/components/employees/EmployeeAgentCodes";
 import { AgentTradeDetailsTable } from "@/components/trade-history/AgentTradeDetailsTable";
 import { UserManagementTab } from "@/components/organization/UserManagementTab";
-import { employees, departments } from "@/data/employees";
+import { useEmployees } from "@/hooks/useEmployees";
+import { departments } from "@/data/employees";
 import { useState, useMemo } from "react";
-import { Mail, Phone, User, Building2, Users, ChevronRight, UserCog } from "lucide-react";
+import { Mail, Phone, User, Building2, Users, ChevronRight, UserCog, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const EmployeesPage = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  
+  const { data: employees = [], isLoading } = useEmployees();
 
   const filteredEmployees = useMemo(() => {
     return employees.filter((employee) => {
@@ -27,7 +30,7 @@ const EmployeesPage = () => {
 
       return matchesSearch && matchesDepartment;
     });
-  }, [searchQuery, selectedDepartment]);
+  }, [employees, searchQuery, selectedDepartment]);
 
   return (
     <MainLayout 
@@ -65,7 +68,11 @@ const EmployeesPage = () => {
             onViewModeChange={setViewMode}
           />
 
-          {viewMode === "grid" ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : viewMode === "grid" ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filteredEmployees.map((employee, index) => (
                 <EmployeeCard key={employee.id} employee={employee} index={index} />
@@ -111,19 +118,21 @@ const EmployeesPage = () => {
                         {employee.department}
                       </td>
                       <td className="px-6 py-4 text-sm text-muted-foreground">
-                        {employee.location}
+                        {employee.branch}
                       </td>
                       <td className="px-6 py-4">
-                        <EmployeeAgentCodes employeeId={employee.id} compact />
+                        <EmployeeAgentCodes employeeId={employee.employee_id} compact />
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-4">
                           <a href={`mailto:${employee.email}`} className="text-muted-foreground hover:text-primary transition-colors">
                             <Mail className="h-4 w-4" />
                           </a>
-                          <a href={`tel:${employee.phone}`} className="text-muted-foreground hover:text-primary transition-colors">
-                            <Phone className="h-4 w-4" />
-                          </a>
+                          {employee.corporate_phone && (
+                            <a href={`tel:${employee.corporate_phone}`} className="text-muted-foreground hover:text-primary transition-colors">
+                              <Phone className="h-4 w-4" />
+                            </a>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -133,7 +142,7 @@ const EmployeesPage = () => {
             </div>
           )}
 
-          {filteredEmployees.length === 0 && (
+          {filteredEmployees.length === 0 && !isLoading && (
             <div className="glass-card rounded-xl p-12 text-center">
               <User className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-medium text-foreground mb-2">No employees found</h3>

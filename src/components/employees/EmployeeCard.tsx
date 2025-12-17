@@ -1,6 +1,5 @@
-import { Employee } from "@/data/employees";
+import { Employee } from "@/hooks/useEmployees";
 import { Mail, Phone, MapPin, User } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { EmployeeAgentCodes } from "./EmployeeAgentCodes";
 
 interface EmployeeCardProps {
@@ -28,7 +27,7 @@ export function EmployeeCard({ employee, index }: EmployeeCardProps) {
       <div className="mt-4 space-y-2">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
-          <span className="truncate">{employee.location}</span>
+          <span className="truncate">{employee.branch}</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
@@ -36,19 +35,21 @@ export function EmployeeCard({ employee, index }: EmployeeCardProps) {
             {employee.email}
           </a>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Phone className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>{employee.phone}</span>
-        </div>
+        {employee.corporate_phone && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Phone className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>{employee.corporate_phone}</span>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 pt-4 border-t border-border">
         <p className="text-xs text-muted-foreground">
-          Reports to: <span className="text-foreground">{employee.reportingTo}</span>
+          Reports to: <span className="text-foreground">{employee.manager || 'N/A'}</span>
         </p>
       </div>
 
-      <EmployeeAgentCodes employeeId={employee.id} />
+      <EmployeeAgentCodes employeeId={employee.employee_id} />
     </div>
   );
 }
