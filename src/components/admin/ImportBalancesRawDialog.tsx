@@ -161,16 +161,18 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
 
       setProgress(50);
 
-      // Delete existing records for this date first
+      // Delete ALL existing records before importing new data
       const { error: deleteError } = await supabase
         .from('balances_raw')
         .delete()
-        .eq('as_of_date', dateStr);
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
 
       if (deleteError) {
         console.error('Delete error:', deleteError);
         throw new Error(`Failed to clear existing data: ${deleteError.message}`);
       }
+      
+      console.log('Cleared all existing balance data');
 
       setProgress(60);
 
@@ -238,7 +240,7 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
         <DialogHeader>
           <DialogTitle>Import Balance Data</DialogTitle>
           <DialogDescription>
-            Upload an Excel file with balance data per instrument. Existing data for the selected date will be replaced.
+            Upload an Excel file with balance data per instrument. <strong>All existing balance data will be cleared</strong> before importing.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-4">
