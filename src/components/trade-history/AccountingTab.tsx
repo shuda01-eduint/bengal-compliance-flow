@@ -12,12 +12,13 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format, subDays } from "date-fns";
-import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, GripVertical, Eye, EyeOff, ChevronUp, ChevronDown } from "lucide-react";
+import { Search, Download, Wallet, TrendingUp, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { formatCurrency } from "@/lib/balance-utils";
 import { toast } from "sonner";
 import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
 import { TradeDetailsDialog } from "./TradeDetailsDialog";
+import { useDebounce } from "@/hooks/useDebounce";
 
 export interface AccountingRow {
   investor_code: string;
@@ -56,6 +57,7 @@ interface ColumnConfig {
 
 const STORAGE_KEY = 'accounting-custom-fields';
 const COLUMNS_STORAGE_KEY = 'accounting-columns-config';
+const PAGE_SIZE = 50;
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'investor_code', label: 'Code', visible: true, align: 'left' },
@@ -147,6 +149,15 @@ const AccountingTab = () => {
   const [tradeDetailsOpen, setTradeDetailsOpen] = useState(false);
   const [selectedTradeType, setSelectedTradeType] = useState<'BUY' | 'SELL'>('BUY');
   const [selectedTradeInvestor, setSelectedTradeInvestor] = useState<AccountingRow | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
+
+  // Debounce search term for server-side search
+  const debouncedSearch = useDebounce(searchTerm, 300);
+
+  // Reset to first page when search changes
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [debouncedSearch]);
 
   // Load custom fields from localStorage
   useEffect(() => {
@@ -182,226 +193,106 @@ const AccountingTab = () => {
     localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(columns));
   }, [columns]);
 
-  // Fetch investors with their rates
-  const { data: investors = [], isLoading: loadingInvestors } = useQuery({
-    queryKey: ['accounting-investors'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('investors')
-        .select('investor_code, investor_name, account_type, interest_rate, brokerage_commission');
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
-  // Fetch initial ledger balances from balances_raw (admin data)
-  const { data: balancesRaw = [], isLoading: loadingBalances } = useQuery({
-    queryKey: ['accounting-balances-raw'],
-    queryFn: async () => {
-      // First get the latest available date in balances_raw
-      const { data: dateData, error: dateError } = await supabase
-        .from('balances_raw')
-        .select('as_of_date')
-        .order('as_of_date', { ascending: false })
-        .limit(1);
-      
-      if (dateError) throw dateError;
-      const latestBalanceDate = dateData?.[0]?.as_of_date;
-      
-      if (!latestBalanceDate) return [];
-      
-      // Fetch aggregated ledger balances per investor for that date
-      const { data, error } = await supabase
-        .from('balances_raw')
-        .select('investor_code, ledger_balance')
-        .eq('as_of_date', latestBalanceDate);
-      
-      if (error) throw error;
-      
-      // Aggregate ledger_balance per investor (sum across instruments)
-      const balanceMap: Record<string, number> = {};
-      data?.forEach(row => {
-        if (!balanceMap[row.investor_code]) {
-          balanceMap[row.investor_code] = 0;
-        }
-        // Only count ledger_balance once per investor (it's the same across instruments)
-        balanceMap[row.investor_code] = row.ledger_balance || 0;
-      });
-      
-      return Object.entries(balanceMap).map(([investor_code, ledger_balance]) => ({
-        investor_code,
-        ledger_balance,
-        as_of_date: latestBalanceDate,
-      }));
-    },
-  });
-
-  // Fetch client names as fallback
-  const { data: clients = [], isLoading: loadingClients } = useQuery({
-    queryKey: ['accounting-clients'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('inv_code, investor_name');
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
-  // Format dates for queries - different formats for different tables
-  const fromDateStr = format(fromDate, 'yyyy-MM-dd'); // For deposits_withdrawals (date column)
+  // Format dates for queries
+  const fromDateStr = format(fromDate, 'yyyy-MM-dd');
   const toDateStr = format(toDate, 'yyyy-MM-dd');
-  const fromTradeDateStr = format(fromDate, 'yyyyMMdd'); // For trade_history (text column YYYYMMDD)
+  const fromTradeDateStr = format(fromDate, 'yyyyMMdd');
   const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
-  // Fetch deposits/withdrawals for date range
-  const { data: transactions = [], isLoading: loadingTx } = useQuery({
-    queryKey: ['accounting-transactions', fromDateStr, toDateStr],
+  // Fetch accounting data using RPC function (server-side search + pagination)
+  const { data: accountingResult, isLoading: loadingData } = useQuery({
+    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, currentPage],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('deposits_withdrawals')
-        .select('investor_code, transaction_type, amount')
-        .gte('transaction_date', fromDateStr)
-        .lte('transaction_date', toDateStr);
+      const { data, error } = await supabase.rpc('get_accounting_data', {
+        _search_term: debouncedSearch || null,
+        _from_trade_date: fromTradeDateStr,
+        _to_trade_date: toTradeDateStr,
+        _from_tx_date: fromDateStr,
+        _to_tx_date: toDateStr,
+        _page_size: PAGE_SIZE,
+        _page_offset: currentPage * PAGE_SIZE,
+      });
       if (error) throw error;
       return data || [];
     },
   });
 
-  // Fetch aggregated trades for date range using RPC function (avoids 1000-row limit)
-  const { data: tradeSums = [], isLoading: loadingTrades } = useQuery({
-    queryKey: ['accounting-trade-sums', fromTradeDateStr, toTradeDateStr],
+  // Fetch summary data using RPC function
+  const { data: summaryResult, isLoading: loadingSummary } = useQuery({
+    queryKey: ['accounting-summary', fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .rpc('get_accounting_trade_sums', {
-          _from_trade_date: fromTradeDateStr,
-          _to_trade_date: toTradeDateStr,
-        });
+      const { data, error } = await supabase.rpc('get_accounting_summary', {
+        _from_trade_date: fromTradeDateStr,
+        _to_trade_date: toTradeDateStr,
+        _from_tx_date: fromDateStr,
+        _to_tx_date: toDateStr,
+      });
       if (error) throw error;
-      return data || [];
+      return data?.[0] || null;
     },
   });
 
-  // Build accounting data
+  // Process accounting data with custom fields
   const accountingData = useMemo(() => {
-    const investorMap = new Map(investors.map(i => [i.investor_code, i]));
-    const clientMap = new Map(clients.map(c => [c.inv_code, c]));
-    const balanceMap = new Map(balancesRaw.map(b => [b.investor_code, b.ledger_balance]));
-
-    // Aggregate transactions per investor
-    const txMap: Record<string, { deposits: number; withdrawals: number }> = {};
-    transactions.forEach(tx => {
-      if (!txMap[tx.investor_code]) {
-        txMap[tx.investor_code] = { deposits: 0, withdrawals: 0 };
-      }
-      if (tx.transaction_type === 'Deposit') {
-        txMap[tx.investor_code].deposits += tx.amount || 0;
-      } else {
-        txMap[tx.investor_code].withdrawals += tx.amount || 0;
-      }
-    });
-
-    // Build trade map from aggregated RPC results
-    const tradeMap: Record<string, { buy: number; sell: number }> = {};
-    tradeSums.forEach((t: { client_code: string; buy_sum: number; sell_sum: number }) => {
-      if (t.client_code) {
-        tradeMap[t.client_code] = { 
-          buy: Number(t.buy_sum) || 0, 
-          sell: Number(t.sell_sum) || 0 
-        };
-      }
-    });
-
-    // Build rows for all investors
-    const rows: AccountingRow[] = [];
+    if (!accountingResult) return [];
     
-    investors.forEach(inv => {
-      const client = clientMap.get(inv.investor_code);
-      const tx = txMap[inv.investor_code] || { deposits: 0, withdrawals: 0 };
-      const trade = tradeMap[inv.investor_code] || { buy: 0, sell: 0 };
-      
-      // Get ledger balance from balances_raw (admin data) instead of clients
-      const ledger_balance = balanceMap.get(inv.investor_code) || 0;
-      const total_deposits = tx.deposits;
-      const total_withdrawals = tx.withdrawals;
-      const gross_buy = trade.buy;
-      const gross_sell = trade.sell;
-      const net_sell = gross_sell - gross_buy;
-      const adjusted_ledger = ledger_balance + total_deposits - total_withdrawals + net_sell;
-      
-      // Brokerage amount calculation (brokerage_commission is already stored as decimal e.g. 0.0018 = 0.18%)
-      const brokerage_amount = (gross_buy + gross_sell) * (inv.brokerage_commission || 0);
-      
-      // Calculate final balance: Ledger + Deposits - Withdrawals + Net Sell - Charges
-      // If positive: broker owes investor (Receivable)
-      // If negative: investor owes broker (Payable)
-      const final_balance = ledger_balance + total_deposits - total_withdrawals + net_sell - brokerage_amount;
-      const receivable = Math.max(0, final_balance);
-      const payable = Math.max(0, -final_balance);
-      
-      // Calculate accrued interest for margin accounts with negative balance
-      let accrued_interest = 0;
-      if (inv.account_type?.toLowerCase() === 'margin' && adjusted_ledger < 0) {
-        accrued_interest = (inv.interest_rate / 365) * Math.abs(adjusted_ledger) / 100;
-      }
-
-      const row: AccountingRow = {
-        investor_code: inv.investor_code,
-        investor_name: inv.investor_name || client?.investor_name || '',
-        account_type: inv.account_type || '',
-        interest_rate: inv.interest_rate || 0,
-        brokerage_commission: inv.brokerage_commission || 0,
-        ledger_balance,
-        total_deposits,
-        total_withdrawals,
-        gross_buy,
-        gross_sell,
-        net_sell,
-        adjusted_ledger,
-        accrued_interest,
-        receivable,
-        payable,
-        brokerage_amount,
-        final_balance,
+    return accountingResult.map((row: any) => {
+      const processedRow: AccountingRow = {
+        investor_code: row.investor_code || '',
+        investor_name: row.investor_name || '',
+        account_type: row.account_type || '',
+        interest_rate: Number(row.interest_rate) || 0,
+        brokerage_commission: Number(row.brokerage_commission) || 0,
+        ledger_balance: Number(row.ledger_balance) || 0,
+        total_deposits: Number(row.total_deposits) || 0,
+        total_withdrawals: Number(row.total_withdrawals) || 0,
+        gross_buy: Number(row.gross_buy) || 0,
+        gross_sell: Number(row.gross_sell) || 0,
+        net_sell: Number(row.net_sell) || 0,
+        adjusted_ledger: Number(row.adjusted_ledger) || 0,
+        accrued_interest: Number(row.accrued_interest) || 0,
+        brokerage_amount: Number(row.brokerage_amount) || 0,
+        final_balance: Number(row.final_balance) || 0,
+        receivable: Number(row.receivable) || 0,
+        payable: Number(row.payable) || 0,
       };
 
       // Calculate custom fields
       customFields.forEach(field => {
-        row[field.id] = evaluateFormula(field.formula, row);
+        processedRow[field.id] = evaluateFormula(field.formula, processedRow);
       });
 
-      rows.push(row);
+      return processedRow;
     });
+  }, [accountingResult, customFields]);
 
-    return rows;
-  }, [investors, clients, balancesRaw, transactions, tradeSums, customFields]);
+  // Get total count from first row (all rows have the same total_count)
+  const totalCount = accountingResult?.[0]?.total_count || 0;
+  const totalPages = Math.ceil(Number(totalCount) / PAGE_SIZE);
 
-  // Filter data
-  const filteredData = useMemo(() => {
-    if (!searchTerm) return accountingData;
-    const term = searchTerm.toLowerCase();
-    return accountingData.filter(row => 
-      row.investor_code.toLowerCase().includes(term) ||
-      row.investor_name.toLowerCase().includes(term)
-    );
-  }, [accountingData, searchTerm]);
-
-  // Summary calculations
+  // Summary data
   const summary = useMemo(() => {
-    const marginAccounts = accountingData.filter(r => r.account_type?.toLowerCase() === 'margin');
-    const marginWithNegative = marginAccounts.filter(r => r.adjusted_ledger < 0);
-    
+    if (!summaryResult) {
+      return {
+        totalAccounts: 0,
+        marginAccounts: 0,
+        totalMarginLoan: 0,
+        totalAccruedInterest: 0,
+        totalReceivable: 0,
+        totalPayable: 0,
+      };
+    }
     return {
-      totalAccounts: accountingData.length,
-      marginAccounts: marginAccounts.length,
-      totalMarginLoan: marginWithNegative.reduce((sum, r) => sum + Math.abs(r.adjusted_ledger), 0),
-      totalAccruedInterest: marginWithNegative.reduce((sum, r) => sum + r.accrued_interest, 0),
-      totalReceivable: accountingData.reduce((sum, r) => sum + r.receivable, 0),
-      totalPayable: accountingData.reduce((sum, r) => sum + r.payable, 0),
+      totalAccounts: Number(summaryResult.total_accounts) || 0,
+      marginAccounts: Number(summaryResult.margin_accounts) || 0,
+      totalMarginLoan: Number(summaryResult.total_margin_loan) || 0,
+      totalAccruedInterest: Number(summaryResult.total_accrued_interest) || 0,
+      totalReceivable: Number(summaryResult.total_receivable) || 0,
+      totalPayable: Number(summaryResult.total_payable) || 0,
     };
-  }, [accountingData]);
+  }, [summaryResult]);
 
-  const isLoading = loadingInvestors || loadingClients || loadingBalances || loadingTx || loadingTrades;
+  const isLoading = loadingData || loadingSummary;
 
   const handleAddField = () => {
     if (!newFieldName.trim() || !newFieldFormula.trim()) {
@@ -431,7 +322,7 @@ const AccountingTab = () => {
     const customHeaders = customFields.map(f => f.name);
     const headers = [...baseHeaders, ...customHeaders];
     
-    const csvData = filteredData.map(row => {
+    const csvData = accountingData.map(row => {
       const baseData = [
         row.investor_code,
         row.investor_name,
@@ -492,7 +383,7 @@ const AccountingTab = () => {
     }
     if (typeof value === 'number') {
       if (columnId === 'interest_rate' || columnId === 'brokerage_commission') {
-        return value.toFixed(2);
+        return value.toFixed(4);
       }
       return value > 0 || value < 0 ? formatCurrency(value) : '-';
     }
@@ -592,7 +483,7 @@ const AccountingTab = () => {
           <div className="relative flex items-center">
             <Search className="absolute left-3 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
             <Input
-              placeholder="Search investor by code or name..."
+              placeholder="Search investor by code (exact) or name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 pr-9 h-10 bg-muted/30 border-muted-foreground/20 focus:border-primary/50 focus:bg-background transition-all"
@@ -606,9 +497,9 @@ const AccountingTab = () => {
               </button>
             )}
           </div>
-          {searchTerm && (
+          {debouncedSearch && (
             <span className="absolute -bottom-5 left-0 text-xs text-muted-foreground">
-              {filteredData.length} result{filteredData.length !== 1 ? 's' : ''} found
+              {totalCount} result{Number(totalCount) !== 1 ? 's' : ''} found
             </span>
           )}
         </div>
@@ -839,7 +730,7 @@ const AccountingTab = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredData.slice(0, 100).map((row) => (
+                    {accountingData.map((row) => (
                       <TableRow 
                         key={row.investor_code}
                         className="cursor-pointer hover:bg-muted/50"
@@ -856,7 +747,7 @@ const AccountingTab = () => {
                                 key={column.id} 
                                 className={cn(
                                   getCellClassName(row, column),
-                                  "cursor-pointer hover:underline hover:bg-primary/10 transition-colors"
+                                  "cursor-pointer hover:underline"
                                 )}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -871,29 +762,63 @@ const AccountingTab = () => {
                           }
                           
                           return (
-                            <TableCell key={column.id} className={getCellClassName(row, column)}>
+                            <TableCell 
+                              key={column.id} 
+                              className={getCellClassName(row, column)}
+                            >
                               {getCellValue(row, column.id)}
                             </TableCell>
                           );
                         })}
-                        {customFields.map(field => {
-                          const value = row[field.id] as number;
-                          return (
-                            <TableCell key={field.id} className={cn("text-right", value < 0 ? 'text-red-400' : value > 0 ? 'text-primary' : '')}>
-                              {formatCurrency(value)}
-                            </TableCell>
-                          );
-                        })}
-                        <TableCell className="w-[40px]"></TableCell>
+                        {customFields.map(field => (
+                          <TableCell key={field.id} className="text-right">
+                            {formatCurrency(Number(row[field.id]) || 0)}
+                          </TableCell>
+                        ))}
+                        <TableCell></TableCell>
                       </TableRow>
                     ))}
+                    {accountingData.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={visibleColumns.length + customFields.length + 1} className="text-center py-8 text-muted-foreground">
+                          {debouncedSearch ? 'No investors found matching your search' : 'No accounting data available'}
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </div>
-              {filteredData.length > 100 && (
-                <p className="text-sm text-muted-foreground mt-4 text-center p-4">
-                  Showing 100 of {filteredData.length} records
-                </p>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-6 py-4 border-t">
+                  <span className="text-sm text-muted-foreground">
+                    Showing {currentPage * PAGE_SIZE + 1} - {Math.min((currentPage + 1) * PAGE_SIZE, Number(totalCount))} of {Number(totalCount).toLocaleString()} records
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                      disabled={currentPage === 0}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Previous
+                    </Button>
+                    <span className="text-sm text-muted-foreground px-2">
+                      Page {currentPage + 1} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                      disabled={currentPage >= totalPages - 1}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -901,23 +826,25 @@ const AccountingTab = () => {
       </Card>
 
       {/* Reconciliation Dialog */}
-      <AccountingReconciliationDialog
-        investor={selectedInvestor}
-        onClose={() => setSelectedInvestor(null)}
-        fromDate={fromDate}
-        toDate={toDate}
-      />
+      {selectedInvestor && (
+        <AccountingReconciliationDialog
+          investor={selectedInvestor}
+          fromDate={fromDate}
+          toDate={toDate}
+          onClose={() => setSelectedInvestor(null)}
+        />
+      )}
 
       {/* Trade Details Dialog */}
       {selectedTradeInvestor && (
         <TradeDetailsDialog
-          open={tradeDetailsOpen}
-          onOpenChange={setTradeDetailsOpen}
           investorCode={selectedTradeInvestor.investor_code}
           investorName={selectedTradeInvestor.investor_name}
           tradeType={selectedTradeType}
           fromDate={fromDate}
           toDate={toDate}
+          open={tradeDetailsOpen}
+          onOpenChange={setTradeDetailsOpen}
         />
       )}
     </div>
