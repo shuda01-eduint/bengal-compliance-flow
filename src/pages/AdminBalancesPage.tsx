@@ -67,43 +67,29 @@ const AdminBalancesPage = () => {
   const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, isLoading: false });
   const [previewAsRM, setPreviewAsRM] = useState<string>("all");
 
-  // Fetch RMs for preview dropdown
+  // Fetch RMs for preview dropdown using optimized RPC function
   const { data: rmList } = useQuery({
     queryKey: ['rm-list-for-preview'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('balances_raw')
-        .select('rm_email, rm_name')
-        .not('rm_email', 'is', null);
+      const { data, error } = await supabase.rpc('get_balance_rms');
       
       if (error) throw error;
       
-      // Get unique RMs
-      const uniqueRMs = new Map<string, string>();
-      data.forEach(d => {
-        if (d.rm_email && !uniqueRMs.has(d.rm_email)) {
-          uniqueRMs.set(d.rm_email, d.rm_name || d.rm_email);
-        }
-      });
-      
-      return Array.from(uniqueRMs.entries())
-        .map(([email, name]) => ({ email, name }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+      return (data || []).map((d: { rm_email: string; rm_name: string | null }) => ({
+        email: d.rm_email,
+        name: d.rm_name || d.rm_email,
+      }));
     },
   });
 
-  // Fetch available dates
+  // Fetch available dates using optimized RPC function
   const { data: availableDates } = useQuery({
     queryKey: ['balances-raw-dates'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('balances_raw')
-        .select('as_of_date')
-        .order('as_of_date', { ascending: false });
+      const { data, error } = await supabase.rpc('get_balance_dates');
       
       if (error) throw error;
-      const uniqueDates = [...new Set(data.map(d => d.as_of_date))];
-      return uniqueDates;
+      return (data || []).map((d: { as_of_date: string }) => d.as_of_date);
     },
   });
 

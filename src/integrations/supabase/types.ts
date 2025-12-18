@@ -1314,6 +1314,19 @@ export type Database = {
           sell_sum: number
         }[]
       }
+      get_balance_dates: {
+        Args: never
+        Returns: {
+          as_of_date: string
+        }[]
+      }
+      get_balance_rms: {
+        Args: never
+        Returns: {
+          rm_email: string
+          rm_name: string
+        }[]
+      }
       get_employee_id_for_user: { Args: never; Returns: string }
       get_trade_file_stats: {
         Args: never
