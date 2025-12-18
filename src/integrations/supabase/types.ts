@@ -104,6 +104,60 @@ export type Database = {
         }
         Relationships: []
       }
+      agents: {
+        Row: {
+          agent_id: string
+          bank_account: string | null
+          bank_name: string | null
+          commission_rate: number | null
+          created_at: string
+          id: string
+          name: string
+          nid_number: string | null
+          remarks: string | null
+          rm_id: string
+          rm_name: string | null
+          routing_number: string | null
+          status: string | null
+          tin_number: string | null
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          bank_account?: string | null
+          bank_name?: string | null
+          commission_rate?: number | null
+          created_at?: string
+          id?: string
+          name: string
+          nid_number?: string | null
+          remarks?: string | null
+          rm_id: string
+          rm_name?: string | null
+          routing_number?: string | null
+          status?: string | null
+          tin_number?: string | null
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          bank_account?: string | null
+          bank_name?: string | null
+          commission_rate?: number | null
+          created_at?: string
+          id?: string
+          name?: string
+          nid_number?: string | null
+          remarks?: string | null
+          rm_id?: string
+          rm_name?: string | null
+          routing_number?: string | null
+          status?: string | null
+          tin_number?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       assignment_change_requests: {
         Row: {
           admin_approved_at: string | null
