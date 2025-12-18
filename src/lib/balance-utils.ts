@@ -16,6 +16,7 @@ export interface BalanceRawRow {
   cq_in_transit: number;
   rm_id: string | null;
   rm_name: string | null;
+  rm_email: string | null;
 }
 
 export interface InvestorAdjustment {
