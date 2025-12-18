@@ -215,6 +215,78 @@ export type Database = {
         }
         Relationships: []
       }
+      commission_change_requests: {
+        Row: {
+          admin_approved_at: string | null
+          admin_approved_by: string | null
+          admin_notes: string | null
+          created_at: string
+          current_commission: number | null
+          id: string
+          investor_code: string
+          investor_name: string | null
+          manager_approved_at: string | null
+          manager_approved_by: string | null
+          manager_notes: string | null
+          reason: string | null
+          rejected_at: string | null
+          rejected_by: string | null
+          rejection_reason: string | null
+          requested_at: string | null
+          requested_by: string
+          requested_by_email: string
+          requested_commission: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          admin_approved_at?: string | null
+          admin_approved_by?: string | null
+          admin_notes?: string | null
+          created_at?: string
+          current_commission?: number | null
+          id?: string
+          investor_code: string
+          investor_name?: string | null
+          manager_approved_at?: string | null
+          manager_approved_by?: string | null
+          manager_notes?: string | null
+          reason?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          requested_at?: string | null
+          requested_by: string
+          requested_by_email: string
+          requested_commission: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          admin_approved_at?: string | null
+          admin_approved_by?: string | null
+          admin_notes?: string | null
+          created_at?: string
+          current_commission?: number | null
+          id?: string
+          investor_code?: string
+          investor_name?: string | null
+          manager_approved_at?: string | null
+          manager_approved_by?: string | null
+          manager_notes?: string | null
+          reason?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          requested_at?: string | null
+          requested_by?: string
+          requested_by_email?: string
+          requested_commission?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       departments: {
         Row: {
           created_at: string

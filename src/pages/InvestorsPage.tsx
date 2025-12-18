@@ -5,13 +5,14 @@ import { InvestorLedgerTab } from "@/components/investors/InvestorLedgerTab";
 import { PortfolioList } from "@/components/portfolio/PortfolioList";
 import { CustomFieldsManager } from "@/components/portfolio/CustomFieldsManager";
 import { PortfolioReports } from "@/components/portfolio/PortfolioReports";
-import { Contact, BookOpen, Briefcase, Settings2, FileBarChart } from "lucide-react";
+import { CommissionApprovalTab } from "@/components/investors/CommissionApprovalTab";
+import { Contact, BookOpen, Briefcase, Settings2, FileBarChart, Percent } from "lucide-react";
 
 const InvestorsPage = () => {
   return (
     <MainLayout title="Investors" subtitle="Manage investor information, ledger statements, and portfolios">
       <Tabs defaultValue="investors" className="space-y-4">
-        <TabsList>
+        <TabsList className="flex-wrap">
           <TabsTrigger value="investors" className="gap-2">
             <Contact className="h-4 w-4" />
             Investors
@@ -32,6 +33,10 @@ const InvestorsPage = () => {
             <FileBarChart className="h-4 w-4" />
             Reports
           </TabsTrigger>
+          <TabsTrigger value="commission-requests" className="gap-2">
+            <Percent className="h-4 w-4" />
+            Commission Requests
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="investors">
           <InvestorsTable />
@@ -47,6 +52,9 @@ const InvestorsPage = () => {
         </TabsContent>
         <TabsContent value="reports">
           <PortfolioReports />
+        </TabsContent>
+        <TabsContent value="commission-requests">
+          <CommissionApprovalTab />
         </TabsContent>
       </Tabs>
     </MainLayout>
