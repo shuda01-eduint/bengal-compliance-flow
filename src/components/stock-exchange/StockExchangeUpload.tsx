@@ -283,12 +283,12 @@ export function StockExchangeUpload() {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
-      const validExtensions = ['.html', '.htm', '.xlsx', '.xls', '.csv', '.xml'];
+      const validExtensions = ['.html', '.htm', '.xlsx', '.xls', '.csv', '.xml', '.txt'];
       const hasValidExt = validExtensions.some(ext => selectedFile.name.toLowerCase().endsWith(ext));
       if (!hasValidExt) {
         toast({
           title: "Invalid file type",
-          description: "Please upload an HTML, Excel, CSV, or XML file from the stock exchange",
+          description: "Please upload an HTML, Excel, CSV, XML, or TXT file from the stock exchange",
           variant: "destructive",
         });
         return;
@@ -426,6 +426,73 @@ export function StockExchangeUpload() {
         }
       });
     });
+    return trades;
+  };
+
+  // Parse pipe-delimited text file (CSE/DSE format)
+  // Format: board|code|security|side|qty|price|client|?|?|exec_id|exec_date|exec_time|order_date|order_time|flag
+  const parsePipeDelimitedFile = async (): Promise<ParsedTrade[]> => {
+    if (!file) return [];
+    
+    const content = await file.text();
+    const lines = content.split('\n').filter(line => line.trim());
+    const trades: ParsedTrade[] = [];
+    
+    for (const line of lines) {
+      const parts = line.split('|');
+      if (parts.length < 11) continue;
+      
+      const board = parts[0]?.trim() || '';
+      const securityCode = parts[2]?.trim() || '';
+      const sideRaw = parts[3]?.trim().toUpperCase() || '';
+      const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
+      const quantity = parseFloat(parts[4]?.replace(/,/g, '') || '0') || 0;
+      const price = parseFloat(parts[5]?.replace(/,/g, '') || '0') || 0;
+      const clientCode = parts[6]?.trim() || '';
+      const execId = parts[9]?.trim() || '';
+      const dateRaw = parts[10]?.trim() || ''; // DD/MM/YYYY
+      const timeRaw = parts[11]?.trim() || '';
+      
+      if (!clientCode || !securityCode) continue;
+      
+      // Convert DD/MM/YYYY to YYYY-MM-DD
+      let date = dateRaw;
+      if (dateRaw.includes('/')) {
+        const [day, month, year] = dateRaw.split('/');
+        if (day && month && year) {
+          date = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        }
+      }
+      
+      trades.push({
+        action: '',
+        status: 'FILL',
+        isin: '',
+        asset_class: '',
+        order_id: '',
+        ref_order_id: '',
+        side,
+        boid: '',
+        security_code: securityCode,
+        board,
+        date,
+        time: timeRaw,
+        quantity,
+        price,
+        value: quantity * price,
+        exec_id: execId,
+        session: '',
+        fill_type: 'FILL',
+        category: '',
+        compulsory_spot: '',
+        client_code: clientCode,
+        trader_dealer_id: '',
+        owner_dealer_id: '',
+        trade_report_type: '',
+      });
+    }
+    
+    console.log('Total parsed pipe-delimited trades:', trades.length);
     return trades;
   };
 
@@ -570,7 +637,14 @@ export function StockExchangeUpload() {
       const fileName = file.name.toLowerCase();
       const isExcelOrCsv = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv');
       const isXml = fileName.endsWith('.xml');
-      const trades = isExcelOrCsv ? await parseExcelFile() : isXml ? await parseXmlFile() : await parseHtmlFile();
+      const isTxt = fileName.endsWith('.txt');
+      const trades = isExcelOrCsv 
+        ? await parseExcelFile() 
+        : isXml 
+          ? await parseXmlFile() 
+          : isTxt 
+            ? await parsePipeDelimitedFile() 
+            : await parseHtmlFile();
 
       if (trades.length === 0) {
         toast({
@@ -704,7 +778,7 @@ export function StockExchangeUpload() {
             Upload Stock Exchange File
           </CardTitle>
           <CardDescription>
-            Upload the daily HTML, Excel, CSV, or XML file from DSE or CSE to perform compliance checks and balance reconciliation
+            Upload the daily HTML, Excel, CSV, XML, or TXT file from DSE or CSE to perform compliance checks and balance reconciliation
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -715,7 +789,7 @@ export function StockExchangeUpload() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".html,.htm,.xlsx,.xls,.csv,.xml"
+              accept=".html,.htm,.xlsx,.xls,.csv,.xml,.txt"
               onChange={handleFileSelect}
               className="hidden"
             />
@@ -736,7 +810,7 @@ export function StockExchangeUpload() {
                   Click to upload or drag and drop
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  HTML, Excel, CSV, or XML files
+                  HTML, Excel, CSV, XML, or TXT files
                 </p>
               </div>
             )}
