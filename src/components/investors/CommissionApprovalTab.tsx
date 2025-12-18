@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +22,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, X, Loader2, Clock, CheckCircle, XCircle, ArrowRight } from "lucide-react";
+import { Check, X, Loader2, Clock, CheckCircle, XCircle, ArrowRight, Users, UserCheck } from "lucide-react";
 import { format } from "date-fns";
 
 type CommissionRequest = {
@@ -42,15 +42,33 @@ type CommissionRequest = {
   rejection_reason: string | null;
 };
 
+type AssignmentRequest = {
+  id: string;
+  investor_code: string;
+  investor_name: string | null;
+  change_type: string;
+  current_assignments: any;
+  requested_assignments: any;
+  reason: string | null;
+  requested_by_email: string;
+  requested_at: string;
+  status: string;
+  manager_notes: string | null;
+  admin_notes: string | null;
+  rejection_reason: string | null;
+};
+
 export function CommissionApprovalTab() {
   const { user } = useAuth();
-  const [requests, setRequests] = useState<CommissionRequest[]>([]);
+  const [commissionRequests, setCommissionRequests] = useState<CommissionRequest[]>([]);
+  const [assignmentRequests, setAssignmentRequests] = useState<AssignmentRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isDeptHead, setIsDeptHead] = useState(false);
   const [actionDialog, setActionDialog] = useState<{
     type: "approve" | "reject";
-    request: CommissionRequest;
+    request: CommissionRequest | AssignmentRequest;
+    requestType: "commission" | "assignment";
   } | null>(null);
   const [notes, setNotes] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -65,7 +83,6 @@ export function CommissionApprovalTab() {
   const checkUserRole = async () => {
     if (!user) return;
 
-    // Check if admin
     const { data: roleData } = await supabase
       .from("user_roles")
       .select("role")
@@ -74,7 +91,6 @@ export function CommissionApprovalTab() {
       .single();
     setIsAdmin(!!roleData);
 
-    // Check if department head
     const { data: profileData } = await supabase
       .from("profiles")
       .select("is_department_head")
@@ -86,16 +102,25 @@ export function CommissionApprovalTab() {
   const fetchRequests = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("commission_change_requests")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const [commissionResult, assignmentResult] = await Promise.all([
+        supabase
+          .from("commission_change_requests")
+          .select("*")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("assignment_change_requests")
+          .select("*")
+          .order("created_at", { ascending: false }),
+      ]);
 
-      if (error) throw error;
-      setRequests(data || []);
+      if (commissionResult.error) throw commissionResult.error;
+      if (assignmentResult.error) throw assignmentResult.error;
+
+      setCommissionRequests(commissionResult.data || []);
+      setAssignmentRequests(assignmentResult.data || []);
     } catch (error: any) {
       console.error("Error fetching requests:", error);
-      toast.error("Failed to load commission change requests");
+      toast.error("Failed to load change requests");
     } finally {
       setIsLoading(false);
     }
@@ -103,14 +128,16 @@ export function CommissionApprovalTab() {
 
   const handleApprove = async () => {
     if (!actionDialog || !user) return;
-    const { request } = actionDialog;
+    const { request, requestType } = actionDialog;
 
     setIsProcessing(true);
     try {
       let updateData: Record<string, any> = {};
+      const tableName = requestType === "commission" 
+        ? "commission_change_requests" 
+        : "assignment_change_requests";
 
       if (request.status === "pending_manager" && isDeptHead) {
-        // Manager approval -> move to pending_admin
         updateData = {
           status: "pending_admin",
           manager_approved_by: user.id,
@@ -118,14 +145,12 @@ export function CommissionApprovalTab() {
           manager_notes: notes.trim() || null,
         };
       } else if ((request.status === "pending_admin" || request.status === "pending_manager") && isAdmin) {
-        // Admin final approval
         updateData = {
           status: "approved",
           admin_approved_by: user.id,
           admin_approved_at: new Date().toISOString(),
           admin_notes: notes.trim() || null,
         };
-        // If admin is approving a pending_manager request, also set manager fields
         if (request.status === "pending_manager") {
           updateData.manager_approved_by = user.id;
           updateData.manager_approved_at = new Date().toISOString();
@@ -134,7 +159,7 @@ export function CommissionApprovalTab() {
       }
 
       const { error } = await supabase
-        .from("commission_change_requests")
+        .from(tableName)
         .update(updateData)
         .eq("id", request.id);
 
@@ -142,7 +167,7 @@ export function CommissionApprovalTab() {
 
       toast.success(
         updateData.status === "approved" 
-          ? "Request approved! Commission rate updated." 
+          ? "Request approved!" 
           : "Request approved and forwarded to admin."
       );
       setActionDialog(null);
@@ -158,7 +183,7 @@ export function CommissionApprovalTab() {
 
   const handleReject = async () => {
     if (!actionDialog || !user) return;
-    const { request } = actionDialog;
+    const { request, requestType } = actionDialog;
 
     if (!notes.trim()) {
       toast.error("Please provide a reason for rejection");
@@ -167,8 +192,12 @@ export function CommissionApprovalTab() {
 
     setIsProcessing(true);
     try {
+      const tableName = requestType === "commission" 
+        ? "commission_change_requests" 
+        : "assignment_change_requests";
+
       const { error } = await supabase
-        .from("commission_change_requests")
+        .from(tableName)
         .update({
           status: "rejected",
           rejected_by: user.id,
@@ -211,7 +240,7 @@ export function CommissionApprovalTab() {
     }
   };
 
-  const canTakeAction = (request: CommissionRequest) => {
+  const canTakeAction = (request: CommissionRequest | AssignmentRequest) => {
     if (isAdmin) {
       return request.status === "pending_manager" || request.status === "pending_admin";
     }
@@ -221,11 +250,28 @@ export function CommissionApprovalTab() {
     return false;
   };
 
+  const renderAssignments = (assignments: any[], type: 'rm' | 'agent') => {
+    if (!assignments || assignments.length === 0) return <span className="text-muted-foreground">None</span>;
+    return (
+      <div className="space-y-1">
+        {assignments.map((a: any, i: number) => (
+          <div key={i} className="text-xs">
+            {type === 'rm' ? (
+              <span>{a.rm_name || a.rm_email} ({a.percentage}%)</span>
+            ) : (
+              <span>{a.agent_id} ({a.percentage}%)</span>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   // Summary counts
-  const pendingManagerCount = requests.filter(r => r.status === "pending_manager").length;
-  const pendingAdminCount = requests.filter(r => r.status === "pending_admin").length;
-  const approvedCount = requests.filter(r => r.status === "approved").length;
-  const rejectedCount = requests.filter(r => r.status === "rejected").length;
+  const commPendingManager = commissionRequests.filter(r => r.status === "pending_manager").length;
+  const commPendingAdmin = commissionRequests.filter(r => r.status === "pending_admin").length;
+  const assignPendingManager = assignmentRequests.filter(r => r.status === "pending_manager").length;
+  const assignPendingAdmin = assignmentRequests.filter(r => r.status === "pending_admin").length;
 
   if (isLoading) {
     return (
@@ -241,123 +287,259 @@ export function CommissionApprovalTab() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Pending Manager</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Commission Pending</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{pendingManagerCount}</div>
+            <div className="text-2xl font-bold text-yellow-600">{commPendingManager + commPendingAdmin}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Pending Admin</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">RM/Agent Pending</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{pendingAdminCount}</div>
+            <div className="text-2xl font-bold text-blue-600">{assignPendingManager + assignPendingAdmin}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Approved</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Approved</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{approvedCount}</div>
+            <div className="text-2xl font-bold text-green-600">
+              {commissionRequests.filter(r => r.status === "approved").length + 
+               assignmentRequests.filter(r => r.status === "approved").length}
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Rejected</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Rejected</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{rejectedCount}</div>
+            <div className="text-2xl font-bold text-red-600">
+              {commissionRequests.filter(r => r.status === "rejected").length +
+               assignmentRequests.filter(r => r.status === "rejected").length}
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Requests Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Commission Change Requests</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {requests.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No commission change requests found
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Investor</TableHead>
-                    <TableHead>Current</TableHead>
-                    <TableHead>Requested</TableHead>
-                    <TableHead>Reason</TableHead>
-                    <TableHead>Requested By</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {requests.map((request) => (
-                    <TableRow key={request.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{request.investor_code}</div>
-                          <div className="text-sm text-muted-foreground">{request.investor_name}</div>
-                        </div>
-                      </TableCell>
-                      <TableCell>{formatCommission(request.current_commission)}</TableCell>
-                      <TableCell className="font-medium">{formatCommission(request.requested_commission)}</TableCell>
-                      <TableCell className="max-w-[200px] truncate" title={request.reason || ""}>
-                        {request.reason || "-"}
-                      </TableCell>
-                      <TableCell>{request.requested_by_email}</TableCell>
-                      <TableCell>{format(new Date(request.requested_at), "dd MMM yyyy")}</TableCell>
-                      <TableCell>{getStatusBadge(request.status)}</TableCell>
-                      <TableCell className="text-right">
-                        {canTakeAction(request) && (
-                          <div className="flex gap-2 justify-end">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-green-600 hover:text-green-700"
-                              onClick={() => setActionDialog({ type: "approve", request })}
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600 hover:text-red-700"
-                              onClick={() => setActionDialog({ type: "reject", request })}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        )}
-                        {request.status === "rejected" && request.rejection_reason && (
-                          <span className="text-xs text-muted-foreground" title={request.rejection_reason}>
-                            {request.rejection_reason.slice(0, 30)}...
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="commission" className="w-full">
+        <TabsList>
+          <TabsTrigger value="commission" className="gap-2">
+            Commission
+            {(commPendingManager + commPendingAdmin) > 0 && (
+              <Badge variant="secondary" className="h-5 px-1.5">{commPendingManager + commPendingAdmin}</Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="rm" className="gap-2">
+            <Users className="h-4 w-4" /> RM
+            {assignmentRequests.filter(r => r.change_type === 'rm' && (r.status === 'pending_manager' || r.status === 'pending_admin')).length > 0 && (
+              <Badge variant="secondary" className="h-5 px-1.5">
+                {assignmentRequests.filter(r => r.change_type === 'rm' && (r.status === 'pending_manager' || r.status === 'pending_admin')).length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="agent" className="gap-2">
+            <UserCheck className="h-4 w-4" /> Agent
+            {assignmentRequests.filter(r => r.change_type === 'agent' && (r.status === 'pending_manager' || r.status === 'pending_admin')).length > 0 && (
+              <Badge variant="secondary" className="h-5 px-1.5">
+                {assignmentRequests.filter(r => r.change_type === 'agent' && (r.status === 'pending_manager' || r.status === 'pending_admin')).length}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Commission Requests Tab */}
+        <TabsContent value="commission">
+          <Card>
+            <CardHeader>
+              <CardTitle>Commission Change Requests</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {commissionRequests.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">No commission change requests found</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Investor</TableHead>
+                        <TableHead>Current</TableHead>
+                        <TableHead>Requested</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead>Requested By</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {commissionRequests.map((request) => (
+                        <TableRow key={request.id}>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium">{request.investor_code}</div>
+                              <div className="text-sm text-muted-foreground">{request.investor_name}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell>{formatCommission(request.current_commission)}</TableCell>
+                          <TableCell className="font-medium">{formatCommission(request.requested_commission)}</TableCell>
+                          <TableCell className="max-w-[200px] truncate" title={request.reason || ""}>{request.reason || "-"}</TableCell>
+                          <TableCell>{request.requested_by_email}</TableCell>
+                          <TableCell>{format(new Date(request.requested_at), "dd MMM yyyy")}</TableCell>
+                          <TableCell>{getStatusBadge(request.status)}</TableCell>
+                          <TableCell className="text-right">
+                            {canTakeAction(request) && (
+                              <div className="flex gap-2 justify-end">
+                                <Button size="sm" variant="outline" className="text-green-600" onClick={() => setActionDialog({ type: "approve", request, requestType: "commission" })}>
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                                <Button size="sm" variant="outline" className="text-red-600" onClick={() => setActionDialog({ type: "reject", request, requestType: "commission" })}>
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* RM Assignment Requests Tab */}
+        <TabsContent value="rm">
+          <Card>
+            <CardHeader>
+              <CardTitle>RM Assignment Change Requests</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {assignmentRequests.filter(r => r.change_type === 'rm').length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">No RM assignment requests found</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Investor</TableHead>
+                        <TableHead>Current</TableHead>
+                        <TableHead>Requested</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead>Requested By</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {assignmentRequests.filter(r => r.change_type === 'rm').map((request) => (
+                        <TableRow key={request.id}>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium">{request.investor_code}</div>
+                              <div className="text-sm text-muted-foreground">{request.investor_name}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell>{renderAssignments(request.current_assignments, 'rm')}</TableCell>
+                          <TableCell>{renderAssignments(request.requested_assignments, 'rm')}</TableCell>
+                          <TableCell className="max-w-[150px] truncate">{request.reason || "-"}</TableCell>
+                          <TableCell>{request.requested_by_email}</TableCell>
+                          <TableCell>{format(new Date(request.requested_at!), "dd MMM yyyy")}</TableCell>
+                          <TableCell>{getStatusBadge(request.status)}</TableCell>
+                          <TableCell className="text-right">
+                            {canTakeAction(request) && (
+                              <div className="flex gap-2 justify-end">
+                                <Button size="sm" variant="outline" className="text-green-600" onClick={() => setActionDialog({ type: "approve", request, requestType: "assignment" })}>
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                                <Button size="sm" variant="outline" className="text-red-600" onClick={() => setActionDialog({ type: "reject", request, requestType: "assignment" })}>
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Agent Assignment Requests Tab */}
+        <TabsContent value="agent">
+          <Card>
+            <CardHeader>
+              <CardTitle>Agent Assignment Change Requests</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {assignmentRequests.filter(r => r.change_type === 'agent').length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">No Agent assignment requests found</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Investor</TableHead>
+                        <TableHead>Current</TableHead>
+                        <TableHead>Requested</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead>Requested By</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {assignmentRequests.filter(r => r.change_type === 'agent').map((request) => (
+                        <TableRow key={request.id}>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium">{request.investor_code}</div>
+                              <div className="text-sm text-muted-foreground">{request.investor_name}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell>{renderAssignments(request.current_assignments, 'agent')}</TableCell>
+                          <TableCell>{renderAssignments(request.requested_assignments, 'agent')}</TableCell>
+                          <TableCell className="max-w-[150px] truncate">{request.reason || "-"}</TableCell>
+                          <TableCell>{request.requested_by_email}</TableCell>
+                          <TableCell>{format(new Date(request.requested_at!), "dd MMM yyyy")}</TableCell>
+                          <TableCell>{getStatusBadge(request.status)}</TableCell>
+                          <TableCell className="text-right">
+                            {canTakeAction(request) && (
+                              <div className="flex gap-2 justify-end">
+                                <Button size="sm" variant="outline" className="text-green-600" onClick={() => setActionDialog({ type: "approve", request, requestType: "assignment" })}>
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                                <Button size="sm" variant="outline" className="text-red-600" onClick={() => setActionDialog({ type: "reject", request, requestType: "assignment" })}>
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Action Dialog */}
       <Dialog open={!!actionDialog} onOpenChange={() => setActionDialog(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {actionDialog?.type === "approve" ? "Approve Request" : "Reject Request"}
-            </DialogTitle>
+            <DialogTitle>{actionDialog?.type === "approve" ? "Approve Request" : "Reject Request"}</DialogTitle>
           </DialogHeader>
 
           {actionDialog && (
@@ -367,14 +549,30 @@ export function CommissionApprovalTab() {
                   <span className="text-muted-foreground">Investor:</span>
                   <span className="font-medium">{actionDialog.request.investor_code} - {actionDialog.request.investor_name}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Current Rate:</span>
-                  <span>{formatCommission(actionDialog.request.current_commission)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Requested Rate:</span>
-                  <span className="font-medium text-primary">{formatCommission(actionDialog.request.requested_commission)}</span>
-                </div>
+                {actionDialog.requestType === "commission" && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Current Rate:</span>
+                      <span>{formatCommission((actionDialog.request as CommissionRequest).current_commission)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Requested Rate:</span>
+                      <span className="font-medium text-primary">{formatCommission((actionDialog.request as CommissionRequest).requested_commission)}</span>
+                    </div>
+                  </>
+                )}
+                {actionDialog.requestType === "assignment" && (
+                  <>
+                    <div className="flex justify-between items-start">
+                      <span className="text-muted-foreground">Current:</span>
+                      {renderAssignments((actionDialog.request as AssignmentRequest).current_assignments, (actionDialog.request as AssignmentRequest).change_type as 'rm' | 'agent')}
+                    </div>
+                    <div className="flex justify-between items-start">
+                      <span className="text-muted-foreground">Requested:</span>
+                      {renderAssignments((actionDialog.request as AssignmentRequest).requested_assignments, (actionDialog.request as AssignmentRequest).change_type as 'rm' | 'agent')}
+                    </div>
+                  </>
+                )}
                 {actionDialog.request.reason && (
                   <div className="pt-2 border-t">
                     <span className="text-muted-foreground">Reason:</span>
@@ -384,9 +582,7 @@ export function CommissionApprovalTab() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  {actionDialog.type === "approve" ? "Notes (optional)" : "Rejection Reason *"}
-                </label>
+                <label className="text-sm font-medium">{actionDialog.type === "approve" ? "Notes (optional)" : "Rejection Reason *"}</label>
                 <Textarea
                   placeholder={actionDialog.type === "approve" ? "Add any notes..." : "Explain why the request is rejected..."}
                   value={notes}
@@ -396,17 +592,11 @@ export function CommissionApprovalTab() {
               </div>
 
               <DialogFooter>
-                <Button variant="outline" onClick={() => setActionDialog(null)}>
-                  Cancel
-                </Button>
+                <Button variant="outline" onClick={() => setActionDialog(null)}>Cancel</Button>
                 {actionDialog.type === "approve" ? (
                   <Button onClick={handleApprove} disabled={isProcessing}>
                     {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {isAdmin && actionDialog.request.status === "pending_manager" 
-                      ? "Approve & Complete" 
-                      : isDeptHead && !isAdmin 
-                        ? "Approve & Forward to Admin" 
-                        : "Approve"}
+                    {isAdmin && actionDialog.request.status === "pending_manager" ? "Approve & Complete" : isDeptHead && !isAdmin ? "Approve & Forward to Admin" : "Approve"}
                   </Button>
                 ) : (
                   <Button variant="destructive" onClick={handleReject} disabled={isProcessing}>

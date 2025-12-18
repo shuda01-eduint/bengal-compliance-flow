@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Dialog,
   DialogContent,
@@ -8,8 +10,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { User, Phone, Mail, Building, CreditCard, Calendar, Edit } from "lucide-react";
+import { User, Phone, Mail, Building, CreditCard, Calendar, Edit, Users, UserCheck } from "lucide-react";
 import { CommissionChangeRequestDialog } from "./CommissionChangeRequestDialog";
+import { AssignmentChangeRequestDialog } from "./AssignmentChangeRequestDialog";
 
 type Investor = {
   id: string;
@@ -59,7 +62,37 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 
 export function InvestorDetailDialog({ investor, onClose }: InvestorDetailDialogProps) {
   const [showChangeRequestDialog, setShowChangeRequestDialog] = useState(false);
+  const [showRMChangeDialog, setShowRMChangeDialog] = useState(false);
+  const [showAgentChangeDialog, setShowAgentChangeDialog] = useState(false);
   
+  // Fetch RM assignments
+  const { data: rmAssignments = [] } = useQuery({
+    queryKey: ['rm-assignments', investor?.investor_code],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('investor_rm_assignments')
+        .select('*')
+        .eq('investor_code', investor!.investor_code);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!investor,
+  });
+
+  // Fetch Agent assignments
+  const { data: agentAssignments = [] } = useQuery({
+    queryKey: ['agent-assignments', investor?.investor_code],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('investor_agent_assignments')
+        .select('*')
+        .eq('investor_code', investor!.investor_code);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!investor,
+  });
+
   if (!investor) return null;
 
   return (
@@ -89,6 +122,82 @@ export function InvestorDetailDialog({ investor, onClose }: InvestorDetailDialog
               <DetailRow label="Mother Name" value={investor.mother_name} />
               <DetailRow label="Date of Birth" value={formatDate(investor.date_of_birth)} />
               <DetailRow label="Home Address" value={investor.home_address} />
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* RM Assignments */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-primary" />
+                <h3 className="font-semibold">RM Assignments</h3>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                onClick={() => setShowRMChangeDialog(true)}
+                title="Request RM Change"
+              >
+                <Edit className="h-3 w-3" />
+              </Button>
+            </div>
+            <div className="bg-muted/30 rounded-lg p-3 text-sm">
+              {rmAssignments.length > 0 ? (
+                rmAssignments.map((rm, idx) => (
+                  <div key={idx} className="flex justify-between py-1.5 border-b last:border-0 border-border/50">
+                    <div>
+                      <span className="font-medium">{rm.rm_name || rm.rm_email}</span>
+                      {rm.department && (
+                        <span className="text-muted-foreground ml-2">({rm.department})</span>
+                      )}
+                    </div>
+                    <Badge variant="secondary">{rm.percentage}%</Badge>
+                  </div>
+                ))
+              ) : (
+                <span className="text-muted-foreground">No RM assigned</span>
+              )}
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Agent Assignments */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <UserCheck className="h-4 w-4 text-primary" />
+                <h3 className="font-semibold">Agent Assignments</h3>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                onClick={() => setShowAgentChangeDialog(true)}
+                title="Request Agent Change"
+              >
+                <Edit className="h-3 w-3" />
+              </Button>
+            </div>
+            <div className="bg-muted/30 rounded-lg p-3 text-sm">
+              {agentAssignments.length > 0 ? (
+                agentAssignments.map((agent, idx) => (
+                  <div key={idx} className="flex justify-between py-1.5 border-b last:border-0 border-border/50">
+                    <div>
+                      <span className="font-medium">{agent.agent_id}</span>
+                      {agent.agent_name && (
+                        <span className="text-muted-foreground ml-2">({agent.agent_name})</span>
+                      )}
+                    </div>
+                    <Badge variant="secondary">{agent.percentage}%</Badge>
+                  </div>
+                ))
+              ) : (
+                <span className="text-muted-foreground">No Agent assigned</span>
+              )}
             </div>
           </div>
 
@@ -172,6 +281,35 @@ export function InvestorDetailDialog({ investor, onClose }: InvestorDetailDialog
           investorCode={investor.investor_code}
           investorName={investor.investor_name}
           currentCommission={investor.brokerage_commission}
+        />
+
+        {/* RM Assignment Change Dialog */}
+        <AssignmentChangeRequestDialog
+          open={showRMChangeDialog}
+          onClose={() => setShowRMChangeDialog(false)}
+          investorCode={investor.investor_code}
+          investorName={investor.investor_name}
+          changeType="rm"
+          currentAssignments={rmAssignments.map(rm => ({
+            rm_email: rm.rm_email,
+            rm_name: rm.rm_name || '',
+            department: rm.department || '',
+            percentage: rm.percentage,
+          }))}
+        />
+
+        {/* Agent Assignment Change Dialog */}
+        <AssignmentChangeRequestDialog
+          open={showAgentChangeDialog}
+          onClose={() => setShowAgentChangeDialog(false)}
+          investorCode={investor.investor_code}
+          investorName={investor.investor_name}
+          changeType="agent"
+          currentAssignments={agentAssignments.map(agent => ({
+            agent_id: agent.agent_id,
+            agent_name: agent.agent_name || '',
+            percentage: agent.percentage,
+          }))}
         />
       </DialogContent>
     </Dialog>
