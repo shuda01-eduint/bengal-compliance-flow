@@ -251,14 +251,36 @@ export function StockExchangeUpload() {
       const batchSize = 500;
       let inserted = 0;
       
+      // Debug: Log sample records before insert
+      if (validRecords.length > 0) {
+        const cseRecords = validRecords.filter(r => r.board?.startsWith('CTG') || r.board?.startsWith('DHK'));
+        console.log(`Total valid records: ${validRecords.length}, CSE records: ${cseRecords.length}`);
+        if (cseRecords.length > 0) {
+          console.log('Sample CSE record to insert:', cseRecords[0]);
+        }
+      }
+      
+      let totalUpserted = 0;
+      
       for (let i = 0; i < validRecords.length; i += batchSize) {
         const batch = validRecords.slice(i, i + batchSize);
+        const batchNum = Math.floor(i / batchSize) + 1;
+        
         // Use upsert to handle re-uploads - update existing records based on exec_id and trade_date
-        const { error } = await supabase.from('trade_history').upsert(batch, { 
+        const { data, error, count } = await supabase.from('trade_history').upsert(batch, { 
           onConflict: 'exec_id,trade_date',
-          ignoreDuplicates: false 
-        });
-        if (error) throw error;
+          ignoreDuplicates: false,
+          count: 'exact'
+        }).select('id');
+        
+        if (error) {
+          console.error(`Batch ${batchNum} upsert error:`, error);
+          throw error;
+        }
+        
+        const affectedRows = data?.length || count || 0;
+        totalUpserted += affectedRows;
+        console.log(`Batch ${batchNum}: sent ${batch.length} records, upserted ${affectedRows} rows`);
         
         inserted += batch.length;
         setProgress({ current: inserted, total: validRecords.length });
@@ -267,15 +289,17 @@ export function StockExchangeUpload() {
         await new Promise(resolve => requestAnimationFrame(resolve));
       }
 
+      console.log(`Save complete: Total records sent: ${validRecords.length}, Total upserted: ${totalUpserted}`);
+      
       toast({
         title: "Trades saved",
-        description: `${validRecords.length} trades stored for audit trail`,
+        description: `${totalUpserted} trades saved to database (${validRecords.length} processed)`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving trades:', error);
       toast({
         title: "Save error",
-        description: "Failed to save trades to database",
+        description: error?.message || "Failed to save trades to database",
         variant: "destructive",
       });
     } finally {
@@ -454,7 +478,7 @@ export function StockExchangeUpload() {
       const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
       const quantity = parseFloat(parts[4]?.replace(/,/g, '') || '0') || 0;
       const price = parseFloat(parts[5]?.replace(/,/g, '') || '0') || 0;
-      const execId = parts[9]?.trim() || '';
+      const execIdRaw = parts[9]?.trim() || '';
       const dateRaw = parts[10]?.trim() || ''; // DD/MM/YYYY
       const timeRaw = parts[11]?.trim() || '';
       
@@ -467,6 +491,15 @@ export function StockExchangeUpload() {
         if (day && month && year) {
           date = `${year}${month.padStart(2, '0')}${day.padStart(2, '0')}`;
         }
+      }
+      
+      // Generate unique exec_id if empty to avoid unique constraint issues
+      // Format: BOARD_CLIENT_SECURITY_DATE_TIME_QTY_PRICE
+      const execId = execIdRaw || `${board}_${clientCode}_${securityCode}_${date}_${timeRaw}_${quantity}_${price}`.replace(/[^a-zA-Z0-9_]/g, '');
+      
+      // Debug: Log first few CSE trades
+      if (trades.length < 3 && (board.startsWith('CTG') || board.startsWith('DHK'))) {
+        console.log('CSE Trade parsed:', { board, clientCode, securityCode, side, quantity, price, execId, date, timeRaw });
       }
       
       trades.push({
