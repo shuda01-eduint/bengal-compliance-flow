@@ -4,18 +4,31 @@ import { EmployeeFilters } from "@/components/employees/EmployeeFilters";
 import { EmployeeAgentCodes } from "@/components/employees/EmployeeAgentCodes";
 import { AgentTradeDetailsTable } from "@/components/trade-history/AgentTradeDetailsTable";
 import { UserManagementTab } from "@/components/organization/UserManagementTab";
+import { AgentCard } from "@/components/agents/AgentCard";
+import { AgentFilters } from "@/components/agents/AgentFilters";
+import { AgentImportDialog } from "@/components/agents/AgentImportDialog";
+import { AgentListItem } from "@/components/agents/AgentListItem";
 import { useEmployees } from "@/hooks/useEmployees";
+import { useAgents } from "@/hooks/useAgents";
 import { departments } from "@/data/employees";
 import { useState, useMemo } from "react";
-import { Mail, Phone, User, Building2, Users, ChevronRight, UserCog, Loader2 } from "lucide-react";
+import { Mail, Phone, User, Building2, Users, ChevronRight, UserCog, Loader2, Briefcase } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const EmployeesPage = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   
+  // Agent state
+  const [agentSearchQuery, setAgentSearchQuery] = useState("");
+  const [selectedRM, setSelectedRM] = useState("all");
+  const [selectedStatus, setSelectedStatus] = useState("all");
+  const [agentViewMode, setAgentViewMode] = useState<"grid" | "list">("grid");
+  
   const { data: employees = [], isLoading } = useEmployees();
+  const { data: agents = [], isLoading: isLoadingAgents } = useAgents();
 
   const filteredEmployees = useMemo(() => {
     return employees.filter((employee) => {
@@ -31,6 +44,37 @@ const EmployeesPage = () => {
       return matchesSearch && matchesDepartment;
     });
   }, [employees, searchQuery, selectedDepartment]);
+
+  const rmOptions = useMemo(() => {
+    const unique = [...new Set(agents.map(a => a.rm_name).filter((name): name is string => Boolean(name) && name.trim() !== ""))];
+    return unique.sort();
+  }, [agents]);
+
+  const filteredAgents = useMemo(() => {
+    return agents.filter((agent) => {
+      const matchesSearch = 
+        agent.name.toLowerCase().includes(agentSearchQuery.toLowerCase()) ||
+        agent.agent_id.toLowerCase().includes(agentSearchQuery.toLowerCase()) ||
+        (agent.rm_name?.toLowerCase().includes(agentSearchQuery.toLowerCase()) ?? false);
+      
+      const matchesRM = 
+        selectedRM === "all" || 
+        agent.rm_name === selectedRM;
+      
+      const matchesStatus = 
+        selectedStatus === "all" || 
+        agent.status === selectedStatus;
+
+      return matchesSearch && matchesRM && matchesStatus;
+    });
+  }, [agents, agentSearchQuery, selectedRM, selectedStatus]);
+
+  const agentStats = useMemo(() => {
+    const total = agents.length;
+    const active = agents.filter(a => a.status === "Active").length;
+    const uniqueRMs = new Set(agents.map(a => a.rm_id)).size;
+    return { total, active, uniqueRMs };
+  }, [agents]);
 
   return (
     <MainLayout 
@@ -184,8 +228,82 @@ const EmployeesPage = () => {
         </TabsContent>
 
         {/* Agents Tab */}
-        <TabsContent value="agents">
-          <AgentTradeDetailsTable />
+        <TabsContent value="agents" className="space-y-6">
+          {/* Stats & Actions Header */}
+          <div className="flex flex-col md:flex-row justify-between gap-4">
+            <div className="flex flex-wrap gap-4">
+              <div className="glass-card rounded-lg px-4 py-3">
+                <p className="text-xs text-muted-foreground">Total Agents</p>
+                <p className="text-2xl font-semibold text-foreground">{agentStats.total}</p>
+              </div>
+              <div className="glass-card rounded-lg px-4 py-3">
+                <p className="text-xs text-muted-foreground">Active</p>
+                <p className="text-2xl font-semibold text-green-600">{agentStats.active}</p>
+              </div>
+              <div className="glass-card rounded-lg px-4 py-3">
+                <p className="text-xs text-muted-foreground">Unique RMs</p>
+                <p className="text-2xl font-semibold text-foreground">{agentStats.uniqueRMs}</p>
+              </div>
+            </div>
+            <AgentImportDialog />
+          </div>
+
+          <AgentFilters
+            searchQuery={agentSearchQuery}
+            onSearchChange={setAgentSearchQuery}
+            selectedRM={selectedRM}
+            onRMChange={setSelectedRM}
+            selectedStatus={selectedStatus}
+            onStatusChange={setSelectedStatus}
+            viewMode={agentViewMode}
+            onViewModeChange={setAgentViewMode}
+            rmOptions={rmOptions}
+          />
+
+          {isLoadingAgents ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : agentViewMode === "grid" ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredAgents.map((agent, index) => (
+                <AgentCard key={agent.id} agent={agent} index={index} />
+              ))}
+            </div>
+          ) : (
+            <div className="glass-card rounded-xl overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Agent ID</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Commission</TableHead>
+                    <TableHead>RM</TableHead>
+                    <TableHead>Bank</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredAgents.map((agent) => (
+                    <AgentListItem key={agent.id} agent={agent} />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {filteredAgents.length === 0 && !isLoadingAgents && (
+            <div className="glass-card rounded-xl p-12 text-center">
+              <Briefcase className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-2">No agents found</h3>
+              <p className="text-sm text-muted-foreground">
+                {agents.length === 0 
+                  ? "Import agents from Excel to get started" 
+                  : "Try adjusting your search or filter criteria"}
+              </p>
+            </div>
+          )}
         </TabsContent>
 
         {/* Users Tab */}
