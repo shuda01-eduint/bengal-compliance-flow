@@ -104,6 +104,81 @@ export type Database = {
         }
         Relationships: []
       }
+      assignment_change_requests: {
+        Row: {
+          admin_approved_at: string | null
+          admin_approved_by: string | null
+          admin_notes: string | null
+          change_type: string
+          created_at: string
+          current_assignments: Json | null
+          id: string
+          investor_code: string
+          investor_name: string | null
+          manager_approved_at: string | null
+          manager_approved_by: string | null
+          manager_notes: string | null
+          reason: string | null
+          rejected_at: string | null
+          rejected_by: string | null
+          rejection_reason: string | null
+          requested_assignments: Json
+          requested_at: string | null
+          requested_by: string
+          requested_by_email: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          admin_approved_at?: string | null
+          admin_approved_by?: string | null
+          admin_notes?: string | null
+          change_type: string
+          created_at?: string
+          current_assignments?: Json | null
+          id?: string
+          investor_code: string
+          investor_name?: string | null
+          manager_approved_at?: string | null
+          manager_approved_by?: string | null
+          manager_notes?: string | null
+          reason?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          requested_assignments: Json
+          requested_at?: string | null
+          requested_by: string
+          requested_by_email: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          admin_approved_at?: string | null
+          admin_approved_by?: string | null
+          admin_notes?: string | null
+          change_type?: string
+          created_at?: string
+          current_assignments?: Json | null
+          id?: string
+          investor_code?: string
+          investor_name?: string | null
+          manager_approved_at?: string | null
+          manager_approved_by?: string | null
+          manager_notes?: string | null
+          reason?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          requested_assignments?: Json
+          requested_at?: string | null
+          requested_by?: string
+          requested_by_email?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       balances_raw: {
         Row: {
           as_of_date: string
@@ -612,6 +687,69 @@ export type Database = {
           total_cost?: number | null
           total_stock?: number | null
           trading_code?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      investor_agent_assignments: {
+        Row: {
+          agent_id: string
+          agent_name: string | null
+          created_at: string
+          id: string
+          investor_code: string
+          percentage: number
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          agent_name?: string | null
+          created_at?: string
+          id?: string
+          investor_code: string
+          percentage?: number
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          agent_name?: string | null
+          created_at?: string
+          id?: string
+          investor_code?: string
+          percentage?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      investor_rm_assignments: {
+        Row: {
+          created_at: string
+          department: string | null
+          id: string
+          investor_code: string
+          percentage: number
+          rm_email: string
+          rm_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          department?: string | null
+          id?: string
+          investor_code: string
+          percentage?: number
+          rm_email: string
+          rm_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          department?: string | null
+          id?: string
+          investor_code?: string
+          percentage?: number
+          rm_email?: string
+          rm_name?: string | null
           updated_at?: string
         }
         Relationships: []
