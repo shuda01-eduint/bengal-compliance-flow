@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Check, X, Search, Shield, Users, Clock, RefreshCw, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { ImportDepartmentHeadsDialog } from "./ImportDepartmentHeadsDialog";
+import { ImportMANCOMDialog } from "./ImportMANCOMDialog";
 
 interface Profile {
   id: string;
@@ -20,7 +21,7 @@ interface Profile {
   created_at: string;
 }
 
-type AppRole = "admin" | "rm" | "user" | "department_head" | "branch_manager" | "agent";
+type AppRole = "admin" | "mancom" | "department_head" | "branch_manager" | "rm" | "agent" | "user";
 
 interface UserRole {
   user_id: string;
@@ -178,6 +179,9 @@ export function UserManagementTab() {
             <ImportDepartmentHeadsDialog 
               onSuccess={() => queryClient.invalidateQueries({ queryKey: ["admin-profiles"] })} 
             />
+            <ImportMANCOMDialog 
+              onSuccess={() => queryClient.invalidateQueries({ queryKey: ["admin-profiles", "admin-user-roles"] })} 
+            />
           </div>
         </CardContent>
       </Card>
@@ -285,6 +289,7 @@ export function UserManagementTab() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="mancom">MANCOM</SelectItem>
                             <SelectItem value="department_head">Department Head</SelectItem>
                             <SelectItem value="branch_manager">Branch Manager</SelectItem>
                             <SelectItem value="rm">RM</SelectItem>

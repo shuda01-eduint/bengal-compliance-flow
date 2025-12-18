@@ -856,6 +856,45 @@ export type Database = {
         }
         Relationships: []
       }
+      outlet_managers: {
+        Row: {
+          created_at: string
+          id: string
+          manager_email: string | null
+          manager_id: string | null
+          manager_name: string | null
+          mancom_email: string
+          mancom_id: string
+          mancom_name: string | null
+          outlet_name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          manager_email?: string | null
+          manager_id?: string | null
+          manager_name?: string | null
+          mancom_email: string
+          mancom_id: string
+          mancom_name?: string | null
+          outlet_name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          manager_email?: string | null
+          manager_id?: string | null
+          manager_name?: string | null
+          mancom_email?: string
+          mancom_id?: string
+          mancom_name?: string | null
+          outlet_name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       portfolio_custom_fields: {
         Row: {
           created_at: string
@@ -956,6 +995,7 @@ export type Database = {
           id: string
           is_approved: boolean
           is_department_head: boolean
+          is_mancom: boolean
           updated_at: string
         }
         Insert: {
@@ -967,6 +1007,7 @@ export type Database = {
           id: string
           is_approved?: boolean
           is_department_head?: boolean
+          is_mancom?: boolean
           updated_at?: string
         }
         Update: {
@@ -978,6 +1019,7 @@ export type Database = {
           id?: string
           is_approved?: boolean
           is_department_head?: boolean
+          is_mancom?: boolean
           updated_at?: string
         }
         Relationships: [
@@ -1209,6 +1251,7 @@ export type Database = {
         Args: { head_emails: string[] }
         Returns: Json
       }
+      bulk_assign_mancom_managers: { Args: { managers: Json }; Returns: Json }
       get_accounting_data: {
         Args: {
           _from_trade_date?: string
@@ -1290,10 +1333,11 @@ export type Database = {
         Args: { _rm_email: string }
         Returns: boolean
       }
+      is_mancom_of_rm: { Args: { _rm_email: string }; Returns: boolean }
       sync_departments_from_employees: { Args: never; Returns: Json }
     }
     Enums: {
-      app_role: "admin" | "rm" | "user" | "agent"
+      app_role: "admin" | "rm" | "user" | "agent" | "mancom" | "branch_manager"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1421,7 +1465,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "rm", "user", "agent"],
+      app_role: ["admin", "rm", "user", "agent", "mancom", "branch_manager"],
     },
   },
 } as const
