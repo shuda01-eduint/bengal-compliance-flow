@@ -253,7 +253,11 @@ export function StockExchangeUpload() {
       
       for (let i = 0; i < validRecords.length; i += batchSize) {
         const batch = validRecords.slice(i, i + batchSize);
-        const { error } = await supabase.from('trade_history').insert(batch);
+        // Use upsert to handle re-uploads - update existing records based on exec_id and trade_date
+        const { error } = await supabase.from('trade_history').upsert(batch, { 
+          onConflict: 'exec_id,trade_date',
+          ignoreDuplicates: false 
+        });
         if (error) throw error;
         
         inserted += batch.length;
