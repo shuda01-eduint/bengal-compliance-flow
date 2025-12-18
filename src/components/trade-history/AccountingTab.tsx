@@ -152,6 +152,7 @@ const AccountingTab = () => {
   const [selectedTradeInvestor, setSelectedTradeInvestor] = useState<AccountingRow | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
+  const [hasTradesFilter, setHasTradesFilter] = useState<string>("all");
 
   // Debounce search term for server-side search
   const debouncedSearch = useDebounce(searchTerm, 300);
@@ -259,10 +260,19 @@ const AccountingTab = () => {
     
     return accountingResult
       .filter((row: any) => {
-        if (accountTypeFilter === "all") return true;
-        const type = (row.account_type || '').toLowerCase();
-        if (accountTypeFilter === "margin") return type === "margin";
-        if (accountTypeFilter === "cash") return type !== "margin";
+        // Account type filter
+        if (accountTypeFilter !== "all") {
+          const type = (row.account_type || '').toLowerCase();
+          if (accountTypeFilter === "margin" && type !== "margin") return false;
+          if (accountTypeFilter === "cash" && type === "margin") return false;
+        }
+        // Has trades filter
+        if (hasTradesFilter === "with_trades") {
+          if (Number(row.gross_buy) === 0 && Number(row.gross_sell) === 0) return false;
+        }
+        if (hasTradesFilter === "no_trades") {
+          if (Number(row.gross_buy) > 0 || Number(row.gross_sell) > 0) return false;
+        }
         return true;
       })
       .map((row: any) => {
@@ -293,7 +303,7 @@ const AccountingTab = () => {
 
         return processedRow;
       });
-  }, [accountingResult, customFields, accountTypeFilter]);
+  }, [accountingResult, customFields, accountTypeFilter, hasTradesFilter]);
 
   // Get total count from first row (all rows have the same total_count)
   const totalCount = accountingResult?.[0]?.total_count || 0;
@@ -617,6 +627,18 @@ const AccountingTab = () => {
               <SelectItem value="all">All Types</SelectItem>
               <SelectItem value="margin">Margin</SelectItem>
               <SelectItem value="cash">Cash/Regular</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Has Trades Filter */}
+          <Select value={hasTradesFilter} onValueChange={setHasTradesFilter}>
+            <SelectTrigger className="w-[140px] h-9 bg-muted/30 border-border/50">
+              <SelectValue placeholder="Trade Activity" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Activity</SelectItem>
+              <SelectItem value="with_trades">With Trades</SelectItem>
+              <SelectItem value="no_trades">No Trades</SelectItem>
             </SelectContent>
           </Select>
 
