@@ -5,7 +5,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Users, TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
+import { Search, Users, TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronRight, Calendar as CalendarIcon, Eye, X } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -65,6 +65,32 @@ const AdminBalancesPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, isLoading: false });
+  const [previewAsRM, setPreviewAsRM] = useState<string>("");
+
+  // Fetch RMs for preview dropdown
+  const { data: rmList } = useQuery({
+    queryKey: ['rm-list-for-preview'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('balances_raw')
+        .select('rm_email, rm_name')
+        .not('rm_email', 'is', null);
+      
+      if (error) throw error;
+      
+      // Get unique RMs
+      const uniqueRMs = new Map<string, string>();
+      data.forEach(d => {
+        if (d.rm_email && !uniqueRMs.has(d.rm_email)) {
+          uniqueRMs.set(d.rm_email, d.rm_name || d.rm_email);
+        }
+      });
+      
+      return Array.from(uniqueRMs.entries())
+        .map(([email, name]) => ({ email, name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    },
+  });
 
   // Fetch available dates
   const { data: availableDates } = useQuery({
@@ -417,10 +443,17 @@ const AdminBalancesPage = () => {
   // Enrich data with computed fields including next-day adjustments
   const enrichedData = useMemo(() => {
     if (!rawBalances) return [];
-    return rawBalances.map(row => enrichBalanceRow(row, investorAdjustments, investorDataMap));
-  }, [rawBalances, investorAdjustments, investorDataMap]);
+    let data = rawBalances.map(row => enrichBalanceRow(row, investorAdjustments, investorDataMap));
+    
+    // Apply RM preview filter
+    if (previewAsRM) {
+      data = data.filter(row => row.rm_email?.toLowerCase() === previewAsRM.toLowerCase());
+    }
+    
+    return data;
+  }, [rawBalances, investorAdjustments, investorDataMap, previewAsRM]);
 
-  // Calculate summary
+  // Calculate summary (now reflects RM preview filter)
   const summary = useMemo(() => {
     return calculateSummary(enrichedData);
   }, [enrichedData]);
@@ -624,7 +657,7 @@ const AdminBalancesPage = () => {
     >
       {/* Sticky Summary Bar */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm pb-4 border-b border-border mb-6">
-        <div className="flex justify-between items-start mb-4">
+        <div className="flex flex-wrap justify-between items-start gap-4 mb-4">
           {/* Date Picker */}
           <div className="flex items-center gap-4">
             <Label>As of Date</Label>
@@ -650,8 +683,49 @@ const AdminBalancesPage = () => {
               </PopoverContent>
             </Popover>
           </div>
+
+          {/* RM Preview Selector */}
+          <div className="flex items-center gap-2">
+            <Eye className="h-4 w-4 text-muted-foreground" />
+            <Label className="text-sm">Preview as RM</Label>
+            <Select value={previewAsRM} onValueChange={setPreviewAsRM}>
+              <SelectTrigger className="w-[280px] bg-secondary border-border">
+                <SelectValue placeholder="All RMs (Admin View)" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[300px]">
+                <SelectItem value="">All RMs (Admin View)</SelectItem>
+                {rmList?.map((rm) => (
+                  <SelectItem key={rm.email} value={rm.email}>
+                    {rm.name} ({rm.email.split('@')[0]})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {previewAsRM && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => setPreviewAsRM("")}
+                className="h-8 w-8"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+
           <ImportBalancesRawDialog onImportComplete={handleImportComplete} />
         </div>
+
+        {/* RM Preview Banner */}
+        {previewAsRM && (
+          <div className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2">
+            <Eye className="h-4 w-4 text-primary" />
+            <span className="text-sm">
+              Previewing as: <strong>{rmList?.find(r => r.email === previewAsRM)?.name || previewAsRM}</strong>
+              {" "}— showing only data this RM would see when logged in
+            </span>
+          </div>
+        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
