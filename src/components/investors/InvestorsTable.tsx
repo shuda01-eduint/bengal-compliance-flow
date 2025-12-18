@@ -30,6 +30,7 @@ import {
 import { Search, Download, Upload, Users, UserCheck, Building } from "lucide-react";
 import { ImportInvestorsDialog } from "./ImportInvestorsDialog";
 import { InvestorDetailDialog } from "./InvestorDetailDialog";
+import { ImportCommissionsDialog } from "@/components/admin/ImportCommissionsDialog";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
 
@@ -281,6 +282,7 @@ export function InvestorsTable() {
             </div>
 
             <div className="flex gap-2">
+              <ImportCommissionsDialog onSuccess={() => refetch()} />
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" />
                 Export
