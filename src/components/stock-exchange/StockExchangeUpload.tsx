@@ -470,9 +470,9 @@ export function StockExchangeUpload() {
       const parts = line.split('|');
       if (parts.length < 11) continue;
       
-      // Format: board|client_code|security_code|side|quantity|price|???|???|???|order_id|trade_date|trade_time|...
+      // Format: board|ref_code|security_code|side|quantity|price|client_code|???|???|exec_id|trade_date|trade_time|...
       const board = parts[0]?.trim() || '';
-      const clientCode = parts[1]?.trim() || ''; // Client code is at position 1
+      const clientCode = parts[6]?.trim() || ''; // Client code is at position 6
       const securityCode = parts[2]?.trim() || '';
       const sideRaw = parts[3]?.trim().toUpperCase() || '';
       const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
