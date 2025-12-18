@@ -41,6 +41,14 @@ export function ImportCommissionsDialog({ onSuccess }: ImportCommissionsDialogPr
     setResults(null);
   };
 
+  const handleOpenChange = (newOpen: boolean) => {
+    if (isImporting) return;
+    setOpen(newOpen);
+    if (!newOpen) {
+      resetState();
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
@@ -156,17 +164,10 @@ export function ImportCommissionsDialog({ onSuccess }: ImportCommissionsDialogPr
     }
   };
 
-  const handleClose = () => {
-    if (!isImporting) {
-      setOpen(false);
-      resetState();
-    }
-  };
-
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline" onClick={() => setOpen(true)}>
+        <Button variant="outline">
           <Percent className="mr-2 h-4 w-4" />
           Update Commissions
         </Button>
@@ -277,7 +278,7 @@ export function ImportCommissionsDialog({ onSuccess }: ImportCommissionsDialogPr
 
           {/* Actions */}
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={handleClose} disabled={isImporting}>
+            <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isImporting}>
               {results ? "Close" : "Cancel"}
             </Button>
             {!results && (
