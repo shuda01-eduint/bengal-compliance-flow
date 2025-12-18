@@ -266,9 +266,9 @@ export function StockExchangeUpload() {
         const batch = validRecords.slice(i, i + batchSize);
         const batchNum = Math.floor(i / batchSize) + 1;
         
-        // Use upsert to handle re-uploads - update existing records based on exec_id and trade_date
+        // Use upsert to handle re-uploads - update existing records based on exec_id, trade_date, client_code, board
         const { data, error, count } = await supabase.from('trade_history').upsert(batch, { 
-          onConflict: 'exec_id,trade_date',
+          onConflict: 'exec_id,trade_date,client_code,board',
           ignoreDuplicates: false,
           count: 'exact'
         }).select('id');
