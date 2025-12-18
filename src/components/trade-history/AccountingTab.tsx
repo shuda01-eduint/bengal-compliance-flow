@@ -157,10 +157,10 @@ const AccountingTab = () => {
   // Debounce search term for server-side search
   const debouncedSearch = useDebounce(searchTerm, 300);
 
-  // Reset to first page when search changes
+  // Reset to first page when search or filters change
   useEffect(() => {
     setCurrentPage(0);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, accountTypeFilter, hasTradesFilter]);
 
   // Load custom fields from localStorage
   useEffect(() => {
@@ -221,9 +221,9 @@ const AccountingTab = () => {
   const fromTradeDateStr = format(fromDate, 'yyyyMMdd');
   const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
-  // Fetch accounting data using RPC function (server-side search + pagination)
+  // Fetch accounting data using RPC function (server-side search + pagination + filters)
   const { data: accountingResult, isLoading: loadingData } = useQuery({
-    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, currentPage],
+    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, currentPage, accountTypeFilter, hasTradesFilter],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_data', {
         _search_term: debouncedSearch || null,
@@ -233,77 +233,64 @@ const AccountingTab = () => {
         _to_tx_date: toDateStr,
         _page_size: PAGE_SIZE,
         _page_offset: currentPage * PAGE_SIZE,
+        _account_type_filter: accountTypeFilter,
+        _has_trades_filter: hasTradesFilter,
       });
       if (error) throw error;
       return data || [];
     },
   });
 
-  // Fetch summary data using RPC function
+  // Fetch summary data using RPC function (with filters for accurate totals)
   const { data: summaryResult, isLoading: loadingSummary } = useQuery({
-    queryKey: ['accounting-summary', fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr],
+    queryKey: ['accounting-summary', fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, accountTypeFilter, hasTradesFilter],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_summary', {
         _from_trade_date: fromTradeDateStr,
         _to_trade_date: toTradeDateStr,
         _from_tx_date: fromDateStr,
         _to_tx_date: toDateStr,
+        _account_type_filter: accountTypeFilter,
+        _has_trades_filter: hasTradesFilter,
       });
       if (error) throw error;
       return data?.[0] || null;
     },
   });
 
-  // Process accounting data with custom fields and filtering
+  // Process accounting data with custom fields (filtering now done server-side)
   const accountingData = useMemo(() => {
     if (!accountingResult) return [];
     
-    return accountingResult
-      .filter((row: any) => {
-        // Account type filter
-        if (accountTypeFilter !== "all") {
-          const type = (row.account_type || '').toLowerCase();
-          if (accountTypeFilter === "margin" && type !== "margin") return false;
-          if (accountTypeFilter === "cash" && type === "margin") return false;
-        }
-        // Has trades filter
-        if (hasTradesFilter === "with_trades") {
-          if (Number(row.gross_buy) === 0 && Number(row.gross_sell) === 0) return false;
-        }
-        if (hasTradesFilter === "no_trades") {
-          if (Number(row.gross_buy) > 0 || Number(row.gross_sell) > 0) return false;
-        }
-        return true;
-      })
-      .map((row: any) => {
-        const processedRow: AccountingRow = {
-          investor_code: row.investor_code || '',
-          investor_name: row.investor_name || '',
-          account_type: row.account_type || '',
-          interest_rate: Number(row.interest_rate) || 0,
-          brokerage_commission: Number(row.brokerage_commission) || 0,
-          ledger_balance: Number(row.ledger_balance) || 0,
-          total_deposits: Number(row.total_deposits) || 0,
-          total_withdrawals: Number(row.total_withdrawals) || 0,
-          gross_buy: Number(row.gross_buy) || 0,
-          gross_sell: Number(row.gross_sell) || 0,
-          net_sell: Number(row.net_sell) || 0,
-          adjusted_ledger: Number(row.adjusted_ledger) || 0,
-          accrued_interest: Number(row.accrued_interest) || 0,
-          brokerage_amount: Number(row.brokerage_amount) || 0,
-          final_balance: Number(row.final_balance) || 0,
-          receivable: Number(row.receivable) || 0,
-          payable: Number(row.payable) || 0,
-        };
+    return accountingResult.map((row: any) => {
+      const processedRow: AccountingRow = {
+        investor_code: row.investor_code || '',
+        investor_name: row.investor_name || '',
+        account_type: row.account_type || '',
+        interest_rate: Number(row.interest_rate) || 0,
+        brokerage_commission: Number(row.brokerage_commission) || 0,
+        ledger_balance: Number(row.ledger_balance) || 0,
+        total_deposits: Number(row.total_deposits) || 0,
+        total_withdrawals: Number(row.total_withdrawals) || 0,
+        gross_buy: Number(row.gross_buy) || 0,
+        gross_sell: Number(row.gross_sell) || 0,
+        net_sell: Number(row.net_sell) || 0,
+        adjusted_ledger: Number(row.adjusted_ledger) || 0,
+        accrued_interest: Number(row.accrued_interest) || 0,
+        brokerage_amount: Number(row.brokerage_amount) || 0,
+        final_balance: Number(row.final_balance) || 0,
+        receivable: Number(row.receivable) || 0,
+        payable: Number(row.payable) || 0,
+      };
 
-        // Calculate custom fields
-        customFields.forEach(field => {
-          processedRow[field.id] = evaluateFormula(field.formula, processedRow);
-        });
-
-        return processedRow;
+      // Calculate custom fields
+      customFields.forEach(field => {
+        processedRow[field.id] = evaluateFormula(field.formula, processedRow);
       });
-  }, [accountingResult, customFields, accountTypeFilter, hasTradesFilter]);
+
+      return processedRow;
+    });
+  }, [accountingResult, customFields]);
 
   // Get total count from first row (all rows have the same total_count)
   const totalCount = accountingResult?.[0]?.total_count || 0;
