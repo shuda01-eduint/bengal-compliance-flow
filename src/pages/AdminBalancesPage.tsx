@@ -673,12 +673,14 @@ const AdminBalancesPage = () => {
                   mode="single"
                   selected={selectedDate}
                   onSelect={setSelectedDate}
-                  disabled={(date) => {
-                    if (!availableDates) return true;
-                    return !availableDates.includes(format(date, 'yyyy-MM-dd'));
-                  }}
+                  disabled={(date) => date > new Date()}
                   initialFocus
-                  className="pointer-events-auto"
+                  modifiers={{
+                    hasData: availableDates?.map(d => parseISO(d)) || []
+                  }}
+                  modifiersStyles={{
+                    hasData: { fontWeight: 'bold', textDecoration: 'underline' }
+                  }}
                 />
               </PopoverContent>
             </Popover>
