@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { format, subDays } from "date-fns";
 import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/balance-utils";
 import { toast } from "sonner";
 import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
@@ -150,6 +151,7 @@ const AccountingTab = () => {
   const [selectedTradeType, setSelectedTradeType] = useState<'BUY' | 'SELL'>('BUY');
   const [selectedTradeInvestor, setSelectedTradeInvestor] = useState<AccountingRow | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
+  const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
 
   // Debounce search term for server-side search
   const debouncedSearch = useDebounce(searchTerm, 300);
@@ -251,39 +253,47 @@ const AccountingTab = () => {
     },
   });
 
-  // Process accounting data with custom fields
+  // Process accounting data with custom fields and filtering
   const accountingData = useMemo(() => {
     if (!accountingResult) return [];
     
-    return accountingResult.map((row: any) => {
-      const processedRow: AccountingRow = {
-        investor_code: row.investor_code || '',
-        investor_name: row.investor_name || '',
-        account_type: row.account_type || '',
-        interest_rate: Number(row.interest_rate) || 0,
-        brokerage_commission: Number(row.brokerage_commission) || 0,
-        ledger_balance: Number(row.ledger_balance) || 0,
-        total_deposits: Number(row.total_deposits) || 0,
-        total_withdrawals: Number(row.total_withdrawals) || 0,
-        gross_buy: Number(row.gross_buy) || 0,
-        gross_sell: Number(row.gross_sell) || 0,
-        net_sell: Number(row.net_sell) || 0,
-        adjusted_ledger: Number(row.adjusted_ledger) || 0,
-        accrued_interest: Number(row.accrued_interest) || 0,
-        brokerage_amount: Number(row.brokerage_amount) || 0,
-        final_balance: Number(row.final_balance) || 0,
-        receivable: Number(row.receivable) || 0,
-        payable: Number(row.payable) || 0,
-      };
+    return accountingResult
+      .filter((row: any) => {
+        if (accountTypeFilter === "all") return true;
+        const type = (row.account_type || '').toLowerCase();
+        if (accountTypeFilter === "margin") return type === "margin";
+        if (accountTypeFilter === "cash") return type !== "margin";
+        return true;
+      })
+      .map((row: any) => {
+        const processedRow: AccountingRow = {
+          investor_code: row.investor_code || '',
+          investor_name: row.investor_name || '',
+          account_type: row.account_type || '',
+          interest_rate: Number(row.interest_rate) || 0,
+          brokerage_commission: Number(row.brokerage_commission) || 0,
+          ledger_balance: Number(row.ledger_balance) || 0,
+          total_deposits: Number(row.total_deposits) || 0,
+          total_withdrawals: Number(row.total_withdrawals) || 0,
+          gross_buy: Number(row.gross_buy) || 0,
+          gross_sell: Number(row.gross_sell) || 0,
+          net_sell: Number(row.net_sell) || 0,
+          adjusted_ledger: Number(row.adjusted_ledger) || 0,
+          accrued_interest: Number(row.accrued_interest) || 0,
+          brokerage_amount: Number(row.brokerage_amount) || 0,
+          final_balance: Number(row.final_balance) || 0,
+          receivable: Number(row.receivable) || 0,
+          payable: Number(row.payable) || 0,
+        };
 
-      // Calculate custom fields
-      customFields.forEach(field => {
-        processedRow[field.id] = evaluateFormula(field.formula, processedRow);
+        // Calculate custom fields
+        customFields.forEach(field => {
+          processedRow[field.id] = evaluateFormula(field.formula, processedRow);
+        });
+
+        return processedRow;
       });
-
-      return processedRow;
-    });
-  }, [accountingResult, customFields]);
+  }, [accountingResult, customFields, accountTypeFilter]);
 
   // Get total count from first row (all rows have the same total_count)
   const totalCount = accountingResult?.[0]?.total_count || 0;
@@ -597,6 +607,18 @@ const AccountingTab = () => {
               </PopoverContent>
             </Popover>
           </div>
+
+          {/* Account Type Filter */}
+          <Select value={accountTypeFilter} onValueChange={setAccountTypeFilter}>
+            <SelectTrigger className="w-[140px] h-9 bg-muted/30 border-border/50">
+              <SelectValue placeholder="Account Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="margin">Margin</SelectItem>
+              <SelectItem value="cash">Cash/Regular</SelectItem>
+            </SelectContent>
+          </Select>
 
           <span className="text-sm text-muted-foreground hidden sm:inline">
             Period: {format(fromDate, 'dd MMM')} - {format(toDate, 'dd MMM yyyy')}
