@@ -459,12 +459,12 @@ export function StockExchangeUpload() {
       
       if (!clientCode || !securityCode) continue;
       
-      // Convert DD/MM/YYYY to YYYY-MM-DD
+      // Convert DD/MM/YYYY to YYYYMMDD (same format as DSE trades)
       let date = dateRaw;
       if (dateRaw.includes('/')) {
         const [day, month, year] = dateRaw.split('/');
         if (day && month && year) {
-          date = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          date = `${year}${month.padStart(2, '0')}${day.padStart(2, '0')}`;
         }
       }
       
