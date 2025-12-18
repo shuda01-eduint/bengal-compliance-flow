@@ -595,7 +595,7 @@ export function OverBuyReport() {
   }, [startDate, endDate]);
 
   const rmOptions = useMemo(() => {
-    const unique = [...new Set(data.map((d) => d.rm_name).filter(Boolean))];
+    const unique = [...new Set(data.map((d) => d.rm_name).filter((name): name is string => Boolean(name) && name.trim() !== ""))];
     return unique.sort();
   }, [data]);
 
