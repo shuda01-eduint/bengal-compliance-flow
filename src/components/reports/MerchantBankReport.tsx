@@ -299,7 +299,9 @@ export function MerchantBankReport() {
   };
 
   const bankOptions = useMemo(() => {
-    return data.map(d => ({ prefix: d.prefix, name: d.bank_name }));
+    return data
+      .filter(d => d.prefix && d.prefix.trim() !== "")
+      .map(d => ({ prefix: d.prefix, name: d.bank_name }));
   }, [data]);
 
   const filteredData = useMemo(() => {
