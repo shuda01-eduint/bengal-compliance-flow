@@ -1350,6 +1350,7 @@ export type Database = {
         Args: { _rm_email: string }
         Returns: boolean
       }
+      is_hr_or_ceo: { Args: never; Returns: boolean }
       is_mancom_of_rm: { Args: { _rm_email: string }; Returns: boolean }
       sync_departments_from_employees: { Args: never; Returns: Json }
     }
