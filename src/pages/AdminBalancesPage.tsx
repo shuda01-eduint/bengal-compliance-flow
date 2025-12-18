@@ -5,7 +5,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Users, TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronRight, Calendar as CalendarIcon, Eye, X } from "lucide-react";
+import { Search, Users, TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronRight, Calendar as CalendarIcon, Eye, X, Percent } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -429,6 +429,30 @@ const AdminBalancesPage = () => {
     },
   });
 
+  // Fetch employee department data for brokerage breakdown
+  const { data: employeeDepartments } = useQuery({
+    queryKey: ['employee-departments'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('employees')
+        .select('email, department');
+      
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Create email to department map
+  const emailToDepartmentMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    employeeDepartments?.forEach(emp => {
+      if (emp.email && emp.department) {
+        map[emp.email.toLowerCase()] = emp.department;
+      }
+    });
+    return map;
+  }, [employeeDepartments]);
+
   // Create investor data map for quick lookup
   const investorDataMap = useMemo(() => {
     const map: Record<string, InvestorData> = {};
@@ -459,6 +483,49 @@ const AdminBalancesPage = () => {
   const summary = useMemo(() => {
     return calculateSummary(enrichedData);
   }, [enrichedData]);
+
+  // Calculate brokerage commission by department
+  const brokerageByDepartment = useMemo(() => {
+    const deptMap: Record<string, { total: number; count: number }> = {};
+    let totalBrokerage = 0;
+
+    // Group by investor first to avoid double counting (since each investor can have multiple holdings)
+    const investorBrokerage: Record<string, { brokerage: number; rmEmail: string | null }> = {};
+    
+    enrichedData.forEach(row => {
+      if (!investorBrokerage[row.investor_code]) {
+        investorBrokerage[row.investor_code] = {
+          brokerage: row.brokerage_amount || 0,
+          rmEmail: row.rm_email,
+        };
+      }
+    });
+
+    // Now aggregate by department
+    Object.values(investorBrokerage).forEach(({ brokerage, rmEmail }) => {
+      const department = rmEmail ? emailToDepartmentMap[rmEmail.toLowerCase()] : null;
+      const deptName = department || 'Unassigned';
+      
+      if (!deptMap[deptName]) {
+        deptMap[deptName] = { total: 0, count: 0 };
+      }
+      deptMap[deptName].total += brokerage;
+      deptMap[deptName].count += 1;
+      totalBrokerage += brokerage;
+    });
+
+    // Convert to sorted array
+    const departments = Object.entries(deptMap)
+      .map(([name, data]) => ({
+        name,
+        total: data.total,
+        count: data.count,
+        percentage: totalBrokerage > 0 ? (data.total / totalBrokerage) * 100 : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    return { departments, totalBrokerage };
+  }, [enrichedData, emailToDepartmentMap]);
 
   // Apply filters
   const filteredData = useMemo(() => {
@@ -808,6 +875,41 @@ const AdminBalancesPage = () => {
               {formatCurrency(summary.total_margin_loan)}
             </p>
           </div>
+        </div>
+
+        {/* Brokerage Commission by Department Card */}
+        <div className="glass-card rounded-xl p-4 mt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Percent className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium">Brokerage Commission by Department</span>
+            <span className="text-xs text-muted-foreground ml-auto">
+              Total: {formatCurrency(brokerageByDepartment.totalBrokerage)}
+            </span>
+          </div>
+          {brokerageByDepartment.departments.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {brokerageByDepartment.departments.slice(0, 12).map((dept) => (
+                <div key={dept.name} className="bg-secondary/50 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground truncate mb-1" title={dept.name}>
+                    {dept.name}
+                  </p>
+                  <p className="text-sm font-semibold text-primary">
+                    {formatCurrency(dept.total)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {dept.percentage.toFixed(1)}% • {dept.count} clients
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No brokerage data available</p>
+          )}
+          {brokerageByDepartment.departments.length > 12 && (
+            <p className="text-xs text-muted-foreground mt-2">
+              +{brokerageByDepartment.departments.length - 12} more departments
+            </p>
+          )}
         </div>
       </div>
 
