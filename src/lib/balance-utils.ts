@@ -24,6 +24,8 @@ export interface InvestorAdjustment {
   withdrawals: number;
   net_sell: number;
   net_buy: number;
+  gross_buy: number;
+  gross_sell: number;
 }
 
 export interface InvestorData {
@@ -42,6 +44,9 @@ export interface EnrichedBalanceRow extends BalanceRawRow {
   withdrawals: number;
   net_sell: number;
   net_buy: number;
+  gross_buy: number;
+  gross_sell: number;
+  brokerage_amount: number;
   accrued_interest: number;
   receivable_payable: number;
   brokerage_commission_rate: number;
@@ -144,14 +149,17 @@ export function enrichBalanceRow(
   adjustments?: Record<string, InvestorAdjustment>,
   investorDataMap?: Record<string, InvestorData>
 ): EnrichedBalanceRow {
-  const adjustment = adjustments?.[row.investor_code] || { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0 };
+  const adjustment = adjustments?.[row.investor_code] || { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0, gross_buy: 0, gross_sell: 0 };
   const investorData = investorDataMap?.[row.investor_code] || { interest_rate: 0, brokerage_commission: 0, account_type: null };
   
   const unrealized_pnl = row.total_mv - row.total_cost;
   const pnl_pct = row.total_cost !== 0 ? (unrealized_pnl / row.total_cost) * 100 : null;
   
-  // Adjusted ledger = ledger_balance + deposits - withdrawals + net_sell
-  const adjusted_ledger = row.ledger_balance + adjustment.deposits - adjustment.withdrawals + adjustment.net_sell;
+  // Calculate brokerage amount: (gross_buy + gross_sell) * commission_rate
+  const brokerage_amount = (adjustment.gross_buy + adjustment.gross_sell) * investorData.brokerage_commission;
+  
+  // Adjusted ledger = ledger_balance + deposits - withdrawals + net_sell - brokerage_amount
+  const adjusted_ledger = row.ledger_balance + adjustment.deposits - adjustment.withdrawals + adjustment.net_sell - brokerage_amount;
   
   // Accrued Interest: Only for margin accounts with negative adjusted ledger
   // Formula: (interest_rate / 365) * abs(negative_adjusted_ledger)
@@ -182,6 +190,9 @@ export function enrichBalanceRow(
     withdrawals: adjustment.withdrawals,
     net_sell: adjustment.net_sell,
     net_buy: adjustment.net_buy,
+    gross_buy: adjustment.gross_buy,
+    gross_sell: adjustment.gross_sell,
+    brokerage_amount,
     accrued_interest,
     receivable_payable,
     brokerage_commission_rate: investorData.brokerage_commission,

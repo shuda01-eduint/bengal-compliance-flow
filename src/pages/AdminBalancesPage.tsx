@@ -370,7 +370,7 @@ const AdminBalancesPage = () => {
     // Process transactions (deposits/withdrawals)
     nextDayTransactions?.forEach(tx => {
       if (!adjustments[tx.investor_code]) {
-        adjustments[tx.investor_code] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0 };
+        adjustments[tx.investor_code] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0, gross_buy: 0, gross_sell: 0 };
       }
       if (tx.transaction_type === 'Deposit') {
         adjustments[tx.investor_code].deposits += Number(tx.amount) || 0;
@@ -385,16 +385,18 @@ const AdminBalancesPage = () => {
       if (!clientCode) return;
       
       if (!adjustments[clientCode]) {
-        adjustments[clientCode] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0 };
+        adjustments[clientCode] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0, gross_buy: 0, gross_sell: 0 };
       }
       
       const value = Number(trade.value) || 0;
       if (trade.side?.toUpperCase() === 'SELL' || trade.side?.toUpperCase() === 'S') {
         adjustments[clientCode].net_sell += value;
         adjustments[clientCode].net_buy -= value;
+        adjustments[clientCode].gross_sell += value;
       } else if (trade.side?.toUpperCase() === 'BUY' || trade.side?.toUpperCase() === 'B') {
         adjustments[clientCode].net_sell -= value;
         adjustments[clientCode].net_buy += value;
+        adjustments[clientCode].gross_buy += value;
       }
     });
     
