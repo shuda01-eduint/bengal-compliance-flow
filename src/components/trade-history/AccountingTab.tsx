@@ -153,6 +153,24 @@ const AccountingTab = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
   const [hasTradesFilter, setHasTradesFilter] = useState<string>("all");
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Check if user is admin
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("role", "admin")
+        .single();
+      setIsAdmin(!!roleData);
+    };
+    checkAdmin();
+  }, []);
 
   // Debounce search term for server-side search
   const debouncedSearch = useDebounce(searchTerm, 300);
@@ -757,10 +775,12 @@ const AccountingTab = () => {
               </DialogContent>
             </Dialog>
 
-            <Button variant="outline" size="sm" onClick={handleExport}>
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={handleExport}>
+                <Download className="h-4 w-4 mr-2" />
+                Export
+              </Button>
+            )}
           </div>
         </div>
       </div>
