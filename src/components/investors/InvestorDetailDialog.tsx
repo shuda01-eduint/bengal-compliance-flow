@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -6,7 +7,9 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { User, Phone, Mail, Building, CreditCard, Calendar } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { User, Phone, Mail, Building, CreditCard, Calendar, Edit } from "lucide-react";
+import { CommissionChangeRequestDialog } from "./CommissionChangeRequestDialog";
 
 type Investor = {
   id: string;
@@ -55,6 +58,8 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 }
 
 export function InvestorDetailDialog({ investor, onClose }: InvestorDetailDialogProps) {
+  const [showChangeRequestDialog, setShowChangeRequestDialog] = useState(false);
+  
   if (!investor) return null;
 
   return (
@@ -141,11 +146,33 @@ export function InvestorDetailDialog({ investor, onClose }: InvestorDetailDialog
               />
               <DetailRow 
                 label="Brokerage Commission" 
-                value={investor.brokerage_commission != null ? `${investor.brokerage_commission}%` : null} 
+                value={
+                  <div className="flex items-center gap-2">
+                    <span>{investor.brokerage_commission != null ? `${investor.brokerage_commission} (${(investor.brokerage_commission * 100).toFixed(4)}%)` : "-"}</span>
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      className="h-6 w-6"
+                      onClick={() => setShowChangeRequestDialog(true)}
+                      title="Request Commission Change"
+                    >
+                      <Edit className="h-3 w-3" />
+                    </Button>
+                  </div>
+                } 
               />
             </div>
           </div>
         </div>
+
+        {/* Commission Change Request Dialog */}
+        <CommissionChangeRequestDialog
+          open={showChangeRequestDialog}
+          onClose={() => setShowChangeRequestDialog(false)}
+          investorCode={investor.investor_code}
+          investorName={investor.investor_name}
+          currentCommission={investor.brokerage_commission}
+        />
       </DialogContent>
     </Dialog>
   );
