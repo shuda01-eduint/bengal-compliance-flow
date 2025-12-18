@@ -446,13 +446,14 @@ export function StockExchangeUpload() {
       const parts = line.split('|');
       if (parts.length < 11) continue;
       
+      // Format: board|client_code|security_code|side|quantity|price|???|???|???|order_id|trade_date|trade_time|...
       const board = parts[0]?.trim() || '';
+      const clientCode = parts[1]?.trim() || ''; // Client code is at position 1
       const securityCode = parts[2]?.trim() || '';
       const sideRaw = parts[3]?.trim().toUpperCase() || '';
       const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
       const quantity = parseFloat(parts[4]?.replace(/,/g, '') || '0') || 0;
       const price = parseFloat(parts[5]?.replace(/,/g, '') || '0') || 0;
-      const clientCode = parts[6]?.trim() || '';
       const execId = parts[9]?.trim() || '';
       const dateRaw = parts[10]?.trim() || ''; // DD/MM/YYYY
       const timeRaw = parts[11]?.trim() || '';
