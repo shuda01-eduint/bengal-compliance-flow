@@ -1205,6 +1205,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      bulk_assign_department_heads: {
+        Args: { head_emails: string[] }
+        Returns: Json
+      }
       get_accounting_data: {
         Args: {
           _from_trade_date?: string
@@ -1286,6 +1290,7 @@ export type Database = {
         Args: { _rm_email: string }
         Returns: boolean
       }
+      sync_departments_from_employees: { Args: never; Returns: Json }
     }
     Enums: {
       app_role: "admin" | "rm" | "user" | "agent"

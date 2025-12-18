@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Check, X, Search, Shield, Users, Clock } from "lucide-react";
+import { Check, X, Search, Shield, Users, Clock, RefreshCw, Loader2 } from "lucide-react";
 import { format } from "date-fns";
+import { ImportDepartmentHeadsDialog } from "./ImportDepartmentHeadsDialog";
 
 interface Profile {
   id: string;
@@ -29,8 +30,32 @@ interface UserRole {
 export function UserManagementTab() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "pending" | "approved">("all");
+  const [isSyncing, setIsSyncing] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const syncDepartments = async () => {
+    setIsSyncing(true);
+    try {
+      const { data, error } = await supabase.rpc("sync_departments_from_employees");
+      if (error) throw error;
+      
+      const result = data as { departments_created: number; total_departments: number };
+      toast({
+        title: "Departments Synced",
+        description: `${result.departments_created} new departments created. Total: ${result.total_departments}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["admin-profiles"] });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const { data: profiles, isLoading } = useQuery({
     queryKey: ["admin-profiles"],
@@ -134,7 +159,28 @@ export function UserManagementTab() {
           <CardContent className="flex items-center gap-4 p-6">
             <div className="p-3 rounded-lg bg-primary/10">
               <Users className="h-6 w-6 text-primary" />
-            </div>
+      </div>
+
+      {/* Admin Actions */}
+      <Card className="glass-card">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap gap-3 items-center">
+            <span className="text-sm font-medium text-muted-foreground">Admin Actions:</span>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={syncDepartments}
+              disabled={isSyncing}
+            >
+              {isSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              Sync Departments
+            </Button>
+            <ImportDepartmentHeadsDialog 
+              onSuccess={() => queryClient.invalidateQueries({ queryKey: ["admin-profiles"] })} 
+            />
+          </div>
+        </CardContent>
+      </Card>
             <div>
               <p className="text-2xl font-bold">{profiles?.length ?? 0}</p>
               <p className="text-sm text-muted-foreground">Total Users</p>
