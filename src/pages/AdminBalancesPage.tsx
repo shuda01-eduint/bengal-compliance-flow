@@ -65,7 +65,7 @@ const AdminBalancesPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, isLoading: false });
-  const [previewAsRM, setPreviewAsRM] = useState<string>("");
+  const [previewAsRM, setPreviewAsRM] = useState<string>("all");
 
   // Fetch RMs for preview dropdown
   const { data: rmList } = useQuery({
@@ -446,7 +446,7 @@ const AdminBalancesPage = () => {
     let data = rawBalances.map(row => enrichBalanceRow(row, investorAdjustments, investorDataMap));
     
     // Apply RM preview filter
-    if (previewAsRM) {
+    if (previewAsRM && previewAsRM !== "all") {
       data = data.filter(row => row.rm_email?.toLowerCase() === previewAsRM.toLowerCase());
     }
     
@@ -693,7 +693,7 @@ const AdminBalancesPage = () => {
                 <SelectValue placeholder="All RMs (Admin View)" />
               </SelectTrigger>
               <SelectContent className="max-h-[300px]">
-                <SelectItem value="">All RMs (Admin View)</SelectItem>
+                <SelectItem value="all">All RMs (Admin View)</SelectItem>
                 {rmList?.map((rm) => (
                   <SelectItem key={rm.email} value={rm.email}>
                     {rm.name} ({rm.email.split('@')[0]})
@@ -701,11 +701,11 @@ const AdminBalancesPage = () => {
                 ))}
               </SelectContent>
             </Select>
-            {previewAsRM && (
+            {previewAsRM && previewAsRM !== "all" && (
               <Button 
                 variant="ghost" 
                 size="icon" 
-                onClick={() => setPreviewAsRM("")}
+                onClick={() => setPreviewAsRM("all")}
                 className="h-8 w-8"
               >
                 <X className="h-4 w-4" />
