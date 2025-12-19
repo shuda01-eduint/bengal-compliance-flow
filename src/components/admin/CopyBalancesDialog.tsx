@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,14 +12,32 @@ import { Label } from "@/components/ui/label";
 import { Copy, CalendarIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { format, parseISO, addDays } from "date-fns";
+import { format, parseISO, addDays, isWeekend, isSaturday, isSunday } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
 interface CopyBalancesDialogProps {
   availableDates: string[];
   onCopyComplete?: () => void;
+}
+
+// Calculate the next business day (skipping weekends)
+function getNextBusinessDay(date: Date): Date {
+  let nextDay = addDays(date, 1);
+  
+  // Skip Saturday (6) and Sunday (0)
+  while (isWeekend(nextDay)) {
+    nextDay = addDays(nextDay, 1);
+  }
+  
+  return nextDay;
+}
+
+// Check if a date is a weekend
+function isWeekendDay(date: Date): boolean {
+  return isWeekend(date);
 }
 
 export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalancesDialogProps) {
@@ -29,8 +47,15 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
     availableDates?.[0] ? parseISO(availableDates[0]) : undefined
   );
   const [targetDate, setTargetDate] = useState<Date | undefined>(
-    availableDates?.[0] ? addDays(parseISO(availableDates[0]), 1) : undefined
+    availableDates?.[0] ? getNextBusinessDay(parseISO(availableDates[0])) : undefined
   );
+
+  // Auto-update target date when source date changes
+  useEffect(() => {
+    if (sourceDate) {
+      setTargetDate(getNextBusinessDay(sourceDate));
+    }
+  }, [sourceDate]);
 
   const handleCopy = async () => {
     if (!sourceDate || !targetDate) {
@@ -121,7 +146,15 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
           </div>
 
           <div className="space-y-2">
-            <Label>Target Date (copy to)</Label>
+            <Label className="flex items-center gap-2">
+              Target Date (copy to)
+              {targetDate && sourceDate && 
+                format(targetDate, 'yyyy-MM-dd') === format(getNextBusinessDay(sourceDate), 'yyyy-MM-dd') && (
+                <Badge variant="secondary" className="text-xs">
+                  Next Business Day
+                </Badge>
+              )}
+            </Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
@@ -141,9 +174,20 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
                   selected={targetDate}
                   onSelect={setTargetDate}
                   initialFocus
+                  modifiers={{
+                    weekend: (date) => isWeekendDay(date)
+                  }}
+                  modifiersStyles={{
+                    weekend: { color: 'hsl(var(--muted-foreground))', opacity: 0.5 }
+                  }}
                 />
               </PopoverContent>
             </Popover>
+            {targetDate && isWeekendDay(targetDate) && (
+              <p className="text-xs text-amber-500">
+                Note: Selected date is a weekend
+              </p>
+            )}
             {targetDate && availableDates?.includes(format(targetDate, 'yyyy-MM-dd')) && (
               <p className="text-xs text-amber-500">
                 Warning: This date already has data that will be replaced
