@@ -106,6 +106,9 @@ export interface PortfolioSummary {
   ledger_balance: number;
   adjusted_ledger: number;
   risk_flag: 'OK' | 'Watch' | 'High';
+  high_risk_count: number;
+  watch_risk_count: number;
+  negative_ledger_count: number;
 }
 
 export interface RMSummary {
@@ -123,6 +126,9 @@ export interface RMSummary {
   ledger_balance: number;
   adjusted_ledger: number;
   risk_flag: 'OK' | 'Watch' | 'High';
+  high_risk_count: number;
+  watch_risk_count: number;
+  negative_ledger_count: number;
 }
 
 export interface Portfolio {
@@ -364,16 +370,27 @@ export function groupByPortfolio(rows: EnrichedBalanceRow[], portfolios: Portfol
     // Sum unique ledger and adjusted_ledger balances per investor
     const ledgerByInvestor: Record<string, number> = {};
     const adjustedByInvestor: Record<string, number> = {};
+    const riskByInvestor: Record<string, 'OK' | 'Watch' | 'High'> = {};
     data.rows.forEach(r => {
       ledgerByInvestor[r.investor_code] = r.ledger_balance;
       adjustedByInvestor[r.investor_code] = r.adjusted_ledger;
+      // Take highest risk per investor
+      const currentRisk = riskByInvestor[r.investor_code];
+      if (!currentRisk || r.risk_flag === 'High' || (r.risk_flag === 'Watch' && currentRisk === 'OK')) {
+        riskByInvestor[r.investor_code] = r.risk_flag;
+      }
     });
     const ledger_balance = Object.values(ledgerByInvestor).reduce((sum, v) => sum + v, 0);
     const adjusted_ledger = Object.values(adjustedByInvestor).reduce((sum, v) => sum + v, 0);
     
+    // Count risk levels and negative ledgers by investor
+    const riskValues = Object.values(riskByInvestor);
+    const high_risk_count = riskValues.filter(r => r === 'High').length;
+    const watch_risk_count = riskValues.filter(r => r === 'Watch').length;
+    const negative_ledger_count = Object.values(adjustedByInvestor).filter(v => v < 0).length;
+    
     // Highest risk flag
-    const riskFlags = data.rows.map(r => r.risk_flag);
-    const risk_flag = riskFlags.includes('High') ? 'High' : riskFlags.includes('Watch') ? 'Watch' : 'OK';
+    const risk_flag = high_risk_count > 0 ? 'High' : watch_risk_count > 0 ? 'Watch' : 'OK';
 
     return {
       portfolio_id: portfolioId,
@@ -389,6 +406,9 @@ export function groupByPortfolio(rows: EnrichedBalanceRow[], portfolios: Portfol
       ledger_balance,
       adjusted_ledger,
       risk_flag,
+      high_risk_count,
+      watch_risk_count,
+      negative_ledger_count,
     };
   });
 }
@@ -437,16 +457,27 @@ export function groupByRM(rows: EnrichedBalanceRow[], portfolios: Portfolio[]): 
     // Sum unique ledger and adjusted_ledger balances per investor
     const ledgerByInvestor: Record<string, number> = {};
     const adjustedByInvestor: Record<string, number> = {};
+    const riskByInvestor: Record<string, 'OK' | 'Watch' | 'High'> = {};
     data.rows.forEach(r => {
       ledgerByInvestor[r.investor_code] = r.ledger_balance;
       adjustedByInvestor[r.investor_code] = r.adjusted_ledger;
+      // Take highest risk per investor
+      const currentRisk = riskByInvestor[r.investor_code];
+      if (!currentRisk || r.risk_flag === 'High' || (r.risk_flag === 'Watch' && currentRisk === 'OK')) {
+        riskByInvestor[r.investor_code] = r.risk_flag;
+      }
     });
     const ledger_balance = Object.values(ledgerByInvestor).reduce((sum, v) => sum + v, 0);
     const adjusted_ledger = Object.values(adjustedByInvestor).reduce((sum, v) => sum + v, 0);
     
+    // Count risk levels and negative ledgers by investor
+    const riskValues = Object.values(riskByInvestor);
+    const high_risk_count = riskValues.filter(r => r === 'High').length;
+    const watch_risk_count = riskValues.filter(r => r === 'Watch').length;
+    const negative_ledger_count = Object.values(adjustedByInvestor).filter(v => v < 0).length;
+    
     // Highest risk flag
-    const riskFlags = data.rows.map(r => r.risk_flag);
-    const risk_flag = riskFlags.includes('High') ? 'High' : riskFlags.includes('Watch') ? 'Watch' : 'OK';
+    const risk_flag = high_risk_count > 0 ? 'High' : watch_risk_count > 0 ? 'Watch' : 'OK';
 
     return {
       rm_id: rmId,
@@ -463,6 +494,9 @@ export function groupByRM(rows: EnrichedBalanceRow[], portfolios: Portfolio[]): 
       ledger_balance,
       adjusted_ledger,
       risk_flag,
+      high_risk_count,
+      watch_risk_count,
+      negative_ledger_count,
     };
   });
 }

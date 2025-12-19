@@ -1494,6 +1494,64 @@ export type Database = {
           sell_sum: number
         }[]
       }
+      get_admin_balances_enriched: {
+        Args: {
+          p_cursor_id?: string
+          p_date: string
+          p_limit?: number
+          p_rm_email?: string
+        }
+        Returns: {
+          account_type: string
+          accrued_interest: number
+          adjusted_ledger: number
+          as_of_date: string
+          avg_cost: number
+          brokerage_amount: number
+          brokerage_commission_rate: number
+          cq_in_transit: number
+          deposits: number
+          gross_buy: number
+          gross_sell: number
+          id: string
+          instrument: string
+          interest_rate: number
+          investor_code: string
+          ledger_balance: number
+          matured_balance: number
+          net_available: number
+          net_buy: number
+          net_sell: number
+          pnl_pct: number
+          receivable_payable: number
+          receivable_sale: number
+          risk_flag: string
+          rm_email: string
+          rm_id: string
+          rm_name: string
+          saleable: number
+          total_cost: number
+          total_mv: number
+          total_stock: number
+          unrealized_pnl: number
+          withdrawals: number
+        }[]
+      }
+      get_admin_balances_summary: {
+        Args: { p_date: string; p_rm_email?: string }
+        Returns: {
+          cq_sum: number
+          negative_ledger_count: number
+          receivable_sum: number
+          total_accrued_interest: number
+          total_brokerage: number
+          total_clients: number
+          total_cost_sum: number
+          total_margin_loan: number
+          total_mv_sum: number
+          unrealized_pnl_sum: number
+        }[]
+      }
       get_admin_trade_file_stats: {
         Args: never
         Returns: {
