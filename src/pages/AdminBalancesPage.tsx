@@ -85,6 +85,7 @@ const AdminBalancesPage = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [portfolioSearchQuery, setPortfolioSearchQuery] = useState("");
   const [rmSearchQuery, setRMSearchQuery] = useState("");
+  const [compSearchQuery, setCompSearchQuery] = useState("");
   const [riskFilter, setRiskFilter] = useState<string>("all");
   const [onlyNegativeLedger, setOnlyNegativeLedger] = useState(false);
   const [onlyReceivables, setOnlyReceivables] = useState(false);
@@ -699,6 +700,7 @@ const AdminBalancesPage = () => {
       <Tabs defaultValue="all" className="space-y-4">
         <TabsList>
           <TabsTrigger value="all">All Holdings ({sortedData.length.toLocaleString()})</TabsTrigger>
+          <TabsTrigger value="comp-view">Comp View ({investorGroups.length.toLocaleString()})</TabsTrigger>
           <TabsTrigger value="by-instrument">By Instrument</TabsTrigger>
           <TabsTrigger value="by-portfolio">By Portfolio</TabsTrigger>
           <TabsTrigger value="by-rm">By RM</TabsTrigger>
@@ -1067,6 +1069,92 @@ const AdminBalancesPage = () => {
                           <Badge variant="secondary">OK</Badge>
                         )}
                       </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="comp-view" className="space-y-4">
+          <div className="flex flex-wrap items-center gap-4 p-4 glass-card rounded-xl">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search investor code..."
+                value={compSearchQuery}
+                onChange={(e) => setCompSearchQuery(e.target.value)}
+                className="pl-10 bg-secondary border-border"
+              />
+            </div>
+          </div>
+
+          <div className="glass-card rounded-xl overflow-hidden">
+            <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+              <Table>
+                <TableHeader className="sticky top-0 z-10 bg-background">
+                  <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
+                    <TableHead className="text-muted-foreground">Investor</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Holdings</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Unreal. P&L</TableHead>
+                    <TableHead className="text-muted-foreground text-right">P&L %</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Ledger</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Deposits</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Withdrawals</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Net Buy</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Net Sell</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Adj. Ledger</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Accrued Int.</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Recv/Pay</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Brokerage</TableHead>
+                    <TableHead className="text-muted-foreground">Risk</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {investorGroups
+                    .filter(group => {
+                      if (!compSearchQuery.trim()) return true;
+                      return group.investor_code.toLowerCase().includes(compSearchQuery.toLowerCase());
+                    })
+                    .sort((a, b) => b.total_mv - a.total_mv)
+                    .map((group) => (
+                    <TableRow 
+                      key={group.investor_code} 
+                      className={cn(
+                        "border-border",
+                        group.risk_flag === 'High' && "bg-destructive/10",
+                        group.risk_flag === 'Watch' && "bg-amber-500/10"
+                      )}
+                    >
+                      <TableCell className="font-medium">{group.investor_code}</TableCell>
+                      <TableCell className="text-right text-muted-foreground">{group.instruments.length}</TableCell>
+                      <TableCell className="text-right">{formatNumber(group.total_cost)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(group.total_mv)}</TableCell>
+                      <TableCell className={cn("text-right", group.unrealized_pnl >= 0 ? "text-success" : "text-destructive")}>
+                        {formatNumber(group.unrealized_pnl)}
+                      </TableCell>
+                      <TableCell className={cn("text-right", (group.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
+                        {formatPercent(group.pnl_pct)}
+                      </TableCell>
+                      <TableCell className={cn("text-right", group.ledger_balance < 0 && "text-destructive")}>
+                        {formatNumber(group.ledger_balance)}
+                      </TableCell>
+                      <TableCell className="text-right text-success">{formatNumber(group.deposits)}</TableCell>
+                      <TableCell className="text-right text-destructive">{formatNumber(group.withdrawals)}</TableCell>
+                      <TableCell className="text-right text-amber-400">{formatNumber(group.net_buy)}</TableCell>
+                      <TableCell className="text-right text-sky-400">{formatNumber(group.net_sell)}</TableCell>
+                      <TableCell className={cn("text-right font-medium", group.adjusted_ledger < 0 && "text-destructive")}>
+                        {formatNumber(group.adjusted_ledger)}
+                      </TableCell>
+                      <TableCell className="text-right text-orange-400">{formatNumber(group.accrued_interest)}</TableCell>
+                      <TableCell className={cn("text-right", group.receivable_payable >= 0 ? "text-amber-400" : "text-sky-400")}>
+                        {formatNumber(group.receivable_payable)}
+                      </TableCell>
+                      <TableCell className="text-right text-primary">{formatNumber(group.brokerage_amount)}</TableCell>
+                      <TableCell>{getRiskBadge(group.risk_flag)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

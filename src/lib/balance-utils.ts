@@ -78,6 +78,7 @@ export interface InvestorGroupedRow {
   net_buy: number;
   accrued_interest: number;
   receivable_payable: number;
+  brokerage_amount: number;
   risk_flag: 'OK' | 'Watch' | 'High';
   instruments: EnrichedBalanceRow[];
 }
@@ -281,6 +282,7 @@ export function groupByInvestor(rows: EnrichedBalanceRow[]): InvestorGroupedRow[
     const net_buy = instruments[0]?.net_buy || 0;
     const accrued_interest = instruments[0]?.accrued_interest || 0;
     const receivable_payable = instruments[0]?.receivable_payable || 0;
+    const brokerage_amount = instruments[0]?.brokerage_amount || 0;
     
     // Highest risk flag
     const riskFlags = instruments.map(i => i.risk_flag);
@@ -300,6 +302,7 @@ export function groupByInvestor(rows: EnrichedBalanceRow[]): InvestorGroupedRow[
       net_buy,
       accrued_interest,
       receivable_payable,
+      brokerage_amount,
       risk_flag,
       instruments,
     };
