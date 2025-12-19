@@ -66,6 +66,7 @@ const CEODashboardPage = () => {
         .eq("as_of_date", latestDate)
         .limit(100000);
       if (error) throw error;
+      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} balance rows for ${latestDate}`);
       return data as BalanceRawRow[];
     },
     enabled: !!latestDate,
@@ -96,6 +97,7 @@ const CEODashboardPage = () => {
         .select("investor_code, interest_rate, brokerage_commission, account_type")
         .limit(100000);
       if (error) throw error;
+      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} investors`);
       return data || [];
     },
   });
@@ -109,6 +111,7 @@ const CEODashboardPage = () => {
         .select("email, department, branch")
         .limit(10000);
       if (error) throw error;
+      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} employees`);
       return data || [];
     },
   });
@@ -134,6 +137,7 @@ const CEODashboardPage = () => {
         .gte("trade_date", startOfMonth)
         .limit(500000);
       if (error) throw error;
+      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} trades for ${startOfMonth}`);
       return data || [];
     },
   });
@@ -169,8 +173,18 @@ const CEODashboardPage = () => {
         account_type: inv.account_type,
       };
     });
+    console.log(`[CEO Dashboard] InvestorDataMap has ${Object.keys(map).length} entries`);
     return map;
   }, [investorData]);
+
+  // Log unique investors in balances for comparison
+  useMemo(() => {
+    if (rawBalances) {
+      const uniqueInvestors = new Set(rawBalances.map(r => r.investor_code));
+      const matchedCount = [...uniqueInvestors].filter(code => investorDataMap[code]).length;
+      console.log(`[CEO Dashboard] Balances: ${uniqueInvestors.size} unique investors, ${matchedCount} matched in investorDataMap, ${uniqueInvestors.size - matchedCount} unmatched`);
+    }
+  }, [rawBalances, investorDataMap]);
 
   const emailToDepartmentMap = useMemo(() => {
     const map: Record<string, string> = {};
