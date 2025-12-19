@@ -507,7 +507,7 @@ const CEODashboardPage = () => {
         <ProfitCommissionObject
           totalCommission={brokerageByDepartment.totalBrokerage}
           monthTarget={brokerageByDepartment.totalBrokerage * 1.2}
-          blendedTakeRate={0.25}
+          turnover={brokerageByDepartment.totalBrokerage / 0.0025}
           netRevenue={brokerageByDepartment.totalBrokerage * 0.85}
           departments={brokerageByDepartment.departments.map((d) => ({
             ...d,
