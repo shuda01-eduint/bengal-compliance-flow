@@ -1147,15 +1147,22 @@ export type Database = {
           eps: number | null
           foreign_percent: number | null
           govt_percent: number | null
+          high_price: number | null
           id: string
           institute_percent: number | null
           instrument_type: string | null
+          last_synced_at: string | null
+          low_price: number | null
+          market_cap: number | null
+          open_price: number | null
           public_percent: number | null
           sector: string | null
           total_securities: number | null
           trading_code: string
           updated_at: string
           volume: number | null
+          week_52_high: number | null
+          week_52_low: number | null
         }
         Insert: {
           audited_pe?: number | null
@@ -1166,15 +1173,22 @@ export type Database = {
           eps?: number | null
           foreign_percent?: number | null
           govt_percent?: number | null
+          high_price?: number | null
           id?: string
           institute_percent?: number | null
           instrument_type?: string | null
+          last_synced_at?: string | null
+          low_price?: number | null
+          market_cap?: number | null
+          open_price?: number | null
           public_percent?: number | null
           sector?: string | null
           total_securities?: number | null
           trading_code: string
           updated_at?: string
           volume?: number | null
+          week_52_high?: number | null
+          week_52_low?: number | null
         }
         Update: {
           audited_pe?: number | null
@@ -1185,15 +1199,22 @@ export type Database = {
           eps?: number | null
           foreign_percent?: number | null
           govt_percent?: number | null
+          high_price?: number | null
           id?: string
           institute_percent?: number | null
           instrument_type?: string | null
+          last_synced_at?: string | null
+          low_price?: number | null
+          market_cap?: number | null
+          open_price?: number | null
           public_percent?: number | null
           sector?: string | null
           total_securities?: number | null
           trading_code?: string
           updated_at?: string
           volume?: number | null
+          week_52_high?: number | null
+          week_52_low?: number | null
         }
         Relationships: []
       }
