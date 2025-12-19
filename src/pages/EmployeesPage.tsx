@@ -8,11 +8,12 @@ import { AgentCard } from "@/components/agents/AgentCard";
 import { AgentFilters } from "@/components/agents/AgentFilters";
 import { AgentImportDialog } from "@/components/agents/AgentImportDialog";
 import { AgentListItem } from "@/components/agents/AgentListItem";
+import { AgentCodesTable } from "@/components/trade-history/AgentCodesTable";
 import { useEmployees } from "@/hooks/useEmployees";
 import { useAgents } from "@/hooks/useAgents";
 import { departments } from "@/data/employees";
 import { useState, useMemo } from "react";
-import { Mail, Phone, User, Building2, Users, ChevronRight, UserCog, Loader2, Briefcase } from "lucide-react";
+import { Mail, Phone, User, Building2, Users, ChevronRight, UserCog, Loader2, Briefcase, Link } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -82,7 +83,7 @@ const EmployeesPage = () => {
       subtitle="Manage employees, departments, agents and users"
     >
       <Tabs defaultValue="employees" className="space-y-6">
-        <TabsList className="grid w-full max-w-2xl grid-cols-4">
+        <TabsList className="grid w-full max-w-3xl grid-cols-5">
           <TabsTrigger value="employees" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
             Employees
@@ -94,6 +95,10 @@ const EmployeesPage = () => {
           <TabsTrigger value="agents" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             Agents
+          </TabsTrigger>
+          <TabsTrigger value="agent-codes" className="flex items-center gap-2">
+            <Link className="h-4 w-4" />
+            Agent Codes
           </TabsTrigger>
           <TabsTrigger value="users" className="flex items-center gap-2">
             <UserCog className="h-4 w-4" />
@@ -304,6 +309,11 @@ const EmployeesPage = () => {
               </p>
             </div>
           )}
+        </TabsContent>
+
+        {/* Agent Codes Tab */}
+        <TabsContent value="agent-codes">
+          <AgentCodesTable />
         </TabsContent>
 
         {/* Users Tab */}
