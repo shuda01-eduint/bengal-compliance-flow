@@ -358,11 +358,19 @@ export function StockExchangeUpload() {
       rowLower[key.toLowerCase()] = row[key];
     }
     
-    const getString = (key: string) => String(rowLower[key.toLowerCase()] ?? row[key] ?? '').trim();
+    // Treat dash "-" as empty value
+    const getString = (key: string) => {
+      let val = String(rowLower[key.toLowerCase()] ?? row[key] ?? '').trim();
+      if (val === '-') val = '';
+      return val;
+    };
+    
     const getNumber = (key: string) => {
       const val = rowLower[key.toLowerCase()] ?? row[key];
       if (typeof val === 'number') return val;
-      return parseFloat(String(val ?? '0').replace(/,/g, '')) || 0;
+      const strVal = String(val ?? '0').replace(/,/g, '');
+      if (strVal === '-') return 0;
+      return parseFloat(strVal) || 0;
     };
 
     const sideRaw = getString('Side').toUpperCase();
@@ -375,23 +383,38 @@ export function StockExchangeUpload() {
       return null;
     }
 
+    // Handle BOID in scientific notation (e.g., 1.20559E+15)
+    const boidRaw = getString('BOID');
+    const boid = boidRaw && !isNaN(Number(boidRaw)) 
+      ? String(BigInt(Math.round(Number(boidRaw)))) 
+      : boidRaw;
+
+    const orderId = getString('OrderID');
+    const dateStr = getString('Date');
+    const quantity = getNumber('Quantity');
+    const price = getNumber('Price');
+    
+    // Generate unique exec_id if empty - use combination of trade details
+    const execIdRaw = getString('ExecID');
+    const execId = execIdRaw || `${orderId}_${clientCode}_${securityCode}_${dateStr}_${quantity}_${price}`;
+
     return {
       action: getString('Action'),
       status: getString('Status'),
       isin: getString('ISIN'),
       asset_class: getString('AssetClass'),
-      order_id: getString('OrderID'),
+      order_id: orderId,
       ref_order_id: getString('RefOrderID'),
       side,
-      boid: getString('BOID'),
+      boid,
       security_code: securityCode,
       board: getString('Board'),
-      date: getString('Date'),
+      date: dateStr,
       time: getString('Time'),
-      quantity: getNumber('Quantity'),
-      price: getNumber('Price'),
-      value: getNumber('Value') || getNumber('Quantity') * getNumber('Price'),
-      exec_id: getString('ExecID'),
+      quantity,
+      price,
+      value: getNumber('Value') || quantity * price,
+      exec_id: execId,
       session: getString('Session'),
       fill_type: getString('FillType'),
       category: getString('Category'),
