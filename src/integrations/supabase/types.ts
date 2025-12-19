@@ -1086,6 +1086,57 @@ export type Database = {
           },
         ]
       }
+      reconciliation_results: {
+        Row: {
+          created_at: string
+          current_ledger_balance: number | null
+          id: string
+          inv_code: string
+          investor_name: string | null
+          issues: string[] | null
+          net_value: number | null
+          processed_at: string
+          processed_by: string | null
+          reconciliation_date: string
+          rm_name: string | null
+          status: string
+          total_buy_value: number | null
+          total_sell_value: number | null
+        }
+        Insert: {
+          created_at?: string
+          current_ledger_balance?: number | null
+          id?: string
+          inv_code: string
+          investor_name?: string | null
+          issues?: string[] | null
+          net_value?: number | null
+          processed_at?: string
+          processed_by?: string | null
+          reconciliation_date?: string
+          rm_name?: string | null
+          status: string
+          total_buy_value?: number | null
+          total_sell_value?: number | null
+        }
+        Update: {
+          created_at?: string
+          current_ledger_balance?: number | null
+          id?: string
+          inv_code?: string
+          investor_name?: string | null
+          issues?: string[] | null
+          net_value?: number | null
+          processed_at?: string
+          processed_by?: string | null
+          reconciliation_date?: string
+          rm_name?: string | null
+          status?: string
+          total_buy_value?: number | null
+          total_sell_value?: number | null
+        }
+        Relationships: []
+      }
       securities: {
         Row: {
           audited_pe: number | null

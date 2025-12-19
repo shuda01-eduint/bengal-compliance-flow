@@ -5,8 +5,10 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Filter, Search, Download, FileSpreadsheet } from "lucide-react";
+import { AlertCircle, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Filter, Search, Download, FileSpreadsheet, Save, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface ParsedTrade {
   action: string;
@@ -63,6 +65,8 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const { toast } = useToast();
 
   const matched = results.filter(r => r.status === 'matched').length;
   const warnings = results.filter(r => r.status === 'warning').length;
@@ -141,6 +145,49 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
     link.href = URL.createObjectURL(blob);
     link.download = `reconciliation_results_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
+  };
+
+  const handleProcess = async () => {
+    if (filteredResults.length === 0) return;
+    
+    setIsProcessing(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const recordsToInsert = filteredResults.map(r => ({
+        inv_code: r.inv_code,
+        investor_name: r.investor_name,
+        rm_name: r.rm_name,
+        total_buy_value: r.total_buy_value,
+        total_sell_value: r.total_sell_value,
+        net_value: r.net_value,
+        current_ledger_balance: r.current_ledger_balance,
+        status: r.status,
+        issues: r.issues,
+        reconciliation_date: new Date().toISOString().split('T')[0],
+        processed_by: user?.id || null,
+      }));
+
+      const { error } = await supabase
+        .from('reconciliation_results')
+        .insert(recordsToInsert);
+
+      if (error) throw error;
+
+      toast({
+        title: "Processed Successfully",
+        description: `${filteredResults.length} reconciliation records saved to database.`,
+      });
+    } catch (error: any) {
+      console.error('Error processing reconciliation:', error);
+      toast({
+        title: "Processing Failed",
+        description: error.message || "Failed to save reconciliation results.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const getStatusIcon = (status: string) => {
@@ -251,6 +298,19 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
                 <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={filteredResults.length === 0}>
                   <Download className="h-4 w-4 mr-1" />
                   CSV
+                </Button>
+                <Button 
+                  size="sm" 
+                  onClick={handleProcess} 
+                  disabled={filteredResults.length === 0 || isProcessing}
+                  className="bg-primary"
+                >
+                  {isProcessing ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-1" />
+                  )}
+                  Process
                 </Button>
               </div>
             </div>
