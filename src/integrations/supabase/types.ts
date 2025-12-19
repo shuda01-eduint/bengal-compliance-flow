@@ -1432,6 +1432,10 @@ export type Database = {
         Returns: Json
       }
       bulk_assign_mancom_managers: { Args: { managers: Json }; Returns: Json }
+      copy_balances_to_date: {
+        Args: { p_source_date: string; p_target_date: string }
+        Returns: Json
+      }
       get_accounting_data: {
         Args: {
           _account_type_filter?: string
