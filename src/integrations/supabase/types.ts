@@ -1298,7 +1298,42 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      investors_limited: {
+        Row: {
+          account_type: string | null
+          created_at: string | null
+          id: string | null
+          investor_code: string | null
+          investor_name: string | null
+          investor_type: string | null
+          status: string | null
+          trader: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          account_type?: string | null
+          created_at?: string | null
+          id?: string | null
+          investor_code?: string | null
+          investor_name?: string | null
+          investor_type?: string | null
+          status?: string | null
+          trader?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          account_type?: string | null
+          created_at?: string | null
+          id?: string | null
+          investor_code?: string | null
+          investor_name?: string | null
+          investor_type?: string | null
+          status?: string | null
+          trader?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       bulk_assign_department_heads: {
@@ -1406,6 +1441,7 @@ export type Database = {
       }
       is_hr_or_ceo: { Args: never; Returns: boolean }
       is_mancom_of_rm: { Args: { _rm_email: string }; Returns: boolean }
+      is_settlement_department: { Args: never; Returns: boolean }
       sync_departments_from_employees: { Args: never; Returns: Json }
     }
     Enums: {
