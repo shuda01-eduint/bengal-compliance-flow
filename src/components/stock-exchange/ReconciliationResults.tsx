@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertCircle, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Filter } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { AlertCircle, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Filter, Search } from "lucide-react";
 
 interface ParsedTrade {
   action: string;
@@ -59,6 +60,7 @@ const statusPriority: Record<string, number> = {
 export function ReconciliationResults({ results }: ReconciliationResultsProps) {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   const matched = results.filter(r => r.status === 'matched').length;
   const warnings = results.filter(r => r.status === 'warning').length;
@@ -67,7 +69,16 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
   const filteredResults = useMemo(() => {
     let data = [...results];
     
-    // Apply filter
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      data = data.filter(r => 
+        r.inv_code.toLowerCase().includes(query) ||
+        r.investor_name?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Apply status filter
     if (statusFilter !== "all") {
       data = data.filter(r => r.status === statusFilter);
     }
@@ -82,7 +93,7 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
     }
     
     return data;
-  }, [results, statusFilter, sortDirection]);
+  }, [results, searchQuery, statusFilter, sortDirection]);
 
   const handleSortClick = () => {
     if (sortDirection === null) setSortDirection("asc");
@@ -171,20 +182,33 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <CardTitle>Reconciliation Details</CardTitle>
-            <div className="flex items-center gap-3">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Filter by Status:</span>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-36">
-                  <SelectValue placeholder="All" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All ({results.length})</SelectItem>
-                  <SelectItem value="matched">Matched ({matched})</SelectItem>
-                  <SelectItem value="warning">Warning ({warnings})</SelectItem>
-                  <SelectItem value="unmatched">Unmatched ({unmatched})</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              {/* Search Input */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by investor code..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 w-56"
+                />
+              </div>
+              {/* Status Filter */}
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Status:</span>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue placeholder="All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All ({results.length})</SelectItem>
+                    <SelectItem value="matched">Matched ({matched})</SelectItem>
+                    <SelectItem value="warning">Warning ({warnings})</SelectItem>
+                    <SelectItem value="unmatched">Unmatched ({unmatched})</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -252,9 +276,10 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
               </TableBody>
             </Table>
           </div>
-          {statusFilter !== "all" && (
+          {(statusFilter !== "all" || searchQuery.trim()) && (
             <p className="text-sm text-muted-foreground mt-3">
               Showing {filteredResults.length} of {results.length} results
+              {searchQuery.trim() && ` matching "${searchQuery}"`}
             </p>
           )}
         </CardContent>
