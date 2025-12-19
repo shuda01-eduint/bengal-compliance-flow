@@ -13,7 +13,8 @@ import {
   Landmark,
   LogOut,
   Contact,
-  Calculator
+  Calculator,
+  PieChart
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,7 @@ interface SidebarProps {
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "CEO Dashboard", href: "/ceo-dashboard", icon: PieChart },
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
   { name: "Trade History", href: "/trade-history", icon: History },
   { name: "Securities", href: "/securities", icon: Landmark },
