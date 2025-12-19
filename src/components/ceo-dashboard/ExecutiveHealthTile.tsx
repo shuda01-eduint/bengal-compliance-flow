@@ -3,6 +3,12 @@ import { LucideIcon, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 export type StatusTag = "on-track" | "warning" | "critical" | "neutral";
 
+export interface BreakdownItem {
+  label: string;
+  value: number;
+  color?: string;
+}
+
 interface ExecutiveHealthTileProps {
   title: string;
   value: string | number;
@@ -13,6 +19,7 @@ interface ExecutiveHealthTileProps {
   status?: StatusTag;
   className?: string;
   delay?: number;
+  breakdown?: BreakdownItem[];
 }
 
 const statusStyles: Record<StatusTag, { bg: string; border: string; text: string; label: string; glow: string }> = {
@@ -56,6 +63,7 @@ export function ExecutiveHealthTile({
   status = "neutral",
   className,
   delay = 0,
+  breakdown,
 }: ExecutiveHealthTileProps) {
   const getTrendIcon = (change?: number) => {
     if (change === undefined || change === 0) return <Minus className="h-3 w-3" />;
@@ -115,6 +123,25 @@ export function ExecutiveHealthTile({
         {/* Title & Value */}
         <p className="text-xs font-medium text-muted-foreground mb-1">{title}</p>
         <p className="text-2xl font-bold tracking-tight text-foreground mb-3 break-all leading-tight">{value}</p>
+
+        {/* Breakdown by type */}
+        {breakdown && breakdown.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {breakdown.map((item) => (
+              <div
+                key={item.label}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-secondary/60"
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ backgroundColor: item.color || "hsl(var(--primary))" }}
+                />
+                <span className="text-muted-foreground">{item.label}:</span>
+                <span className="font-semibold text-foreground">{item.value.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Trend indicators */}
         <div className="flex items-center gap-3 text-[11px]">
