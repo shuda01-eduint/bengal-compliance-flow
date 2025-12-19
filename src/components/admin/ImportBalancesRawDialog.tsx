@@ -193,20 +193,21 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
       console.log(`RM matching: ${matchedRms} matched, ${unmatchedRms} unmatched`);
 
       setProgress(50);
-      setProgressMessage("Clearing existing balance data... (this can take a few minutes)");
+      setProgressMessage(`Clearing existing data for ${format(asOfDate, 'PP')}...`);
 
-      // Delete ALL existing records in batches to avoid timeout
-      console.log('Clearing all existing balance data in batches...');
+      // Delete only records for the selected date (preserving historical data)
+      console.log(`Clearing balance data for date: ${dateStr}`);
       let deletedTotal = 0;
       let hasMore = true;
-      const fetchBatchSize = 1000; // Fetch this many IDs at a time
-      const deleteBatchSize = 150; // Delete in chunks to avoid URL length issues
+      const fetchBatchSize = 1000;
+      const deleteBatchSize = 150;
       
       while (hasMore) {
-        // Get a batch of IDs to delete
+        // Get a batch of IDs to delete for this specific date
         const { data: idsToDelete, error: selectError } = await supabase
           .from('balances_raw')
           .select('id')
+          .eq('as_of_date', dateStr)
           .order('id', { ascending: true })
           .limit(fetchBatchSize);
         
@@ -235,15 +236,15 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
         }
         
         deletedTotal += idsToDelete.length;
-        console.log(`Deleted ${deletedTotal} records...`);
-        setProgressMessage(`Clearing existing balance data... deleted ${deletedTotal} rows`);
+        console.log(`Deleted ${deletedTotal} records for ${dateStr}...`);
+        setProgressMessage(`Clearing data for ${format(asOfDate, 'PP')}... ${deletedTotal} rows`);
         setProgress(50 + Math.min(9, Math.floor(deletedTotal / 5000)));
         
         // Yield to UI
         await new Promise(resolve => requestAnimationFrame(resolve));
       }
       
-      console.log(`Cleared all existing balance data (${deletedTotal} records)`);
+      console.log(`Cleared balance data for ${dateStr} (${deletedTotal} records)`);
 
       setProgress(60);
       setProgressMessage("Uploading new balance data...");
@@ -314,7 +315,7 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
         <DialogHeader>
           <DialogTitle>Import Balance Data</DialogTitle>
           <DialogDescription>
-            Upload an Excel file with balance data per instrument. <strong>All existing balance data will be cleared</strong> before importing.
+            Upload an Excel file with balance data per instrument. Existing data for the selected date will be replaced; other dates are preserved.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-4">

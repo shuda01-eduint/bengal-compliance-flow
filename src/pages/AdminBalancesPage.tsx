@@ -511,13 +511,20 @@ const AdminBalancesPage = () => {
                   mode="single"
                   selected={selectedDate}
                   onSelect={setSelectedDate}
-                  disabled={(date) => date > new Date()}
+                  disabled={(date) => {
+                    // Disable future dates
+                    if (date > new Date()) return true;
+                    // Only allow dates that have data
+                    if (!availableDates || availableDates.length === 0) return false;
+                    const dateStr = format(date, 'yyyy-MM-dd');
+                    return !availableDates.includes(dateStr);
+                  }}
                   initialFocus
                   modifiers={{
                     hasData: availableDates?.map(d => parseISO(d)) || []
                   }}
                   modifiersStyles={{
-                    hasData: { fontWeight: 'bold', textDecoration: 'underline' }
+                    hasData: { fontWeight: 'bold', color: 'hsl(var(--primary))' }
                   }}
                 />
               </PopoverContent>
