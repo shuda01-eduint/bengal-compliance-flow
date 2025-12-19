@@ -1,7 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ReconciliationResults } from "./ReconciliationResults";
@@ -57,9 +57,32 @@ export function StockExchangeUpload() {
   const [results, setResults] = useState<ReconciliationResult[]>([]);
   const [parseStatus, setParseStatus] = useState<"idle" | "parsed" | "reconciled">("idle");
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
+  // Check if user is admin
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setCheckingAdmin(false);
+        return;
+      }
+      
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("role", "admin")
+        .single();
+      
+      setIsAdmin(!!roleData);
+      setCheckingAdmin(false);
+    };
+    checkAdmin();
+  }, []);
   const saveToDatabase = async (trades: ParsedTrade[], fileName: string) => {
     setSaving(true);
     setProgress({ current: 0, total: trades.length });
@@ -845,6 +868,36 @@ export function StockExchangeUpload() {
       setReconciling(false);
     }
   };
+
+  // Show loading state while checking admin status
+  if (checkingAdmin) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Show access denied for non-admins
+  if (!isAdmin) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <Shield className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold">Admin Access Required</h3>
+            <p className="text-muted-foreground mt-2">
+              Stock Exchange reconciliation is only available to administrators.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-6">
