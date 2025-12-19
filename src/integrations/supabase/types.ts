@@ -1419,6 +1419,70 @@ export type Database = {
           sell_sum: number
         }[]
       }
+      get_admin_trade_file_stats: {
+        Args: never
+        Returns: {
+          file_name: string
+          first_upload: string
+          last_upload: string
+          record_count: number
+          total_value: number
+          unique_clients: number
+        }[]
+      }
+      get_admin_trades: {
+        Args: {
+          p_date_from?: string
+          p_date_to?: string
+          p_file_name?: string
+          p_hide_zero_values?: boolean
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_side?: string
+          p_sort_column?: string
+          p_sort_direction?: string
+          p_status?: string
+        }
+        Returns: {
+          account_type: string
+          action: string
+          agent_id: string
+          board: string
+          boid: string
+          brokerage_commission: number
+          category: string
+          client_code: string
+          department: string
+          exec_id: string
+          file_name: string
+          fill_type: string
+          id: string
+          interest_rate: number
+          investor_type: string
+          isin: string
+          ledger_balance_snapshot: number
+          net_deposit: number
+          order_id: string
+          owner_dealer_id: string
+          price: number
+          quantity: number
+          rm_id: string
+          rm_name: string
+          security_code: string
+          session: string
+          side: string
+          status: string
+          total_count: number
+          total_deposits: number
+          total_withdrawals: number
+          trade_date: string
+          trade_time: string
+          trader_dealer_id: string
+          uploaded_at: string
+          value: number
+        }[]
+      }
       get_balance_dates: {
         Args: never
         Returns: {
