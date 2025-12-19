@@ -22,6 +22,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Progress } from "@/components/ui/progress";
 
 interface CopyBalancesDialogProps {
   availableDates: string[];
@@ -95,10 +96,14 @@ function isWeekendDay(date: Date): boolean {
   return isWeekend(date);
 }
 
+const BATCH_SIZE = 5000;
+
 export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalancesDialogProps) {
   const [open, setOpen] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
   const [showHolidays, setShowHolidays] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [progressText, setProgressText] = useState("");
   const [sourceDate, setSourceDate] = useState<Date | undefined>(
     availableDates?.[0] ? parseISO(availableDates[0]) : undefined
   );
@@ -128,23 +133,75 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
     }
 
     setIsCopying(true);
+    setProgress(0);
+    setProgressText("Initializing...");
+
+    const sourceDateStr = format(sourceDate, 'yyyy-MM-dd');
+    const targetDateStr = format(targetDate, 'yyyy-MM-dd');
+
     try {
-      const { data, error } = await supabase.rpc('copy_balances_to_date', {
-        p_source_date: format(sourceDate, 'yyyy-MM-dd'),
-        p_target_date: format(targetDate, 'yyyy-MM-dd'),
+      // Step 1: Initialize - validate and get total count
+      const { data: initData, error: initError } = await supabase.rpc('init_copy_balances', {
+        p_source_date: sourceDateStr,
+        p_target_date: targetDateStr,
       });
 
-      if (error) throw error;
+      if (initError) throw initError;
 
-      const result = data as { records_copied: number; records_replaced: number };
+      const { total_rows } = initData as { total_rows: number; deleted_count: number };
+      const totalBatches = Math.ceil(total_rows / BATCH_SIZE);
+      
+      setProgressText(`Copying ${total_rows.toLocaleString()} records...`);
+
+      // Step 2: Copy in batches
+      let totalCopied = 0;
+      let offset = 0;
+      let batchNum = 1;
+
+      while (true) {
+        setProgressText(`Batch ${batchNum}/${totalBatches} (${totalCopied.toLocaleString()} of ${total_rows.toLocaleString()})`);
+        
+        const { data: batchData, error: batchError } = await supabase.rpc('copy_balances_batch', {
+          p_source_date: sourceDateStr,
+          p_target_date: targetDateStr,
+          p_batch_size: BATCH_SIZE,
+          p_offset: offset,
+        });
+
+        if (batchError) throw batchError;
+
+        const { copied_count, has_more } = batchData as { copied_count: number; has_more: boolean };
+        totalCopied += copied_count;
+        
+        // Update progress
+        const progressPercent = Math.min(100, Math.round((totalCopied / total_rows) * 100));
+        setProgress(progressPercent);
+
+        if (!has_more || copied_count === 0) break;
+        
+        offset += BATCH_SIZE;
+        batchNum++;
+      }
+
+      setProgress(100);
+      setProgressText("Complete!");
+      
       toast.success(
-        `Copied ${result.records_copied.toLocaleString()} records from ${format(sourceDate, 'PP')} to ${format(targetDate, 'PP')}`
+        `Copied ${totalCopied.toLocaleString()} records from ${format(sourceDate, 'PP')} to ${format(targetDate, 'PP')}`
       );
-      setOpen(false);
-      onCopyComplete?.();
+      
+      setTimeout(() => {
+        setOpen(false);
+        setProgress(0);
+        setProgressText("");
+        onCopyComplete?.();
+      }, 1000);
+      
     } catch (error) {
       console.error('Copy error:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to copy balance data');
+      setProgress(0);
+      setProgressText("");
     } finally {
       setIsCopying(false);
     }
@@ -293,6 +350,17 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
               </div>
             </CollapsibleContent>
           </Collapsible>
+
+          {/* Progress indicator */}
+          {isCopying && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{progressText}</span>
+                <span className="font-medium">{progress}%</span>
+              </div>
+              <Progress value={progress} className="h-2" />
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setOpen(false)} disabled={isCopying}>

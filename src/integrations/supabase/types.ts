@@ -1432,6 +1432,15 @@ export type Database = {
         Returns: Json
       }
       bulk_assign_mancom_managers: { Args: { managers: Json }; Returns: Json }
+      copy_balances_batch: {
+        Args: {
+          p_batch_size?: number
+          p_offset?: number
+          p_source_date: string
+          p_target_date: string
+        }
+        Returns: Json
+      }
       copy_balances_to_date: {
         Args: { p_source_date: string; p_target_date: string }
         Returns: Json
@@ -1659,6 +1668,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      init_copy_balances: {
+        Args: { p_source_date: string; p_target_date: string }
+        Returns: Json
       }
       is_department_head_of_rm: {
         Args: { _rm_email: string }
