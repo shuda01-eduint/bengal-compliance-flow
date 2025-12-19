@@ -119,6 +119,26 @@ const CEODashboardPage = () => {
     },
   });
 
+  // Fetch trade history for turnover calculation (current month)
+  const { data: tradeHistory } = useQuery({
+    queryKey: ["ceo-trade-history"],
+    queryFn: async () => {
+      const startOfMonth = format(new Date(), "yyyy-MM-01");
+      const { data, error } = await supabase
+        .from("trade_history")
+        .select("value, side, trade_date")
+        .gte("trade_date", startOfMonth);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Calculate actual turnover from trade history
+  const tradeTurnover = useMemo(() => {
+    if (!tradeHistory || tradeHistory.length === 0) return 0;
+    return tradeHistory.reduce((sum, trade) => sum + (trade.value || 0), 0);
+  }, [tradeHistory]);
+
   // Create lookup maps
   const investorDataMap = useMemo(() => {
     const map: Record<string, InvestorData> = {};
@@ -507,7 +527,7 @@ const CEODashboardPage = () => {
         <ProfitCommissionObject
           totalCommission={brokerageByDepartment.totalBrokerage}
           monthTarget={brokerageByDepartment.totalBrokerage * 1.2}
-          turnover={brokerageByDepartment.totalBrokerage / 0.0025}
+          turnover={tradeTurnover || brokerageByDepartment.totalBrokerage / 0.0025}
           netRevenue={brokerageByDepartment.totalBrokerage * 0.85}
           departments={brokerageByDepartment.departments.map((d) => ({
             ...d,
