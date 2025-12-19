@@ -120,8 +120,8 @@ export function ProfitCommissionObject({
         {/* Department Performance Chart */}
         <div className="mb-5">
           <h4 className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">By Department</h4>
-          <div className="space-y-2.5">
-            {departments.slice(0, 5).map((dept, idx) => (
+          <div className="space-y-2.5 max-h-64 overflow-y-auto">
+            {departments.map((dept, idx) => (
               <div key={dept.name} className="group">
                 <div className="flex items-center gap-3">
                   <div className="w-24 text-[11px] text-muted-foreground truncate group-hover:text-foreground transition-colors" title={dept.name}>
@@ -215,7 +215,7 @@ export function ProfitCommissionObject({
                     <tr>
                       <th className="text-left px-4 py-3 font-medium">Department</th>
                       <th className="text-right px-4 py-3 font-medium">Turnover</th>
-                      <th className="text-right px-4 py-3 font-medium">Commission</th>
+                      <th className="text-right px-4 py-3 font-medium">Turnover Last Day</th>
                       <th className="text-right px-4 py-3 font-medium">Contribution %</th>
                       <th className="text-center px-4 py-3 font-medium">Status</th>
                     </tr>
