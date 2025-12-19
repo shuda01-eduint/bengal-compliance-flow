@@ -296,6 +296,36 @@ export type Database = {
         }
         Relationships: []
       }
+      branch_codes: {
+        Row: {
+          branch_name: string
+          branch_type: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          prefix: string
+          updated_at: string | null
+        }
+        Insert: {
+          branch_name: string
+          branch_type?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          prefix: string
+          updated_at?: string | null
+        }
+        Update: {
+          branch_name?: string
+          branch_type?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          prefix?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       ceo_dashboard_thresholds: {
         Row: {
           created_at: string | null

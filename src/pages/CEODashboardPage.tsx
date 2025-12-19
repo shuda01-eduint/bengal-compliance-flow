@@ -63,7 +63,8 @@ const CEODashboardPage = () => {
       const { data, error } = await supabase
         .from("balances_raw")
         .select("*")
-        .eq("as_of_date", latestDate);
+        .eq("as_of_date", latestDate)
+        .limit(100000);
       if (error) throw error;
       return data as BalanceRawRow[];
     },
@@ -78,7 +79,8 @@ const CEODashboardPage = () => {
       const { data, error } = await supabase
         .from("balances_raw")
         .select("*")
-        .eq("as_of_date", previousDate);
+        .eq("as_of_date", previousDate)
+        .limit(100000);
       if (error) throw error;
       return data as BalanceRawRow[];
     },
@@ -91,7 +93,8 @@ const CEODashboardPage = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("investors")
-        .select("investor_code, interest_rate, brokerage_commission, account_type");
+        .select("investor_code, interest_rate, brokerage_commission, account_type")
+        .limit(100000);
       if (error) throw error;
       return data || [];
     },
@@ -103,7 +106,8 @@ const CEODashboardPage = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("employees")
-        .select("email, department, branch");
+        .select("email, department, branch")
+        .limit(10000);
       if (error) throw error;
       return data || [];
     },
@@ -127,7 +131,8 @@ const CEODashboardPage = () => {
       const { data, error } = await supabase
         .from("trade_history")
         .select("value, side, trade_date, department, client_code")
-        .gte("trade_date", startOfMonth);
+        .gte("trade_date", startOfMonth)
+        .limit(500000);
       if (error) throw error;
       return data || [];
     },
