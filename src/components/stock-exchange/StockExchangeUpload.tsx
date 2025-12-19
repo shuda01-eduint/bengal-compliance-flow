@@ -724,16 +724,41 @@ export function StockExchangeUpload() {
       // Get unique client codes from parsed trades
       const uniqueCodes = [...new Set(parsedTrades.map(t => t.client_code))];
       
-      // Fetch client data from database
-      const { data: clients, error } = await supabase
-        .from('clients')
-        .select('*')
-        .in('inv_code', uniqueCodes);
+      // Fetch from multiple sources in parallel for better data coverage
+      const [clientsResult, investorsResult, balancesResult] = await Promise.all([
+        // Fetch from clients table
+        supabase
+          .from('clients')
+          .select('*')
+          .in('inv_code', uniqueCodes),
+        // Fetch from investors table for proper names
+        supabase
+          .from('investors')
+          .select('investor_code, investor_name')
+          .in('investor_code', uniqueCodes),
+        // Fetch latest balances from balances_raw
+        supabase
+          .from('balances_raw')
+          .select('investor_code, ledger_balance, as_of_date')
+          .in('investor_code', uniqueCodes)
+          .order('as_of_date', { ascending: false })
+      ]);
 
-      if (error) throw error;
+      if (clientsResult.error) throw clientsResult.error;
 
-      // Create a map for quick client lookup
-      const clientMap = new Map(clients?.map(c => [c.inv_code, c]) || []);
+      // Create lookup maps
+      const clientMap = new Map(clientsResult.data?.map(c => [c.inv_code, c]) || []);
+      const investorMap = new Map(investorsResult.data?.map(i => [i.investor_code, i]) || []);
+      
+      // For balances, keep only the latest per investor_code
+      const balanceMap = new Map<string, { ledger_balance: number | null }>();
+      if (balancesResult.data) {
+        for (const b of balancesResult.data) {
+          if (!balanceMap.has(b.investor_code)) {
+            balanceMap.set(b.investor_code, { ledger_balance: b.ledger_balance });
+          }
+        }
+      }
 
       // Group trades by client code
       const tradesByClient = parsedTrades.reduce((acc, trade) => {
@@ -747,6 +772,9 @@ export function StockExchangeUpload() {
       // Generate reconciliation results
       const reconciliationResults: ReconciliationResult[] = Object.entries(tradesByClient).map(([clientCode, trades]) => {
         const client = clientMap.get(clientCode);
+        const investor = investorMap.get(clientCode);
+        const balanceInfo = balanceMap.get(clientCode);
+        
         const totalBuy = trades.filter(t => t.side === 'BUY').reduce((sum, t) => sum + t.value, 0);
         const totalSell = trades.filter(t => t.side === 'SELL').reduce((sum, t) => sum + t.value, 0);
         const netValue = totalSell - totalBuy;
@@ -754,16 +782,28 @@ export function StockExchangeUpload() {
         const issues: string[] = [];
         let status: "matched" | "unmatched" | "warning" = "matched";
 
-        if (!client) {
+        // Use investor name from investors table if client name is a placeholder (same as code)
+        const investorName = client?.investor_name && client.investor_name !== client.inv_code 
+          ? client.investor_name 
+          : investor?.investor_name || 'Unknown';
+        
+        // Get ledger balance from client first, fallback to balances_raw
+        const ledgerBalance = client?.ledger_balance ?? balanceInfo?.ledger_balance ?? 0;
+        const equity = client?.equity ?? 0;
+
+        // Check if client exists in any source
+        const foundInDatabase = client || investor || balanceInfo;
+
+        if (!foundInDatabase) {
           issues.push("Client code not found in database");
           status = "unmatched";
         } else {
           // Check for compliance issues
-          if (client.ledger_balance < 0 && totalBuy > 0) {
+          if (ledgerBalance < 0 && totalBuy > 0) {
             issues.push("Negative ledger balance with buy orders");
             status = "warning";
           }
-          if (client.equity < totalBuy * 0.2) {
+          if (equity < totalBuy * 0.2 && equity > 0) {
             issues.push("Insufficient equity margin for trades");
             status = "warning";
           }
@@ -771,14 +811,14 @@ export function StockExchangeUpload() {
 
         return {
           inv_code: clientCode,
-          investor_name: client?.investor_name || 'Unknown',
+          investor_name: investorName,
           rm_name: client?.rm_name || 'Unknown',
           trades,
           total_buy_value: totalBuy,
           total_sell_value: totalSell,
           net_value: netValue,
-          current_ledger_balance: client?.ledger_balance || 0,
-          current_equity: client?.equity || 0,
+          current_ledger_balance: ledgerBalance,
+          current_equity: equity,
           status,
           issues,
         };
