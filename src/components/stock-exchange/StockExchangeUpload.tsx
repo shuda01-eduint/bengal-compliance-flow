@@ -1,12 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Shield } from "lucide-react";
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Shield, CalendarIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ReconciliationResults } from "./ReconciliationResults";
 import * as XLSX from "xlsx";
 import { TradeRecordSchema, sanitizeString } from "@/lib/validation-schemas";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Label } from "@/components/ui/label";
 interface ParsedTrade {
   action: string;
   status: string;
@@ -59,6 +64,7 @@ export function StockExchangeUpload() {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const [selectedTradeDate, setSelectedTradeDate] = useState<Date | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -348,6 +354,7 @@ export function StockExchangeUpload() {
       setParseStatus("idle");
       setParsedTrades([]);
       setResults([]);
+      setSelectedTradeDate(undefined);
     }
   };
 
@@ -714,7 +721,7 @@ export function StockExchangeUpload() {
   };
 
   const handleParseFile = async () => {
-    if (!file) return;
+    if (!file || !selectedTradeDate) return;
 
     setParsing(true);
     try {
@@ -743,8 +750,15 @@ export function StockExchangeUpload() {
       setParsedTrades(trades);
       setParseStatus("parsed");
       
+      // Create filename with selected trade date
+      const dateStr = format(selectedTradeDate, 'yyyy-MM-dd');
+      const lastDot = file.name.lastIndexOf('.');
+      const baseName = lastDot > 0 ? file.name.substring(0, lastDot) : file.name;
+      const extension = lastDot > 0 ? file.name.substring(lastDot) : '';
+      const fileNameWithDate = `${baseName}_${dateStr}${extension}`;
+      
       // Save trades to database for audit trail
-      await saveToDatabase(trades, file.name);
+      await saveToDatabase(trades, fileNameWithDate);
       
       toast({
         title: "File parsed successfully",
@@ -970,6 +984,40 @@ export function StockExchangeUpload() {
             )}
           </div>
 
+          {/* Trade Date Selection */}
+          <div className="space-y-2">
+            <Label htmlFor="trade-date" className="text-sm font-medium">
+              Trade Date <span className="text-destructive">*</span>
+            </Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  id="trade-date"
+                  variant="outline"
+                  className={cn(
+                    "w-full md:w-[280px] justify-start text-left font-normal",
+                    !selectedTradeDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {selectedTradeDate ? format(selectedTradeDate, "PPP") : <span>Select trade date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={selectedTradeDate}
+                  onSelect={setSelectedTradeDate}
+                  initialFocus
+                  className={cn("p-3 pointer-events-auto")}
+                />
+              </PopoverContent>
+            </Popover>
+            <p className="text-xs text-muted-foreground">
+              Select the date for the trades in this file
+            </p>
+          </div>
+
           {/* Progress indicator */}
           {progress && (
             <div className="space-y-2">
@@ -989,7 +1037,7 @@ export function StockExchangeUpload() {
           <div className="flex gap-3">
             <Button
               onClick={handleParseFile}
-              disabled={!file || parsing || saving}
+              disabled={!file || !selectedTradeDate || parsing || saving}
               className="btn-gradient-gold text-primary-foreground"
             >
               {parsing ? (
