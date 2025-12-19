@@ -19,6 +19,18 @@ interface RiskCase {
   recommended_action: string;
 }
 
+interface MarginByDepartment {
+  name: string;
+  exposure: number;
+  count: number;
+}
+
+interface MarginByRiskLevel {
+  level: "High" | "Watch" | "OK";
+  exposure: number;
+  count: number;
+}
+
 interface RiskExposurePanelProps {
   totalMarginExposure: number;
   utilizationPercent: number;
@@ -28,6 +40,8 @@ interface RiskExposurePanelProps {
   negativeLedgerCount: number;
   largestSingleExposure: { investor_code: string; amount: number };
   topRiskCases: RiskCase[];
+  marginByDepartment?: MarginByDepartment[];
+  marginByRiskLevel?: MarginByRiskLevel[];
   onViewInvestor?: (investorCode: string) => void;
 }
 
@@ -40,6 +54,8 @@ export function RiskExposurePanel({
   negativeLedgerCount,
   largestSingleExposure,
   topRiskCases,
+  marginByDepartment = [],
+  marginByRiskLevel = [],
   onViewInvestor,
 }: RiskExposurePanelProps) {
   const utilizationStatus =
@@ -111,6 +127,53 @@ export function RiskExposurePanel({
             </p>
           </div>
         </div>
+
+        {/* Margin by Department */}
+        {marginByDepartment.length > 0 && (
+          <div className="mb-5">
+            <h4 className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">
+              Margin by Department
+            </h4>
+            <div className="space-y-2">
+              {marginByDepartment.slice(0, 4).map((dept) => (
+                <div key={dept.name} className="flex items-center justify-between p-2 rounded-lg bg-destructive/5 border border-destructive/10">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium truncate max-w-[120px]" title={dept.name}>{dept.name}</span>
+                    <span className="text-[10px] text-muted-foreground">({dept.count} clients)</span>
+                  </div>
+                  <span className="text-xs font-bold text-destructive">{formatCurrency(dept.exposure)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Margin by Risk Level */}
+        {marginByRiskLevel.length > 0 && (
+          <div className="mb-5">
+            <h4 className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">
+              Margin by Risk Level
+            </h4>
+            <div className="grid grid-cols-3 gap-2">
+              {marginByRiskLevel.map((risk) => (
+                <div
+                  key={risk.level}
+                  className={cn(
+                    "rounded-lg p-3 text-center border",
+                    riskFlagConfig[risk.level].bg,
+                    riskFlagConfig[risk.level].border
+                  )}
+                >
+                  <p className={cn("text-[10px] font-medium uppercase tracking-wider", riskFlagConfig[risk.level].text)}>
+                    {risk.level}
+                  </p>
+                  <p className="text-base font-bold mt-1">{formatCurrency(risk.exposure)}</p>
+                  <p className="text-[10px] text-muted-foreground">{risk.count} clients</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Receivables Aging */}
         <div className="mb-5">
