@@ -220,6 +220,40 @@ const CEODashboardPage = () => {
     return { tradeTurnover: total, turnoverByDepartment: deptTurnover };
   }, [tradeHistory]);
 
+  // Calculate investor adjustments from trade history for brokerage calculation
+  const investorAdjustments = useMemo(() => {
+    const adjustments: Record<string, InvestorAdjustment> = {};
+    
+    if (!tradeHistory) return adjustments;
+    
+    tradeHistory.forEach((trade) => {
+      const code = trade.client_code;
+      if (!code) return;
+      
+      if (!adjustments[code]) {
+        adjustments[code] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0, gross_buy: 0, gross_sell: 0 };
+      }
+      
+      const value = trade.value || 0;
+      const side = (trade.side || '').toUpperCase();
+      
+      if (side === 'B' || side === 'BUY') {
+        adjustments[code].gross_buy += value;
+      } else if (side === 'S' || side === 'SELL') {
+        adjustments[code].gross_sell += value;
+      }
+    });
+    
+    // Calculate net_sell/net_buy
+    Object.values(adjustments).forEach((adj) => {
+      adj.net_sell = adj.gross_sell - adj.gross_buy;
+      adj.net_buy = adj.gross_buy - adj.gross_sell;
+    });
+    
+    console.log(`[CEO Dashboard] Calculated adjustments for ${Object.keys(adjustments).length} investors from trade history`);
+    return adjustments;
+  }, [tradeHistory]);
+
   // Create lookup maps
   const investorDataMap = useMemo(() => {
     const map: Record<string, InvestorData> = {};
@@ -256,15 +290,15 @@ const CEODashboardPage = () => {
   // Enrich and calculate summaries
   const enrichedData = useMemo(() => {
     if (!rawBalances) return [];
-    return rawBalances.map((row) => enrichBalanceRow(row, {}, investorDataMap));
-  }, [rawBalances, investorDataMap]);
+    return rawBalances.map((row) => enrichBalanceRow(row, investorAdjustments, investorDataMap));
+  }, [rawBalances, investorAdjustments, investorDataMap]);
 
   const summary = useMemo(() => calculateSummary(enrichedData), [enrichedData]);
 
   const previousEnrichedData = useMemo(() => {
     if (!previousBalances) return [];
-    return previousBalances.map((row) => enrichBalanceRow(row, {}, investorDataMap));
-  }, [previousBalances, investorDataMap]);
+    return previousBalances.map((row) => enrichBalanceRow(row, investorAdjustments, investorDataMap));
+  }, [previousBalances, investorAdjustments, investorDataMap]);
 
   const previousSummary = useMemo(
     () => calculateSummary(previousEnrichedData),
