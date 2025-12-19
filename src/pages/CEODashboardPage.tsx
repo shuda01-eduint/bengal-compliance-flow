@@ -69,6 +69,7 @@ const CEODashboardPage = () => {
           .from("balances_raw")
           .select("*")
           .eq("as_of_date", latestDate)
+          .order("id")
           .range(offset, offset + batchSize - 1);
         
         if (error) throw error;
@@ -99,6 +100,7 @@ const CEODashboardPage = () => {
           .from("balances_raw")
           .select("*")
           .eq("as_of_date", previousDate)
+          .order("id")
           .range(offset, offset + batchSize - 1);
         
         if (error) throw error;
@@ -127,6 +129,7 @@ const CEODashboardPage = () => {
         const { data, error } = await supabase
           .from("investors")
           .select("investor_code, interest_rate, brokerage_commission, account_type")
+          .order("investor_code")
           .range(offset, offset + batchSize - 1);
         
         if (error) throw error;
@@ -180,6 +183,7 @@ const CEODashboardPage = () => {
           .from("trade_history")
           .select("value, side, trade_date, department, client_code")
           .gte("trade_date", startOfMonth)
+          .order("id")
           .range(offset, offset + batchSize - 1);
         
         if (error) throw error;
