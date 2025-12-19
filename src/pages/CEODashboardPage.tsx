@@ -300,6 +300,36 @@ const CEODashboardPage = () => {
     return max;
   }, [enrichedData]);
 
+  // Account type breakdown for Active Investors
+  const accountTypeBreakdown = useMemo(() => {
+    const typeCount: Record<string, number> = {};
+    const seenInvestors = new Set<string>();
+
+    enrichedData.forEach((row) => {
+      if (seenInvestors.has(row.investor_code)) return;
+      seenInvestors.add(row.investor_code);
+      
+      const accountType = investorDataMap[row.investor_code]?.account_type || "Unknown";
+      typeCount[accountType] = (typeCount[accountType] || 0) + 1;
+    });
+
+    const colors: Record<string, string> = {
+      "Margin": "hsl(217 91% 60%)",
+      "Cash": "hsl(142 76% 36%)",
+      "margin": "hsl(217 91% 60%)",
+      "cash": "hsl(142 76% 36%)",
+      "Unknown": "hsl(var(--muted-foreground))",
+    };
+
+    return Object.entries(typeCount)
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value]) => ({
+        label: label.charAt(0).toUpperCase() + label.slice(1).toLowerCase(),
+        value,
+        color: colors[label] || "hsl(var(--primary))",
+      }));
+  }, [enrichedData, investorDataMap]);
+
   // Auto-generated narrative
   const narrativeBullets = useMemo(() => {
     const bullets: { text: string; category: "growth" | "revenue" | "risk" | "operational"; change: "positive" | "negative" | "neutral" }[] = [];
@@ -407,6 +437,7 @@ const CEODashboardPage = () => {
           monthChange={calcChange(summary.total_clients, previousSummary.total_clients) * 1.5}
           status={getStatus("active_investors", summary.total_clients, calcChange(summary.total_clients, previousSummary.total_clients), calcChange(summary.total_clients, previousSummary.total_clients) * 1.5)}
           delay={0}
+          breakdown={accountTypeBreakdown}
         />
         <ExecutiveHealthTile
           title="Total AUM"
