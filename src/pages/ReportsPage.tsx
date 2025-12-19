@@ -1,10 +1,10 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { ReportsTable } from "@/components/reports/ReportsTable";
 import { OverBuyReport } from "@/components/reports/OverBuyReport";
-import { MerchantBankReport } from "@/components/reports/MerchantBankReport";
+import { BranchTradeReport } from "@/components/reports/BranchTradeReport";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Plus, Download, Filter, AlertTriangle, FileText, Building2 } from "lucide-react";
+import { Plus, Download, Filter, AlertTriangle, FileText, GitBranch } from "lucide-react";
 
 const ReportsPage = () => {
   return (
@@ -18,9 +18,9 @@ const ReportsPage = () => {
             <AlertTriangle className="h-4 w-4" />
             OverBuy Monitor
           </TabsTrigger>
-          <TabsTrigger value="merchant" className="gap-2">
-            <Building2 className="h-4 w-4" />
-            Merchant Banks
+          <TabsTrigger value="branch" className="gap-2">
+            <GitBranch className="h-4 w-4" />
+            Branch Trades
           </TabsTrigger>
           <TabsTrigger value="general" className="gap-2">
             <FileText className="h-4 w-4" />
@@ -32,8 +32,8 @@ const ReportsPage = () => {
           <OverBuyReport />
         </TabsContent>
 
-        <TabsContent value="merchant">
-          <MerchantBankReport />
+        <TabsContent value="branch">
+          <BranchTradeReport />
         </TabsContent>
 
         <TabsContent value="general">
