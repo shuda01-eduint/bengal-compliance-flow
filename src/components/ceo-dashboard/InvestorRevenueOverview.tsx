@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Users, TrendingUp, TrendingDown, UserPlus, UserMinus, DollarSign } from "lucide-react";
+import { Users, TrendingUp, UserPlus, UserMinus, DollarSign, Filter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/balance-utils";
+import { cn } from "@/lib/utils";
 
 interface TopClient {
   investor_code: string;
@@ -47,114 +48,99 @@ export function InvestorRevenueOverview({
     onFilterChange?.({ department: department === "all" ? undefined : department, branch: value === "all" ? undefined : value });
   };
 
+  const metrics = [
+    { label: "Active Investors", value: activeInvestors.toLocaleString(), icon: Users, color: "text-primary", bgColor: "bg-primary/10" },
+    { label: "New This Period", value: `+${newInvestors.toLocaleString()}`, icon: UserPlus, color: "text-success", bgColor: "bg-success/10" },
+    { label: "Churned", value: `-${churnedInvestors.toLocaleString()}`, icon: UserMinus, color: "text-destructive", bgColor: "bg-destructive/10" },
+    { label: "ARPU", value: formatCurrency(arpu), icon: DollarSign, color: "text-accent", bgColor: "bg-accent/10" },
+    { label: "Total Revenue", value: formatCurrency(totalRevenue), icon: TrendingUp, color: "text-primary", bgColor: "bg-primary/10" },
+  ];
+
   return (
-    <div className="glass-card rounded-xl p-6 animate-slide-up" style={{ animationDelay: "200ms" }}>
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg p-2.5 btn-gradient-gold">
-            <Users className="h-5 w-5 text-primary-foreground" />
+    <div className="glass-card rounded-xl overflow-hidden animate-slide-up" style={{ animationDelay: "200ms" }}>
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-border/30 bg-gradient-to-r from-primary/5 to-transparent">
+        <div className="flex items-center justify-between">
+          <div className="section-header mb-0">
+            <div className="section-icon bg-gradient-to-br from-primary to-primary/70">
+              <Users className="h-5 w-5 text-primary-foreground" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold font-serif">Investor & Revenue</h3>
+              <p className="text-xs text-muted-foreground">Account metrics and distribution</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-semibold font-serif">Investor & Revenue Overview</h3>
-            <p className="text-sm text-muted-foreground">Active accounts and revenue distribution</p>
+
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <Select value={department} onValueChange={handleDepartmentChange}>
+              <SelectTrigger className="w-[140px] h-8 text-xs bg-secondary/50 border-border/50">
+                <SelectValue placeholder="Department" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {departments.map((d) => (
+                  <SelectItem key={d.code} value={d.code}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={branch} onValueChange={handleBranchChange}>
+              <SelectTrigger className="w-[120px] h-8 text-xs bg-secondary/50 border-border/50">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => (
+                  <SelectItem key={b.code} value={b.code}>{b.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Select value={department} onValueChange={handleDepartmentChange}>
-            <SelectTrigger className="w-[160px] bg-secondary border-border">
-              <SelectValue placeholder="All Departments" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map((d) => (
-                <SelectItem key={d.code} value={d.code}>
-                  {d.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={branch} onValueChange={handleBranchChange}>
-            <SelectTrigger className="w-[140px] bg-secondary border-border">
-              <SelectValue placeholder="All Branches" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b) => (
-                <SelectItem key={b.code} value={b.code}>
-                  {b.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        <div className="bg-secondary/50 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Users className="h-4 w-4 text-primary" />
-            <span className="text-xs text-muted-foreground">Active Investors</span>
-          </div>
-          <p className="text-xl font-semibold">{activeInvestors.toLocaleString()}</p>
-        </div>
-
-        <div className="bg-secondary/50 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <UserPlus className="h-4 w-4 text-success" />
-            <span className="text-xs text-muted-foreground">New This Period</span>
-          </div>
-          <p className="text-xl font-semibold text-success">+{newInvestors.toLocaleString()}</p>
-        </div>
-
-        <div className="bg-secondary/50 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <UserMinus className="h-4 w-4 text-destructive" />
-            <span className="text-xs text-muted-foreground">Churned</span>
-          </div>
-          <p className="text-xl font-semibold text-destructive">-{churnedInvestors.toLocaleString()}</p>
-        </div>
-
-        <div className="bg-secondary/50 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <DollarSign className="h-4 w-4 text-accent" />
-            <span className="text-xs text-muted-foreground">ARPU</span>
-          </div>
-          <p className="text-xl font-semibold text-accent">{formatCurrency(arpu)}</p>
-        </div>
-
-        <div className="bg-secondary/50 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <TrendingUp className="h-4 w-4 text-primary" />
-            <span className="text-xs text-muted-foreground">Total Revenue</span>
-          </div>
-          <p className="text-xl font-semibold text-primary">{formatCurrency(totalRevenue)}</p>
         </div>
       </div>
 
-      {/* Top 5 Clients */}
-      <div>
-        <h4 className="text-sm font-medium text-muted-foreground mb-3">Top 5 Clients by Revenue</h4>
-        <div className="flex flex-wrap gap-2">
-          {topClients.length > 0 ? (
-            topClients.map((client, index) => (
-              <Badge
-                key={client.investor_code}
-                variant="outline"
-                className="px-3 py-2 cursor-pointer hover:bg-secondary transition-colors"
-              >
-                <span className="text-xs text-muted-foreground mr-2">#{index + 1}</span>
-                <span className="font-medium">{client.investor_code}</span>
-                <span className="mx-2 text-muted-foreground">•</span>
-                <span className="text-primary">{formatCurrency(client.revenue)}</span>
-                <span className="ml-2 text-xs text-muted-foreground">({client.share_percent.toFixed(1)}%)</span>
-              </Badge>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">No client data available</p>
-          )}
+      <div className="p-5">
+        {/* Metrics Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+          {metrics.map((metric) => (
+            <div key={metric.label} className="stat-card">
+              <div className="flex items-center gap-2 mb-2">
+                <div className={cn("rounded-md p-1.5", metric.bgColor)}>
+                  <metric.icon className={cn("h-3.5 w-3.5", metric.color)} />
+                </div>
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{metric.label}</span>
+              </div>
+              <p className={cn("text-lg font-bold", metric.color)}>{metric.value}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Top 5 Clients */}
+        <div className="pt-4 border-t border-border/30">
+          <h4 className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">Top 5 Clients by Revenue</h4>
+          <div className="flex flex-wrap gap-2">
+            {topClients.length > 0 ? (
+              topClients.map((client, index) => (
+                <Badge
+                  key={client.investor_code}
+                  variant="outline"
+                  className="px-3 py-2 cursor-pointer hover:bg-secondary/80 transition-all hover:-translate-y-0.5 border-border/50"
+                >
+                  <span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center mr-2">
+                    {index + 1}
+                  </span>
+                  <span className="font-medium text-sm">{client.investor_code}</span>
+                  <span className="mx-2 text-border">|</span>
+                  <span className="text-primary font-semibold">{formatCurrency(client.revenue)}</span>
+                  <span className="ml-2 text-[10px] text-muted-foreground bg-secondary/50 px-1.5 py-0.5 rounded">
+                    {client.share_percent.toFixed(1)}%
+                  </span>
+                </Badge>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">No client data available</p>
+            )}
+          </div>
         </div>
       </div>
     </div>

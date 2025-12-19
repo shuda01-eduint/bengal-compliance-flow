@@ -104,8 +104,8 @@
 
 @layer utilities {
   .glass-card {
-    @apply backdrop-blur-xl border border-border/50;
-    background: linear-gradient(145deg, hsl(222 47% 9% / 0.8), hsl(222 47% 7% / 0.9));
+    @apply backdrop-blur-xl border border-border/40 bg-card/80;
+    background: linear-gradient(145deg, hsl(222 47% 10% / 0.9), hsl(222 47% 7% / 0.95));
   }
 
   .text-gradient-gold {
@@ -123,11 +123,30 @@
   }
 
   .animate-slide-up {
-    animation: slideUp 0.5s ease-out forwards;
+    animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
   }
 
   .animate-pulse-subtle {
     animation: pulseSublte 2s ease-in-out infinite;
+  }
+
+  .stat-card {
+    @apply relative overflow-hidden rounded-lg p-4 transition-all duration-200;
+    background: linear-gradient(135deg, hsl(217 33% 17% / 0.6), hsl(217 33% 14% / 0.8));
+  }
+
+  .stat-card:hover {
+    @apply -translate-y-0.5;
+    background: linear-gradient(135deg, hsl(217 33% 19% / 0.7), hsl(217 33% 16% / 0.9));
+  }
+
+  .section-header {
+    @apply flex items-center gap-3 mb-5;
+  }
+
+  .section-icon {
+    @apply rounded-xl p-2.5 shadow-lg;
   }
 
   @keyframes fadeIn {
@@ -136,7 +155,7 @@
   }
 
   @keyframes slideUp {
-    from { opacity: 0; transform: translateY(20px); }
+    from { opacity: 0; transform: translateY(16px); }
     to { opacity: 1; transform: translateY(0); }
   }
 
