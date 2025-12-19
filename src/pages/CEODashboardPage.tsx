@@ -357,12 +357,16 @@ const CEODashboardPage = () => {
       title="CEO Dashboard"
       subtitle={`Executive overview as of ${latestDate ? format(parseISO(latestDate), "PPP") : "—"}`}
     >
-      {/* Mode Toggle */}
-      <div className="flex items-center justify-between mb-6">
+      {/* Mode Toggle & Actions */}
+      <div className="flex items-center justify-between mb-8">
         <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
-          <TabsList className="bg-secondary">
-            <TabsTrigger value="ceo">CEO View</TabsTrigger>
-            <TabsTrigger value="rm">RM View</TabsTrigger>
+          <TabsList className="bg-secondary/50 p-1 h-10">
+            <TabsTrigger value="ceo" className="text-sm px-4 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              CEO View
+            </TabsTrigger>
+            <TabsTrigger value="rm" className="text-sm px-4 data-[state=active]:bg-secondary">
+              RM View
+            </TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -371,19 +375,19 @@ const CEODashboardPage = () => {
             variant="outline"
             size="sm"
             onClick={() => setThresholdDialogOpen(true)}
-            className="text-muted-foreground"
+            className="h-9 text-xs border-border/50 hover:bg-secondary/80"
           >
-            <Settings2 className="mr-2 h-4 w-4" />
-            Configure Alerts
+            <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+            Alerts
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => navigate("/admin/balances")}
-            className="text-muted-foreground"
+            className="h-9 text-xs border-border/50 hover:bg-secondary/80"
           >
-            Detailed Balances
-            <ExternalLink className="ml-2 h-4 w-4" />
+            Details
+            <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
@@ -394,7 +398,7 @@ const CEODashboardPage = () => {
       />
 
       {/* Executive Health Tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
         <ExecutiveHealthTile
           title="Active Investors"
           value={summary.total_clients.toLocaleString()}
@@ -453,8 +457,8 @@ const CEODashboardPage = () => {
         />
       </div>
 
-      {/* Object 1: Investor & Revenue Overview */}
-      <div className="mb-6">
+      {/* Investor & Revenue Overview - Full Width */}
+      <div className="mb-5">
         <InvestorRevenueOverview
           activeInvestors={summary.total_clients}
           newInvestors={Math.floor(summary.total_clients * 0.05)}
@@ -467,8 +471,8 @@ const CEODashboardPage = () => {
         />
       </div>
 
-      {/* Object 2: Profit & Commission */}
-      <div className="mb-6">
+      {/* Two Column Layout: Profit/Commission & Risk */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
         <ProfitCommissionObject
           totalCommission={brokerageByDepartment.totalBrokerage}
           monthTarget={brokerageByDepartment.totalBrokerage * 1.2}
@@ -484,10 +488,7 @@ const CEODashboardPage = () => {
             { text: topClients[0] ? `Top client ${topClients[0].investor_code} accounts for ${topClients[0].share_percent.toFixed(1)}% of revenue.` : "No dominant client concentration.", type: "neutral" },
           ]}
         />
-      </div>
 
-      {/* Object 3: Risk & Exposure Panel */}
-      <div className="mb-6">
         <RiskExposurePanel
           totalMarginExposure={summary.total_margin_loan}
           utilizationPercent={summary.total_mv_sum > 0 ? (summary.total_margin_loan / summary.total_mv_sum) * 100 : 0}
@@ -501,7 +502,7 @@ const CEODashboardPage = () => {
         />
       </div>
 
-      {/* Object 4: Narrative Section */}
+      {/* Executive Brief - Full Width */}
       <NarrativeSection
         narrativeBullets={narrativeBullets}
         feedbackEntries={[
