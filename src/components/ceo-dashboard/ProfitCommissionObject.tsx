@@ -11,6 +11,7 @@ interface DepartmentPerformance {
   changePercent: number;
   contributionPercent: number;
   status: "outperform" | "flat" | "underperform";
+  turnover?: number;
 }
 
 interface InsightBullet {
@@ -123,7 +124,7 @@ export function ProfitCommissionObject({
             {departments.slice(0, 5).map((dept, idx) => (
               <div key={dept.name} className="group">
                 <div className="flex items-center gap-3">
-                  <div className="w-20 text-[11px] text-muted-foreground truncate group-hover:text-foreground transition-colors" title={dept.name}>
+                  <div className="w-24 text-[11px] text-muted-foreground truncate group-hover:text-foreground transition-colors" title={dept.name}>
                     {dept.name}
                   </div>
                   <div className="flex-1 h-5 bg-secondary/50 rounded-full overflow-hidden">
@@ -136,21 +137,11 @@ export function ProfitCommissionObject({
                     />
                   </div>
                   <div className="w-20 text-right">
-                    <span className="text-xs font-semibold">{formatCurrency(dept.currentPeriod)}</span>
+                    <span className="text-xs font-semibold">{formatCurrency(dept.turnover || 0)}</span>
                   </div>
                   <div className="w-14 flex items-center justify-end gap-1">
-                    {dept.changePercent !== 0 && (
-                      dept.changePercent > 0 ? (
-                        <TrendingUp className="h-3 w-3 text-success" />
-                      ) : (
-                        <TrendingDown className="h-3 w-3 text-destructive" />
-                      )
-                    )}
-                    <span className={cn(
-                      "text-[10px] font-medium",
-                      dept.changePercent > 0 ? "text-success" : dept.changePercent < 0 ? "text-destructive" : "text-muted-foreground"
-                    )}>
-                      {dept.changePercent > 0 ? "+" : ""}{dept.changePercent.toFixed(1)}%
+                    <span className="text-[10px] font-medium text-muted-foreground">
+                      {dept.contributionPercent.toFixed(1)}%
                     </span>
                   </div>
                 </div>
@@ -223,9 +214,8 @@ export function ProfitCommissionObject({
                   <thead className="bg-muted/50">
                     <tr>
                       <th className="text-left px-4 py-3 font-medium">Department</th>
-                      <th className="text-right px-4 py-3 font-medium">Current Period</th>
-                      <th className="text-right px-4 py-3 font-medium">Previous Period</th>
-                      <th className="text-right px-4 py-3 font-medium">Change %</th>
+                      <th className="text-right px-4 py-3 font-medium">Turnover</th>
+                      <th className="text-right px-4 py-3 font-medium">Commission</th>
                       <th className="text-right px-4 py-3 font-medium">Contribution %</th>
                       <th className="text-center px-4 py-3 font-medium">Status</th>
                     </tr>
@@ -234,11 +224,8 @@ export function ProfitCommissionObject({
                     {departments.map((dept, idx) => (
                       <tr key={dept.name} className={cn("border-t border-border/50", idx % 2 === 0 ? "bg-background" : "bg-muted/20")}>
                         <td className="px-4 py-3 font-medium">{dept.name}</td>
+                        <td className="px-4 py-3 text-right text-accent font-semibold">{formatCurrency(dept.turnover || 0)}</td>
                         <td className="px-4 py-3 text-right">{formatCurrency(dept.currentPeriod)}</td>
-                        <td className="px-4 py-3 text-right text-muted-foreground">{formatCurrency(dept.previousPeriod)}</td>
-                        <td className={cn("px-4 py-3 text-right font-medium", dept.changePercent > 0 ? "text-success" : dept.changePercent < 0 ? "text-destructive" : "")}>
-                          {dept.changePercent > 0 ? "+" : ""}{dept.changePercent.toFixed(1)}%
-                        </td>
                         <td className="px-4 py-3 text-right">{dept.contributionPercent.toFixed(1)}%</td>
                         <td className="px-4 py-3 text-center">
                           <span className={cn("text-xs px-2 py-1 rounded-full", statusConfig[dept.status].bg, statusConfig[dept.status].text)}>
