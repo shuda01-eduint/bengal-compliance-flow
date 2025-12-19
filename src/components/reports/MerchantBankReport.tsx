@@ -83,18 +83,12 @@ export function MerchantBankReport() {
     try {
       // Fetch bank mappings first
       await fetchMerchantBanks();
-      
-      // Get all client codes that exist in clients table
-      const { data: existingClients } = await supabase
-        .from("clients")
-        .select("inv_code");
-      
-      const existingCodes = new Set(existingClients?.map(c => c.inv_code) || []);
 
-      // Build trade query with date filters
+      // Build trade query with date filters - only get CL prefix codes for merchant bank report
       let tradeQuery = supabase
         .from("trade_history")
-        .select("client_code, side, value, quantity, security_code, trade_date, file_name");
+        .select("client_code, side, value, quantity, security_code, trade_date, file_name")
+        .ilike("client_code", "CL%");
       
       if (startDate) {
         tradeQuery = tradeQuery.gte("trade_date", format(startDate, "yyyy-MM-dd"));
@@ -107,10 +101,8 @@ export function MerchantBankReport() {
 
       if (error) throw error;
 
-      // Filter to only merchant bank codes (not in clients table)
-      const merchantTrades = (trades || []).filter(
-        t => t.client_code && !existingCodes.has(t.client_code)
-      );
+      // All CL codes are merchant bank codes
+      const merchantTrades = (trades || []).filter(t => t.client_code);
 
       // Group by prefix and client_code
       const bankMap = new Map<string, Map<string, MerchantCodeData>>();
