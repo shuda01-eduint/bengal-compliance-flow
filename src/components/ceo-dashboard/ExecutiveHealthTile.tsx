@@ -113,8 +113,8 @@ export function ExecutiveHealthTile({
         </div>
 
         {/* Title & Value */}
-        <p className="text-xs font-medium text-muted-foreground mb-0.5 truncate">{title}</p>
-        <p className="text-xl font-bold tracking-tight text-foreground mb-2 font-serif">{value}</p>
+        <p className="text-xs font-medium text-muted-foreground mb-1">{title}</p>
+        <p className="text-2xl font-bold tracking-tight text-foreground mb-3 break-all leading-tight">{value}</p>
 
         {/* Trend indicators */}
         <div className="flex items-center gap-3 text-[11px]">
