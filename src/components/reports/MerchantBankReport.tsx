@@ -12,21 +12,20 @@ import { Calendar } from "@/components/ui/calendar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Search, Download, RefreshCw, GitBranch, CalendarIcon, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Settings, Plus, Pencil, Trash2 } from "lucide-react";
+import { Search, Download, RefreshCw, Building2, CalendarIcon, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Settings, Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 
-interface BranchCode {
+interface MerchantBank {
   id: string;
   prefix: string;
-  branch_name: string;
-  branch_type: string | null;
+  bank_name: string;
   description: string | null;
 }
 
-interface BranchCodeData {
+interface MerchantCodeData {
   client_code: string;
   trade_count: number;
   buy_value: number;
@@ -39,52 +38,51 @@ interface BranchCodeData {
   securities: { code: string; buy: number; sell: number; net: number }[];
 }
 
-interface BranchData {
+interface MerchantBankData {
   prefix: string;
-  branch_name: string;
-  branch_type: string;
-  codes: BranchCodeData[];
+  bank_name: string;
+  codes: MerchantCodeData[];
   total_buy: number;
   total_sell: number;
   total_net: number;
   total_trades: number;
 }
 
-export function BranchTradeReport() {
+export function MerchantBankReport() {
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<BranchData[]>([]);
-  const [branchCodes, setBranchCodes] = useState<BranchCode[]>([]);
+  const [data, setData] = useState<MerchantBankData[]>([]);
+  const [merchantBanks, setMerchantBanks] = useState<MerchantBank[]>([]);
   const [search, setSearch] = useState("");
-  const [selectedBranch, setSelectedBranch] = useState<string>("all");
+  const [selectedBank, setSelectedBank] = useState<string>("all");
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
-  const [expandedBranches, setExpandedBranches] = useState<Set<string>>(new Set());
+  const [expandedBanks, setExpandedBanks] = useState<Set<string>>(new Set());
   const [sortColumn, setSortColumn] = useState<string>("net_value");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   
   // Settings dialog state
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [editingBranch, setEditingBranch] = useState<BranchCode | null>(null);
-  const [newBranch, setNewBranch] = useState({ prefix: "", branch_name: "", branch_type: "outlet", description: "" });
-  const [savingBranch, setSavingBranch] = useState(false);
+  const [editingBank, setEditingBank] = useState<MerchantBank | null>(null);
+  const [newBank, setNewBank] = useState({ prefix: "", bank_name: "", description: "" });
+  const [savingBank, setSavingBank] = useState(false);
 
-  // Fetch branch code mappings from database
-  const fetchBranchCodes = async () => {
+  // Fetch merchant bank mappings from database
+  const fetchMerchantBanks = async () => {
     const { data, error } = await supabase
-      .from("branch_codes")
+      .from("merchant_banks")
       .select("*")
       .order("prefix");
     
     if (!error && data) {
-      setBranchCodes(data);
+      setMerchantBanks(data);
     }
   };
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch branch mappings first
-      await fetchBranchCodes();
+      // Fetch bank mappings first
+      await fetchMerchantBanks();
       
       // Get all client codes that exist in clients table
       const { data: existingClients } = await supabase
@@ -109,23 +107,23 @@ export function BranchTradeReport() {
 
       if (error) throw error;
 
-      // Filter to only branch codes (not in clients table)
-      const branchTrades = (trades || []).filter(
+      // Filter to only merchant bank codes (not in clients table)
+      const merchantTrades = (trades || []).filter(
         t => t.client_code && !existingCodes.has(t.client_code)
       );
 
       // Group by prefix and client_code
-      const branchMap = new Map<string, Map<string, BranchCodeData>>();
+      const bankMap = new Map<string, Map<string, MerchantCodeData>>();
 
-      branchTrades.forEach(trade => {
+      merchantTrades.forEach(trade => {
         const code = trade.client_code!;
         const prefix = code.replace(/[0-9]+$/, '');
         
-        if (!branchMap.has(prefix)) {
-          branchMap.set(prefix, new Map());
+        if (!bankMap.has(prefix)) {
+          bankMap.set(prefix, new Map());
         }
         
-        const codesMap = branchMap.get(prefix)!;
+        const codesMap = bankMap.get(prefix)!;
         if (!codesMap.has(code)) {
           codesMap.set(code, {
             client_code: code,
@@ -182,20 +180,18 @@ export function BranchTradeReport() {
         }
       });
 
-      // Get branch names from database
-      const { data: dbBranches } = await supabase.from("branch_codes").select("prefix, branch_name, branch_type");
-      const branchNames: Record<string, { name: string; type: string }> = {};
-      dbBranches?.forEach(b => { branchNames[b.prefix] = { name: b.branch_name, type: b.branch_type || 'outlet' }; });
+      // Get bank names from database
+      const { data: dbBanks } = await supabase.from("merchant_banks").select("prefix, bank_name");
+      const bankNames: Record<string, string> = {};
+      dbBanks?.forEach(b => { bankNames[b.prefix] = b.bank_name; });
 
       // Convert to array format
-      const result: BranchData[] = [];
-      branchMap.forEach((codesMap, prefix) => {
+      const result: MerchantBankData[] = [];
+      bankMap.forEach((codesMap, prefix) => {
         const codes = Array.from(codesMap.values());
-        const branchInfo = branchNames[prefix] || { name: `Branch ${prefix || 'Direct'}`, type: 'outlet' };
         result.push({
           prefix,
-          branch_name: branchInfo.name,
-          branch_type: branchInfo.type,
+          bank_name: bankNames[prefix] || `Bank ${prefix}`,
           codes,
           total_buy: codes.reduce((sum, c) => sum + c.buy_value, 0),
           total_sell: codes.reduce((sum, c) => sum + c.sell_value, 0),
@@ -209,8 +205,8 @@ export function BranchTradeReport() {
 
       setData(result);
     } catch (error) {
-      console.error("Error fetching branch trade data:", error);
-      toast.error("Failed to load branch trade report");
+      console.error("Error fetching merchant bank data:", error);
+      toast.error("Failed to load merchant bank report");
     } finally {
       setLoading(false);
     }
@@ -220,130 +216,129 @@ export function BranchTradeReport() {
     fetchData();
   }, [startDate, endDate]);
 
-  // Branch management functions
-  const handleSaveBranch = async () => {
-    if (!newBranch.prefix || !newBranch.branch_name) {
-      toast.error("Prefix and Branch Name are required");
+  // Bank management functions
+  const handleSaveBank = async () => {
+    if (!newBank.prefix || !newBank.bank_name) {
+      toast.error("Prefix and Bank Name are required");
       return;
     }
     
-    setSavingBranch(true);
+    setSavingBank(true);
     try {
-      if (editingBranch) {
+      if (editingBank) {
         // Update existing
         const { error } = await supabase
-          .from("branch_codes")
+          .from("merchant_banks")
           .update({ 
-            branch_name: newBranch.branch_name,
-            branch_type: newBranch.branch_type,
-            description: newBranch.description || null 
+            bank_name: newBank.bank_name, 
+            description: newBank.description || null 
           })
-          .eq("id", editingBranch.id);
+          .eq("id", editingBank.id);
         
         if (error) throw error;
-        toast.success("Branch updated successfully");
+        toast.success("Bank updated successfully");
       } else {
         // Insert new
         const { error } = await supabase
-          .from("branch_codes")
+          .from("merchant_banks")
           .insert({ 
-            prefix: newBranch.prefix.toUpperCase(), 
-            branch_name: newBranch.branch_name,
-            branch_type: newBranch.branch_type,
-            description: newBranch.description || null 
+            prefix: newBank.prefix.toUpperCase(), 
+            bank_name: newBank.bank_name, 
+            description: newBank.description || null 
           });
         
         if (error) {
           if (error.code === "23505") {
-            toast.error("A branch with this prefix already exists");
+            toast.error("A bank with this prefix already exists");
           } else {
             throw error;
           }
           return;
         }
-        toast.success("Branch added successfully");
+        toast.success("Bank added successfully");
       }
       
-      setNewBranch({ prefix: "", branch_name: "", branch_type: "outlet", description: "" });
-      setEditingBranch(null);
-      await fetchBranchCodes();
+      setNewBank({ prefix: "", bank_name: "", description: "" });
+      setEditingBank(null);
+      await fetchMerchantBanks();
       await fetchData();
     } catch (error) {
-      console.error("Error saving branch:", error);
-      toast.error("Failed to save branch");
+      console.error("Error saving bank:", error);
+      toast.error("Failed to save bank");
     } finally {
-      setSavingBranch(false);
+      setSavingBank(false);
     }
   };
 
-  const handleDeleteBranch = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this branch mapping?")) return;
+  const handleDeleteBank = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this bank mapping?")) return;
     
     try {
       const { error } = await supabase
-        .from("branch_codes")
+        .from("merchant_banks")
         .delete()
         .eq("id", id);
       
       if (error) throw error;
-      toast.success("Branch deleted successfully");
-      await fetchBranchCodes();
+      toast.success("Bank deleted successfully");
+      await fetchMerchantBanks();
       await fetchData();
     } catch (error) {
-      console.error("Error deleting branch:", error);
-      toast.error("Failed to delete branch");
+      console.error("Error deleting bank:", error);
+      toast.error("Failed to delete bank");
     }
   };
 
-  const handleEditBranch = (branch: BranchCode) => {
-    setEditingBranch(branch);
-    setNewBranch({ 
-      prefix: branch.prefix, 
-      branch_name: branch.branch_name,
-      branch_type: branch.branch_type || "outlet",
-      description: branch.description || "" 
+  const handleEditBank = (bank: MerchantBank) => {
+    setEditingBank(bank);
+    setNewBank({ 
+      prefix: bank.prefix, 
+      bank_name: bank.bank_name, 
+      description: bank.description || "" 
     });
   };
 
-  const branchOptions = useMemo(() => {
-    return data.map(d => ({ prefix: d.prefix, name: d.branch_name }));
+  const bankOptions = useMemo(() => {
+    return data
+      .filter(d => d.prefix && d.prefix.trim() !== "")
+      .map(d => ({ prefix: d.prefix, name: d.bank_name }));
   }, [data]);
 
   const filteredData = useMemo(() => {
     let result = data;
 
-    if (selectedBranch !== "all") {
-      result = result.filter(d => d.prefix === selectedBranch);
+    if (selectedBank !== "all") {
+      result = result.filter(d => d.prefix === selectedBank);
     }
 
     if (search) {
       const searchLower = search.toLowerCase();
-      result = result.map(branch => ({
-        ...branch,
-        codes: branch.codes.filter(c => 
+      result = result.map(bank => ({
+        ...bank,
+        codes: bank.codes.filter(c => 
           c.client_code.toLowerCase().includes(searchLower)
         )
-      })).filter(branch => branch.codes.length > 0);
+      })).filter(bank => bank.codes.length > 0);
     }
 
-    // Sort codes within each branch
+    // Sort codes within each bank
     if (sortColumn) {
-      result = result.map(branch => ({
-        ...branch,
-        codes: [...branch.codes].sort((a, b) => {
-          const aVal = a[sortColumn as keyof BranchCodeData] as number;
-          const bVal = b[sortColumn as keyof BranchCodeData] as number;
+      result = result.map(bank => ({
+        ...bank,
+        codes: [...bank.codes].sort((a, b) => {
+          const aVal = a[sortColumn as keyof MerchantCodeData] as number;
+          const bVal = b[sortColumn as keyof MerchantCodeData] as number;
           return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
         })
       }));
     }
 
     return result;
-  }, [data, search, selectedBranch, sortColumn, sortDirection]);
+  }, [data, search, selectedBank, sortColumn, sortDirection]);
 
   const totals = useMemo(() => {
     return {
-      branches: filteredData.length,
+      banks: filteredData.length,
       codes: filteredData.reduce((sum, b) => sum + b.codes.length, 0),
       trades: filteredData.reduce((sum, b) => sum + b.total_trades, 0),
       buy: filteredData.reduce((sum, b) => sum + b.total_buy, 0),
@@ -361,8 +356,8 @@ export function BranchTradeReport() {
     }).format(value);
   };
 
-  const toggleBranch = (prefix: string) => {
-    setExpandedBranches(prev => {
+  const toggleBank = (prefix: string) => {
+    setExpandedBanks(prev => {
       const next = new Set(prev);
       if (next.has(prefix)) {
         next.delete(prefix);
@@ -385,12 +380,11 @@ export function BranchTradeReport() {
   const handleExport = () => {
     const exportData: any[] = [];
     
-    filteredData.forEach(branch => {
-      branch.codes.forEach(code => {
+    filteredData.forEach(bank => {
+      bank.codes.forEach(code => {
         exportData.push({
-          "Branch": branch.branch_name,
-          "Type": branch.branch_type,
-          "Prefix": branch.prefix,
+          "Bank": bank.bank_name,
+          "Prefix": bank.prefix,
           "Code": code.client_code,
           "Trades": code.trade_count,
           "Buy Value": code.buy_value,
@@ -406,8 +400,8 @@ export function BranchTradeReport() {
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Branch Trade Report");
-    XLSX.writeFile(wb, `branch_trade_report_${new Date().toISOString().split("T")[0]}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Merchant Bank Report");
+    XLSX.writeFile(wb, `merchant_bank_report_${new Date().toISOString().split("T")[0]}.xlsx`);
     toast.success("Report exported successfully");
   };
 
@@ -415,14 +409,6 @@ export function BranchTradeReport() {
     if (sortColumn !== column) return <ArrowUpDown className="h-3 w-3 opacity-30" />;
     return sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
   };
-
-  const branchTypeOptions = [
-    { value: "head_office", label: "Head Office" },
-    { value: "branch", label: "Branch" },
-    { value: "extension", label: "Extension Counter" },
-    { value: "digital_booth", label: "Digital Booth" },
-    { value: "outlet", label: "Outlet" },
-  ];
 
   return (
     <>
@@ -432,7 +418,7 @@ export function BranchTradeReport() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Settings className="h-5 w-5" />
-              Manage Branch Codes
+              Manage Merchant Banks
             </DialogTitle>
           </DialogHeader>
           
@@ -440,63 +426,46 @@ export function BranchTradeReport() {
             {/* Add/Edit Form */}
             <Card>
               <CardContent className="pt-4">
-                <h4 className="font-medium mb-3">{editingBranch ? "Edit Branch" : "Add New Branch"}</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <h4 className="font-medium mb-3">{editingBank ? "Edit Bank" : "Add New Bank"}</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <Label>Prefix</Label>
                     <Input
-                      value={newBranch.prefix}
-                      onChange={(e) => setNewBranch(prev => ({ ...prev, prefix: e.target.value.toUpperCase() }))}
-                      placeholder="e.g., KL, MR, OBO"
-                      disabled={!!editingBranch}
+                      value={newBank.prefix}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, prefix: e.target.value.toUpperCase() }))}
+                      placeholder="e.g., CL"
+                      disabled={!!editingBank}
                       maxLength={10}
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Leave empty for direct/head office codes</p>
                   </div>
                   <div>
-                    <Label>Branch Name</Label>
+                    <Label>Bank Name</Label>
                     <Input
-                      value={newBranch.branch_name}
-                      onChange={(e) => setNewBranch(prev => ({ ...prev, branch_name: e.target.value }))}
-                      placeholder="e.g., Khulna Branch"
+                      value={newBank.bank_name}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, bank_name: e.target.value }))}
+                      placeholder="e.g., Community Bank"
                     />
-                  </div>
-                  <div>
-                    <Label>Branch Type</Label>
-                    <Select 
-                      value={newBranch.branch_type} 
-                      onValueChange={(value) => setNewBranch(prev => ({ ...prev, branch_type: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {branchTypeOptions.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
                   <div>
                     <Label>Description</Label>
                     <Input
-                      value={newBranch.description}
-                      onChange={(e) => setNewBranch(prev => ({ ...prev, description: e.target.value }))}
+                      value={newBank.description}
+                      onChange={(e) => setNewBank(prev => ({ ...prev, description: e.target.value }))}
                       placeholder="Optional notes"
                     />
                   </div>
                 </div>
                 <div className="flex gap-2 mt-3">
-                  <Button onClick={handleSaveBranch} disabled={savingBranch} size="sm">
-                    {savingBranch ? "Saving..." : editingBranch ? "Update" : "Add Branch"}
+                  <Button onClick={handleSaveBank} disabled={savingBank} size="sm">
+                    {savingBank ? "Saving..." : editingBank ? "Update" : "Add Bank"}
                   </Button>
-                  {editingBranch && (
+                  {editingBank && (
                     <Button 
                       variant="outline" 
                       size="sm"
                       onClick={() => {
-                        setEditingBranch(null);
-                        setNewBranch({ prefix: "", branch_name: "", branch_type: "outlet", description: "" });
+                        setEditingBank(null);
+                        setNewBank({ prefix: "", bank_name: "", description: "" });
                       }}
                     >
                       Cancel
@@ -506,43 +475,37 @@ export function BranchTradeReport() {
               </CardContent>
             </Card>
 
-            {/* Existing Branches List */}
+            {/* Existing Banks List */}
             <div className="rounded-lg border">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Prefix</TableHead>
-                    <TableHead>Branch Name</TableHead>
-                    <TableHead>Type</TableHead>
+                    <TableHead>Bank Name</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {branchCodes.length === 0 ? (
+                  {merchantBanks.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground py-4">
-                        No branches configured
+                      <TableCell colSpan={4} className="text-center text-muted-foreground py-4">
+                        No banks configured
                       </TableCell>
                     </TableRow>
                   ) : (
-                    branchCodes.map((branch) => (
-                      <TableRow key={branch.id}>
-                        <TableCell className="font-mono font-bold">{branch.prefix || "(empty)"}</TableCell>
-                        <TableCell>{branch.branch_name}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="capitalize">
-                            {branch.branch_type?.replace("_", " ") || "outlet"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{branch.description || "-"}</TableCell>
+                    merchantBanks.map((bank) => (
+                      <TableRow key={bank.id}>
+                        <TableCell className="font-mono font-bold">{bank.prefix}</TableCell>
+                        <TableCell>{bank.bank_name}</TableCell>
+                        <TableCell className="text-muted-foreground">{bank.description || "-"}</TableCell>
                         <TableCell>
                           <div className="flex gap-1">
                             <Button
                               variant="ghost"
                               size="sm"
                               className="h-8 w-8 p-0"
-                              onClick={() => handleEditBranch(branch)}
+                              onClick={() => handleEditBank(bank)}
                             >
                               <Pencil className="h-4 w-4" />
                             </Button>
@@ -550,7 +513,7 @@ export function BranchTradeReport() {
                               variant="ghost"
                               size="sm"
                               className="h-8 w-8 p-0 text-destructive"
-                              onClick={() => handleDeleteBranch(branch.id)}
+                              onClick={() => handleDeleteBank(bank.id)}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -574,11 +537,11 @@ export function BranchTradeReport() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-xl flex items-center gap-2">
-              <GitBranch className="h-5 w-5 text-primary" />
-              Branch Trade Report
+              <Building2 className="h-5 w-5 text-primary" />
+              Merchant Bank Report
             </CardTitle>
             <p className="text-sm text-muted-foreground mt-1">
-              Trade summaries for branch/outlet codes by prefix
+              Trade summaries for merchant bank accounts by prefix
             </p>
           </div>
           <div className="flex gap-2">
@@ -600,8 +563,8 @@ export function BranchTradeReport() {
         {/* Summary Stats */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
           <div className="bg-secondary/50 rounded-lg p-3">
-            <p className="text-xs text-muted-foreground">Branches</p>
-            <p className="text-xl font-bold">{totals.branches}</p>
+            <p className="text-xs text-muted-foreground">Banks</p>
+            <p className="text-xl font-bold">{totals.banks}</p>
           </div>
           <div className="bg-secondary/50 rounded-lg p-3">
             <p className="text-xs text-muted-foreground">Codes</p>
@@ -682,22 +645,22 @@ export function BranchTradeReport() {
             </Button>
           )}
           
-          <Select value={selectedBranch} onValueChange={setSelectedBranch}>
+          <Select value={selectedBank} onValueChange={setSelectedBank}>
             <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Filter by Branch" />
+              <SelectValue placeholder="Filter by Bank" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {branchOptions.map((branch) => (
-                <SelectItem key={branch.prefix} value={branch.prefix}>
-                  {branch.name} ({branch.prefix || "Direct"})
+              <SelectItem value="all">All Banks</SelectItem>
+              {bankOptions.map((bank) => (
+                <SelectItem key={bank.prefix} value={bank.prefix}>
+                  {bank.name} ({bank.prefix})
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
-        {/* Branch Cards */}
+        {/* Bank Cards */}
         {loading ? (
           <div className="space-y-4">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -706,51 +669,46 @@ export function BranchTradeReport() {
           </div>
         ) : filteredData.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
-            No branch trades found
+            No merchant bank trades found
           </div>
         ) : (
           <div className="space-y-4">
-            {filteredData.map((branch) => (
+            {filteredData.map((bank) => (
               <Collapsible
-                key={branch.prefix}
-                open={expandedBranches.has(branch.prefix)}
-                onOpenChange={() => toggleBranch(branch.prefix)}
+                key={bank.prefix}
+                open={expandedBanks.has(bank.prefix)}
+                onOpenChange={() => toggleBank(bank.prefix)}
               >
                 <CollapsibleTrigger asChild>
                   <Card className="cursor-pointer hover:bg-muted/50 transition-colors">
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          {expandedBranches.has(branch.prefix) ? (
+                          {expandedBanks.has(bank.prefix) ? (
                             <ChevronDown className="h-5 w-5" />
                           ) : (
                             <ChevronRight className="h-5 w-5" />
                           )}
                           <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-semibold">{branch.branch_name}</h3>
-                              <Badge variant="outline" className="capitalize text-xs">
-                                {branch.branch_type?.replace("_", " ") || "outlet"}
-                              </Badge>
-                            </div>
+                            <h3 className="font-semibold">{bank.bank_name}</h3>
                             <p className="text-sm text-muted-foreground">
-                              Prefix: {branch.prefix || "(direct)"} • {branch.codes.length} codes • {branch.total_trades.toLocaleString()} trades
+                              Prefix: {bank.prefix} • {bank.codes.length} codes • {bank.total_trades.toLocaleString()} trades
                             </p>
                           </div>
                         </div>
                         <div className="flex gap-6 text-right">
                           <div>
                             <p className="text-xs text-muted-foreground">Buy</p>
-                            <p className="font-mono text-green-600">{formatCurrency(branch.total_buy)}</p>
+                            <p className="font-mono text-green-600">{formatCurrency(bank.total_buy)}</p>
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground">Sell</p>
-                            <p className="font-mono text-red-600">{formatCurrency(branch.total_sell)}</p>
+                            <p className="font-mono text-red-600">{formatCurrency(bank.total_sell)}</p>
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground">Net</p>
-                            <p className={cn("font-mono font-bold", branch.total_net >= 0 ? "text-green-600" : "text-red-600")}>
-                              {formatCurrency(branch.total_net)}
+                            <p className={cn("font-mono font-bold", bank.total_net >= 0 ? "text-green-600" : "text-red-600")}>
+                              {formatCurrency(bank.total_net)}
                             </p>
                           </div>
                         </div>
@@ -800,7 +758,7 @@ export function BranchTradeReport() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {branch.codes.map((code) => (
+                        {bank.codes.map((code) => (
                           <TableRow key={code.client_code}>
                             <TableCell className="font-mono font-medium">{code.client_code}</TableCell>
                             <TableCell className="text-right font-mono">{code.trade_count}</TableCell>
