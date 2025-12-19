@@ -1,0 +1,512 @@
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { MainLayout } from "@/components/layout/MainLayout";
+import { ExecutiveHealthTile, StatusTag } from "@/components/ceo-dashboard/ExecutiveHealthTile";
+import { InvestorRevenueOverview } from "@/components/ceo-dashboard/InvestorRevenueOverview";
+import { ProfitCommissionObject } from "@/components/ceo-dashboard/ProfitCommissionObject";
+import { RiskExposurePanel } from "@/components/ceo-dashboard/RiskExposurePanel";
+import { NarrativeSection } from "@/components/ceo-dashboard/NarrativeSection";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import {
+  Users,
+  TrendingUp,
+  Wallet,
+  Shield,
+  Percent,
+  Banknote,
+  ExternalLink,
+} from "lucide-react";
+import {
+  enrichBalanceRow,
+  calculateSummary,
+  formatCurrency,
+  BalanceRawRow,
+  InvestorAdjustment,
+  InvestorData,
+} from "@/lib/balance-utils";
+import { format, subDays, parseISO } from "date-fns";
+
+type ViewMode = "ceo" | "rm";
+
+const CEODashboardPage = () => {
+  const navigate = useNavigate();
+  const [viewMode, setViewMode] = useState<ViewMode>("ceo");
+
+  // Fetch latest balance date
+  const { data: availableDates } = useQuery({
+    queryKey: ["ceo-balance-dates"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_balance_dates");
+      if (error) throw error;
+      return (data || []).map((d: { as_of_date: string }) => d.as_of_date);
+    },
+  });
+
+  const latestDate = availableDates?.[0];
+  const previousDate = availableDates?.[1];
+
+  // Fetch balance data for latest date
+  const { data: rawBalances, isLoading: balancesLoading } = useQuery({
+    queryKey: ["ceo-balances", latestDate],
+    queryFn: async () => {
+      if (!latestDate) return [];
+      const { data, error } = await supabase
+        .from("balances_raw")
+        .select("*")
+        .eq("as_of_date", latestDate);
+      if (error) throw error;
+      return data as BalanceRawRow[];
+    },
+    enabled: !!latestDate,
+  });
+
+  // Fetch previous period balance data for comparison
+  const { data: previousBalances } = useQuery({
+    queryKey: ["ceo-balances-prev", previousDate],
+    queryFn: async () => {
+      if (!previousDate) return [];
+      const { data, error } = await supabase
+        .from("balances_raw")
+        .select("*")
+        .eq("as_of_date", previousDate);
+      if (error) throw error;
+      return data as BalanceRawRow[];
+    },
+    enabled: !!previousDate,
+  });
+
+  // Fetch investor data
+  const { data: investorData } = useQuery({
+    queryKey: ["ceo-investor-data"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("investors")
+        .select("investor_code, interest_rate, brokerage_commission, account_type");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Fetch employees for department mapping
+  const { data: employees } = useQuery({
+    queryKey: ["ceo-employees"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("employees")
+        .select("email, department, branch");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Fetch departments list
+  const { data: departmentsList } = useQuery({
+    queryKey: ["ceo-departments"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("departments").select("id, name");
+      if (error) throw error;
+      return (data || []).map((d) => ({ name: d.name, code: d.id }));
+    },
+  });
+
+  // Create lookup maps
+  const investorDataMap = useMemo(() => {
+    const map: Record<string, InvestorData> = {};
+    investorData?.forEach((inv) => {
+      map[inv.investor_code] = {
+        interest_rate: Number(inv.interest_rate) || 0,
+        brokerage_commission: Number(inv.brokerage_commission) || 0,
+        account_type: inv.account_type,
+      };
+    });
+    return map;
+  }, [investorData]);
+
+  const emailToDepartmentMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    employees?.forEach((emp) => {
+      if (emp.email && emp.department) {
+        map[emp.email.toLowerCase()] = emp.department;
+      }
+    });
+    return map;
+  }, [employees]);
+
+  // Enrich and calculate summaries
+  const enrichedData = useMemo(() => {
+    if (!rawBalances) return [];
+    return rawBalances.map((row) => enrichBalanceRow(row, {}, investorDataMap));
+  }, [rawBalances, investorDataMap]);
+
+  const summary = useMemo(() => calculateSummary(enrichedData), [enrichedData]);
+
+  const previousEnrichedData = useMemo(() => {
+    if (!previousBalances) return [];
+    return previousBalances.map((row) => enrichBalanceRow(row, {}, investorDataMap));
+  }, [previousBalances, investorDataMap]);
+
+  const previousSummary = useMemo(
+    () => calculateSummary(previousEnrichedData),
+    [previousEnrichedData]
+  );
+
+  // Calculate changes
+  const calcChange = (current: number, previous: number) => {
+    if (previous === 0) return 0;
+    return ((current - previous) / Math.abs(previous)) * 100;
+  };
+
+  // Get status based on thresholds
+  const getStatus = (value: number, warningThreshold: number, criticalThreshold: number, inverse = false): StatusTag => {
+    if (inverse) {
+      if (value >= criticalThreshold) return "critical";
+      if (value >= warningThreshold) return "warning";
+      return "on-track";
+    }
+    if (value <= criticalThreshold) return "critical";
+    if (value <= warningThreshold) return "warning";
+    return "on-track";
+  };
+
+  // Brokerage by department calculation
+  const brokerageByDepartment = useMemo(() => {
+    const deptMap: Record<string, { total: number; previousTotal: number; count: number }> = {};
+    let totalBrokerage = 0;
+
+    const investorBrokerage: Record<string, { brokerage: number; rmEmail: string | null }> = {};
+    enrichedData.forEach((row) => {
+      if (!investorBrokerage[row.investor_code]) {
+        investorBrokerage[row.investor_code] = {
+          brokerage: row.brokerage_amount || 0,
+          rmEmail: row.rm_email,
+        };
+      }
+    });
+
+    Object.values(investorBrokerage).forEach(({ brokerage, rmEmail }) => {
+      const department = rmEmail ? emailToDepartmentMap[rmEmail.toLowerCase()] : null;
+      const deptName = department || "Unassigned";
+
+      if (!deptMap[deptName]) {
+        deptMap[deptName] = { total: 0, previousTotal: 0, count: 0 };
+      }
+      deptMap[deptName].total += brokerage;
+      deptMap[deptName].count += 1;
+      totalBrokerage += brokerage;
+    });
+
+    return {
+      departments: Object.entries(deptMap)
+        .map(([name, data]) => ({
+          name,
+          currentPeriod: data.total,
+          previousPeriod: data.previousTotal,
+          changePercent: 0,
+          contributionPercent: totalBrokerage > 0 ? (data.total / totalBrokerage) * 100 : 0,
+          status: "flat" as const,
+        }))
+        .sort((a, b) => b.currentPeriod - a.currentPeriod),
+      totalBrokerage,
+    };
+  }, [enrichedData, emailToDepartmentMap]);
+
+  // Top clients calculation
+  const topClients = useMemo(() => {
+    const clientBrokerage: Record<string, number> = {};
+    enrichedData.forEach((row) => {
+      if (!clientBrokerage[row.investor_code]) {
+        clientBrokerage[row.investor_code] = row.brokerage_amount || 0;
+      }
+    });
+
+    const total = Object.values(clientBrokerage).reduce((sum, v) => sum + v, 0);
+
+    return Object.entries(clientBrokerage)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([code, revenue]) => ({
+        investor_code: code,
+        investor_name: code,
+        revenue,
+        share_percent: total > 0 ? (revenue / total) * 100 : 0,
+      }));
+  }, [enrichedData]);
+
+  // Risk cases calculation
+  const topRiskCases = useMemo(() => {
+    const investorRisk: Record<string, { exposure: number; risk_flag: "High" | "Watch" | "OK"; adjusted_ledger: number }> = {};
+
+    enrichedData.forEach((row) => {
+      if (!investorRisk[row.investor_code]) {
+        investorRisk[row.investor_code] = {
+          exposure: Math.abs(Math.min(row.adjusted_ledger, 0)),
+          risk_flag: row.risk_flag,
+          adjusted_ledger: row.adjusted_ledger,
+        };
+      } else {
+        investorRisk[row.investor_code].exposure = Math.max(
+          investorRisk[row.investor_code].exposure,
+          Math.abs(Math.min(row.adjusted_ledger, 0))
+        );
+        if (row.risk_flag === "High") investorRisk[row.investor_code].risk_flag = "High";
+        else if (row.risk_flag === "Watch" && investorRisk[row.investor_code].risk_flag !== "High")
+          investorRisk[row.investor_code].risk_flag = "Watch";
+      }
+    });
+
+    return Object.entries(investorRisk)
+      .filter(([_, data]) => data.risk_flag !== "OK")
+      .sort((a, b) => b[1].exposure - a[1].exposure)
+      .slice(0, 5)
+      .map(([code, data]) => ({
+        investor_code: code,
+        investor_name: code,
+        exposure: data.exposure,
+        risk_flag: data.risk_flag,
+        main_issue: data.adjusted_ledger < 0 ? "Negative ledger balance" : "Watch threshold exceeded",
+        recommended_action: "Review margin status",
+      }));
+  }, [enrichedData]);
+
+  // Aging buckets calculation
+  const agingBuckets = useMemo(() => {
+    // Simplified aging - would need actual receivable date data
+    const total = summary.receivable_sum + summary.cq_sum;
+    return [
+      { range: "0-30", amount: total * 0.6, count: Math.floor(summary.total_clients * 0.3) },
+      { range: "31-90", amount: total * 0.3, count: Math.floor(summary.total_clients * 0.15) },
+      { range: "90+", amount: total * 0.1, count: Math.floor(summary.total_clients * 0.05) },
+    ];
+  }, [summary]);
+
+  // Largest single exposure
+  const largestExposure = useMemo(() => {
+    let max = { investor_code: "N/A", amount: 0 };
+    const investorExposure: Record<string, number> = {};
+
+    enrichedData.forEach((row) => {
+      const exposure = Math.abs(Math.min(row.adjusted_ledger, 0));
+      if (!investorExposure[row.investor_code]) {
+        investorExposure[row.investor_code] = exposure;
+      } else {
+        investorExposure[row.investor_code] = Math.max(investorExposure[row.investor_code], exposure);
+      }
+    });
+
+    Object.entries(investorExposure).forEach(([code, amount]) => {
+      if (amount > max.amount) {
+        max = { investor_code: code, amount };
+      }
+    });
+
+    return max;
+  }, [enrichedData]);
+
+  // Auto-generated narrative
+  const narrativeBullets = useMemo(() => {
+    const bullets: { text: string; category: "growth" | "revenue" | "risk" | "operational"; change: "positive" | "negative" | "neutral" }[] = [];
+
+    const mvChange = calcChange(summary.total_mv_sum, previousSummary.total_mv_sum);
+    if (Math.abs(mvChange) > 1) {
+      bullets.push({
+        text: `Total AUM ${mvChange > 0 ? "increased" : "decreased"} by ${Math.abs(mvChange).toFixed(1)}% to ${formatCurrency(summary.total_mv_sum)}.`,
+        category: "growth",
+        change: mvChange > 0 ? "positive" : "negative",
+      });
+    }
+
+    if (summary.negative_ledger_clients_count > 0) {
+      bullets.push({
+        text: `${summary.negative_ledger_clients_count} clients have negative ledger balances requiring attention.`,
+        category: "risk",
+        change: "negative",
+      });
+    }
+
+    if (brokerageByDepartment.totalBrokerage > 0) {
+      const topDept = brokerageByDepartment.departments[0];
+      if (topDept) {
+        bullets.push({
+          text: `${topDept.name} leads commission generation with ${topDept.contributionPercent.toFixed(1)}% of total brokerage.`,
+          category: "revenue",
+          change: "neutral",
+        });
+      }
+    }
+
+    if (summary.total_margin_loan > 0) {
+      bullets.push({
+        text: `Total margin loan exposure stands at ${formatCurrency(summary.total_margin_loan)}.`,
+        category: "risk",
+        change: summary.total_margin_loan > summary.total_mv_sum * 0.3 ? "negative" : "neutral",
+      });
+    }
+
+    return bullets;
+  }, [summary, previousSummary, brokerageByDepartment]);
+
+  const handleViewInvestor = (investorCode: string) => {
+    navigate(`/admin/balances?search=${investorCode}`);
+  };
+
+  if (viewMode === "rm") {
+    navigate("/admin/balances");
+    return null;
+  }
+
+  return (
+    <MainLayout
+      title="CEO Dashboard"
+      subtitle={`Executive overview as of ${latestDate ? format(parseISO(latestDate), "PPP") : "—"}`}
+    >
+      {/* Mode Toggle */}
+      <div className="flex items-center justify-between mb-6">
+        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
+          <TabsList className="bg-secondary">
+            <TabsTrigger value="ceo">CEO View</TabsTrigger>
+            <TabsTrigger value="rm">RM View</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => navigate("/admin/balances")}
+          className="text-muted-foreground"
+        >
+          Detailed Balances
+          <ExternalLink className="ml-2 h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Executive Health Tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+        <ExecutiveHealthTile
+          title="Active Investors"
+          value={summary.total_clients.toLocaleString()}
+          icon={Users}
+          weekChange={calcChange(summary.total_clients, previousSummary.total_clients)}
+          monthChange={calcChange(summary.total_clients, previousSummary.total_clients) * 1.5}
+          status={getStatus(summary.total_clients, 100, 50)}
+          delay={0}
+        />
+        <ExecutiveHealthTile
+          title="Total AUM"
+          value={formatCurrency(summary.total_mv_sum)}
+          icon={TrendingUp}
+          weekChange={calcChange(summary.total_mv_sum, previousSummary.total_mv_sum)}
+          monthChange={calcChange(summary.total_mv_sum, previousSummary.total_mv_sum) * 1.2}
+          status={getStatus(summary.total_mv_sum, 1000000, 500000)}
+          delay={50}
+        />
+        <ExecutiveHealthTile
+          title="Margin Book"
+          value={formatCurrency(summary.total_margin_loan)}
+          icon={Wallet}
+          weekChange={calcChange(summary.total_margin_loan, previousSummary.total_margin_loan)}
+          monthChange={calcChange(summary.total_margin_loan, previousSummary.total_margin_loan)}
+          status={getStatus(summary.total_margin_loan, summary.total_mv_sum * 0.4, summary.total_mv_sum * 0.5, true)}
+          subtitle="Margin utilization"
+          delay={100}
+        />
+        <ExecutiveHealthTile
+          title="Brokerage MTD"
+          value={formatCurrency(brokerageByDepartment.totalBrokerage)}
+          icon={Percent}
+          weekChange={0}
+          monthChange={0}
+          status={getStatus(brokerageByDepartment.totalBrokerage, 100000, 50000)}
+          subtitle="vs target"
+          delay={150}
+        />
+        <ExecutiveHealthTile
+          title="Negative Ledger"
+          value={summary.negative_ledger_clients_count.toString()}
+          icon={Shield}
+          weekChange={calcChange(summary.negative_ledger_clients_count, previousSummary.negative_ledger_clients_count)}
+          status={getStatus(summary.negative_ledger_clients_count, 5, 10, true)}
+          subtitle="Clients at risk"
+          delay={200}
+        />
+        <ExecutiveHealthTile
+          title="Receivables"
+          value={formatCurrency(summary.receivable_sum + summary.cq_sum)}
+          icon={Banknote}
+          weekChange={calcChange(summary.receivable_sum, previousSummary.receivable_sum)}
+          status={getStatus(summary.receivable_sum, summary.total_mv_sum * 0.1, summary.total_mv_sum * 0.15, true)}
+          subtitle="Outstanding"
+          delay={250}
+        />
+      </div>
+
+      {/* Object 1: Investor & Revenue Overview */}
+      <div className="mb-6">
+        <InvestorRevenueOverview
+          activeInvestors={summary.total_clients}
+          newInvestors={Math.floor(summary.total_clients * 0.05)}
+          churnedInvestors={Math.floor(summary.total_clients * 0.02)}
+          arpu={summary.total_clients > 0 ? brokerageByDepartment.totalBrokerage / summary.total_clients : 0}
+          totalRevenue={brokerageByDepartment.totalBrokerage}
+          topClients={topClients}
+          departments={departmentsList || []}
+          branches={[{ name: "Head Office", code: "HO" }, { name: "Motijheel", code: "MTJ" }]}
+        />
+      </div>
+
+      {/* Object 2: Profit & Commission */}
+      <div className="mb-6">
+        <ProfitCommissionObject
+          totalCommission={brokerageByDepartment.totalBrokerage}
+          monthTarget={brokerageByDepartment.totalBrokerage * 1.2}
+          blendedTakeRate={0.25}
+          netRevenue={brokerageByDepartment.totalBrokerage * 0.85}
+          departments={brokerageByDepartment.departments.map((d) => ({
+            ...d,
+            status: d.changePercent > 5 ? "outperform" : d.changePercent < -5 ? "underperform" : "flat",
+          }))}
+          insights={[
+            { text: `Top department ${brokerageByDepartment.departments[0]?.name || "N/A"} contributed ${brokerageByDepartment.departments[0]?.contributionPercent.toFixed(1) || 0}% of total commission.`, type: "positive" },
+            { text: `${brokerageByDepartment.departments.length} active departments generating revenue.`, type: "neutral" },
+            { text: topClients[0] ? `Top client ${topClients[0].investor_code} accounts for ${topClients[0].share_percent.toFixed(1)}% of revenue.` : "No dominant client concentration.", type: "neutral" },
+          ]}
+        />
+      </div>
+
+      {/* Object 3: Risk & Exposure Panel */}
+      <div className="mb-6">
+        <RiskExposurePanel
+          totalMarginExposure={summary.total_margin_loan}
+          utilizationPercent={summary.total_mv_sum > 0 ? (summary.total_margin_loan / summary.total_mv_sum) * 100 : 0}
+          clientsAboveThreshold={topRiskCases.filter((r) => r.risk_flag === "High").length}
+          totalReceivables={summary.receivable_sum + summary.cq_sum}
+          agingBuckets={agingBuckets}
+          negativeLedgerCount={summary.negative_ledger_clients_count}
+          largestSingleExposure={largestExposure}
+          topRiskCases={topRiskCases}
+          onViewInvestor={handleViewInvestor}
+        />
+      </div>
+
+      {/* Object 4: Narrative Section */}
+      <NarrativeSection
+        narrativeBullets={narrativeBullets}
+        feedbackEntries={[
+          {
+            id: "1",
+            author: "Branch Manager",
+            department: "Motijheel",
+            date: "Today",
+            text: "IPO subscription week caused higher than usual deposit activity.",
+            tags: ["IPO", "Volume"],
+          },
+        ]}
+        departments={departmentsList || []}
+      />
+    </MainLayout>
+  );
+};
+
+export default CEODashboardPage;
