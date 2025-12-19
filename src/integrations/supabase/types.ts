@@ -296,6 +296,60 @@ export type Database = {
         }
         Relationships: []
       }
+      ceo_dashboard_thresholds: {
+        Row: {
+          created_at: string | null
+          critical_threshold: number | null
+          id: string
+          is_enabled: boolean | null
+          metric_type: string
+          mom_critical_threshold: number | null
+          mom_warning_threshold: number | null
+          threshold_direction: string
+          tile_key: string
+          tile_name: string
+          updated_at: string | null
+          updated_by: string | null
+          warning_threshold: number | null
+          wow_critical_threshold: number | null
+          wow_warning_threshold: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          critical_threshold?: number | null
+          id?: string
+          is_enabled?: boolean | null
+          metric_type?: string
+          mom_critical_threshold?: number | null
+          mom_warning_threshold?: number | null
+          threshold_direction?: string
+          tile_key: string
+          tile_name: string
+          updated_at?: string | null
+          updated_by?: string | null
+          warning_threshold?: number | null
+          wow_critical_threshold?: number | null
+          wow_warning_threshold?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          critical_threshold?: number | null
+          id?: string
+          is_enabled?: boolean | null
+          metric_type?: string
+          mom_critical_threshold?: number | null
+          mom_warning_threshold?: number | null
+          threshold_direction?: string
+          tile_key?: string
+          tile_name?: string
+          updated_at?: string | null
+          updated_by?: string | null
+          warning_threshold?: number | null
+          wow_critical_threshold?: number | null
+          wow_warning_threshold?: number | null
+        }
+        Relationships: []
+      }
       clients: {
         Row: {
           accrued_interest: number

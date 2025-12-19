@@ -3,13 +3,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { ExecutiveHealthTile, StatusTag } from "@/components/ceo-dashboard/ExecutiveHealthTile";
+import { ExecutiveHealthTile } from "@/components/ceo-dashboard/ExecutiveHealthTile";
 import { InvestorRevenueOverview } from "@/components/ceo-dashboard/InvestorRevenueOverview";
 import { ProfitCommissionObject } from "@/components/ceo-dashboard/ProfitCommissionObject";
 import { RiskExposurePanel } from "@/components/ceo-dashboard/RiskExposurePanel";
 import { NarrativeSection } from "@/components/ceo-dashboard/NarrativeSection";
+import { ThresholdConfigDialog } from "@/components/ceo-dashboard/ThresholdConfigDialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { useThresholds } from "@/hooks/useThresholds";
 import {
   Users,
   TrendingUp,
@@ -18,6 +20,7 @@ import {
   Percent,
   Banknote,
   ExternalLink,
+  Settings2,
 } from "lucide-react";
 import {
   enrichBalanceRow,
@@ -34,6 +37,10 @@ type ViewMode = "ceo" | "rm";
 const CEODashboardPage = () => {
   const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<ViewMode>("ceo");
+  const [thresholdDialogOpen, setThresholdDialogOpen] = useState(false);
+  
+  // Use thresholds hook
+  const { getStatus } = useThresholds();
 
   // Fetch latest balance date
   const { data: availableDates } = useQuery({
@@ -157,18 +164,6 @@ const CEODashboardPage = () => {
   const calcChange = (current: number, previous: number) => {
     if (previous === 0) return 0;
     return ((current - previous) / Math.abs(previous)) * 100;
-  };
-
-  // Get status based on thresholds
-  const getStatus = (value: number, warningThreshold: number, criticalThreshold: number, inverse = false): StatusTag => {
-    if (inverse) {
-      if (value >= criticalThreshold) return "critical";
-      if (value >= warningThreshold) return "warning";
-      return "on-track";
-    }
-    if (value <= criticalThreshold) return "critical";
-    if (value <= warningThreshold) return "warning";
-    return "on-track";
   };
 
   // Brokerage by department calculation
@@ -371,16 +366,32 @@ const CEODashboardPage = () => {
           </TabsList>
         </Tabs>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => navigate("/admin/balances")}
-          className="text-muted-foreground"
-        >
-          Detailed Balances
-          <ExternalLink className="ml-2 h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setThresholdDialogOpen(true)}
+            className="text-muted-foreground"
+          >
+            <Settings2 className="mr-2 h-4 w-4" />
+            Configure Alerts
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/admin/balances")}
+            className="text-muted-foreground"
+          >
+            Detailed Balances
+            <ExternalLink className="ml-2 h-4 w-4" />
+          </Button>
+        </div>
       </div>
+
+      <ThresholdConfigDialog
+        open={thresholdDialogOpen}
+        onOpenChange={setThresholdDialogOpen}
+      />
 
       {/* Executive Health Tiles */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
@@ -390,7 +401,7 @@ const CEODashboardPage = () => {
           icon={Users}
           weekChange={calcChange(summary.total_clients, previousSummary.total_clients)}
           monthChange={calcChange(summary.total_clients, previousSummary.total_clients) * 1.5}
-          status={getStatus(summary.total_clients, 100, 50)}
+          status={getStatus("active_investors", summary.total_clients, calcChange(summary.total_clients, previousSummary.total_clients), calcChange(summary.total_clients, previousSummary.total_clients) * 1.5)}
           delay={0}
         />
         <ExecutiveHealthTile
@@ -399,7 +410,7 @@ const CEODashboardPage = () => {
           icon={TrendingUp}
           weekChange={calcChange(summary.total_mv_sum, previousSummary.total_mv_sum)}
           monthChange={calcChange(summary.total_mv_sum, previousSummary.total_mv_sum) * 1.2}
-          status={getStatus(summary.total_mv_sum, 1000000, 500000)}
+          status={getStatus("total_aum", summary.total_mv_sum, calcChange(summary.total_mv_sum, previousSummary.total_mv_sum), calcChange(summary.total_mv_sum, previousSummary.total_mv_sum) * 1.2)}
           delay={50}
         />
         <ExecutiveHealthTile
@@ -408,7 +419,7 @@ const CEODashboardPage = () => {
           icon={Wallet}
           weekChange={calcChange(summary.total_margin_loan, previousSummary.total_margin_loan)}
           monthChange={calcChange(summary.total_margin_loan, previousSummary.total_margin_loan)}
-          status={getStatus(summary.total_margin_loan, summary.total_mv_sum * 0.4, summary.total_mv_sum * 0.5, true)}
+          status={getStatus("margin_book", summary.total_margin_loan, calcChange(summary.total_margin_loan, previousSummary.total_margin_loan))}
           subtitle="Margin utilization"
           delay={100}
         />
@@ -418,7 +429,7 @@ const CEODashboardPage = () => {
           icon={Percent}
           weekChange={0}
           monthChange={0}
-          status={getStatus(brokerageByDepartment.totalBrokerage, 100000, 50000)}
+          status={getStatus("brokerage_commission", brokerageByDepartment.totalBrokerage)}
           subtitle="vs target"
           delay={150}
         />
@@ -427,7 +438,7 @@ const CEODashboardPage = () => {
           value={summary.negative_ledger_clients_count.toString()}
           icon={Shield}
           weekChange={calcChange(summary.negative_ledger_clients_count, previousSummary.negative_ledger_clients_count)}
-          status={getStatus(summary.negative_ledger_clients_count, 5, 10, true)}
+          status={getStatus("negative_ledger", summary.negative_ledger_clients_count, calcChange(summary.negative_ledger_clients_count, previousSummary.negative_ledger_clients_count))}
           subtitle="Clients at risk"
           delay={200}
         />
@@ -436,7 +447,7 @@ const CEODashboardPage = () => {
           value={formatCurrency(summary.receivable_sum + summary.cq_sum)}
           icon={Banknote}
           weekChange={calcChange(summary.receivable_sum, previousSummary.receivable_sum)}
-          status={getStatus(summary.receivable_sum, summary.total_mv_sum * 0.1, summary.total_mv_sum * 0.15, true)}
+          status={getStatus("receivables", summary.receivable_sum + summary.cq_sum, calcChange(summary.receivable_sum, previousSummary.receivable_sum))}
           subtitle="Outstanding"
           delay={250}
         />
