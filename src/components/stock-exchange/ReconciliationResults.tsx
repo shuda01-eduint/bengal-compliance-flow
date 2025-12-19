@@ -4,7 +4,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { AlertCircle, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Filter, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Filter, Search, Download, FileSpreadsheet } from "lucide-react";
+import * as XLSX from "xlsx";
 
 interface ParsedTrade {
   action: string;
@@ -110,6 +112,37 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
     }).format(value);
   };
 
+  const exportData = useMemo(() => {
+    return filteredResults.map(r => ({
+      "Status": r.status.charAt(0).toUpperCase() + r.status.slice(1),
+      "Client Code": r.inv_code,
+      "Investor Name": r.investor_name,
+      "RM Name": r.rm_name,
+      "Buy Value": r.total_buy_value,
+      "Sell Value": r.total_sell_value,
+      "Net Value": r.net_value,
+      "Ledger Balance": r.current_ledger_balance,
+      "Issues": r.issues.join("; ") || "None",
+    }));
+  }, [filteredResults]);
+
+  const handleExportExcel = () => {
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Reconciliation");
+    XLSX.writeFile(wb, `reconciliation_results_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const handleExportCSV = () => {
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const csv = XLSX.utils.sheet_to_csv(ws);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `reconciliation_results_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'matched':
@@ -208,6 +241,17 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
                     <SelectItem value="unmatched">Unmatched ({unmatched})</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              {/* Export Buttons */}
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleExportExcel} disabled={filteredResults.length === 0}>
+                  <FileSpreadsheet className="h-4 w-4 mr-1" />
+                  Excel
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={filteredResults.length === 0}>
+                  <Download className="h-4 w-4 mr-1" />
+                  CSV
+                </Button>
               </div>
             </div>
           </div>
