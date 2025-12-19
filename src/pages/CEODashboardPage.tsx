@@ -336,6 +336,56 @@ const CEODashboardPage = () => {
     return max;
   }, [enrichedData]);
 
+  // Margin breakdown by department
+  const marginByDepartment = useMemo(() => {
+    const deptMargin: Record<string, { exposure: number; count: number }> = {};
+    const seenInvestors = new Set<string>();
+
+    enrichedData.forEach((row) => {
+      if (seenInvestors.has(row.investor_code)) return;
+      seenInvestors.add(row.investor_code);
+
+      const accountType = investorDataMap[row.investor_code]?.account_type?.toLowerCase();
+      if (accountType !== 'margin' || row.adjusted_ledger >= 0) return;
+
+      const department = row.rm_email ? emailToDepartmentMap[row.rm_email.toLowerCase()] : null;
+      const deptName = department || "Unassigned";
+      const exposure = Math.abs(row.adjusted_ledger);
+
+      if (!deptMargin[deptName]) {
+        deptMargin[deptName] = { exposure: 0, count: 0 };
+      }
+      deptMargin[deptName].exposure += exposure;
+      deptMargin[deptName].count += 1;
+    });
+
+    return Object.entries(deptMargin)
+      .map(([name, data]) => ({ name, exposure: data.exposure, count: data.count }))
+      .sort((a, b) => b.exposure - a.exposure);
+  }, [enrichedData, investorDataMap, emailToDepartmentMap]);
+
+  // Margin breakdown by risk level
+  const marginByRiskLevel = useMemo(() => {
+    const riskMargin: Record<string, { exposure: number; count: number }> = { High: { exposure: 0, count: 0 }, Watch: { exposure: 0, count: 0 }, OK: { exposure: 0, count: 0 } };
+    const seenInvestors = new Set<string>();
+
+    enrichedData.forEach((row) => {
+      if (seenInvestors.has(row.investor_code)) return;
+      seenInvestors.add(row.investor_code);
+
+      const accountType = investorDataMap[row.investor_code]?.account_type?.toLowerCase();
+      if (accountType !== 'margin' || row.adjusted_ledger >= 0) return;
+
+      const exposure = Math.abs(row.adjusted_ledger);
+      riskMargin[row.risk_flag].exposure += exposure;
+      riskMargin[row.risk_flag].count += 1;
+    });
+
+    return Object.entries(riskMargin)
+      .filter(([_, data]) => data.exposure > 0)
+      .map(([level, data]) => ({ level: level as "High" | "Watch" | "OK", exposure: data.exposure, count: data.count }));
+  }, [enrichedData, investorDataMap]);
+
   // Account type breakdown for Active Investors
   const accountTypeBreakdown = useMemo(() => {
     const typeCount: Record<string, number> = {};
@@ -410,7 +460,7 @@ const CEODashboardPage = () => {
   }, [summary, previousSummary, brokerageByDepartment]);
 
   const handleViewInvestor = (investorCode: string) => {
-    navigate(`/admin/balances?search=${investorCode}`);
+    navigate(`/investors?search=${investorCode}`);
   };
 
   if (viewMode === "rm") {
@@ -565,6 +615,8 @@ const CEODashboardPage = () => {
           negativeLedgerCount={summary.negative_ledger_clients_count}
           largestSingleExposure={largestExposure}
           topRiskCases={topRiskCases}
+          marginByDepartment={marginByDepartment}
+          marginByRiskLevel={marginByRiskLevel}
           onViewInvestor={handleViewInvestor}
         />
       </div>
