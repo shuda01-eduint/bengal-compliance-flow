@@ -9,26 +9,81 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Copy, CalendarIcon, Loader2 } from "lucide-react";
+import { Copy, CalendarIcon, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { format, parseISO, addDays, isWeekend, isSaturday, isSunday } from "date-fns";
+import { format, parseISO, addDays, isWeekend } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface CopyBalancesDialogProps {
   availableDates: string[];
   onCopyComplete?: () => void;
 }
 
-// Calculate the next business day (skipping weekends)
+// Bangladesh Bank Holidays for 2024-2025
+// These can be updated annually or moved to database for easier management
+const BANK_HOLIDAYS: { date: string; name: string }[] = [
+  // 2024 Holidays
+  { date: "2024-02-21", name: "Shaheed Day" },
+  { date: "2024-03-17", name: "Sheikh Mujibur Rahman's Birthday" },
+  { date: "2024-03-26", name: "Independence Day" },
+  { date: "2024-04-14", name: "Bengali New Year" },
+  { date: "2024-05-01", name: "May Day" },
+  { date: "2024-08-15", name: "National Mourning Day" },
+  { date: "2024-12-16", name: "Victory Day" },
+  { date: "2024-12-25", name: "Christmas Day" },
+  // 2025 Holidays
+  { date: "2025-01-01", name: "New Year's Day" },
+  { date: "2025-02-21", name: "Shaheed Day" },
+  { date: "2025-03-17", name: "Sheikh Mujibur Rahman's Birthday" },
+  { date: "2025-03-26", name: "Independence Day" },
+  { date: "2025-03-31", name: "Eid ul-Fitr" },
+  { date: "2025-04-01", name: "Eid ul-Fitr (2nd day)" },
+  { date: "2025-04-02", name: "Eid ul-Fitr (3rd day)" },
+  { date: "2025-04-14", name: "Bengali New Year" },
+  { date: "2025-05-01", name: "May Day" },
+  { date: "2025-06-07", name: "Eid ul-Adha" },
+  { date: "2025-06-08", name: "Eid ul-Adha (2nd day)" },
+  { date: "2025-06-09", name: "Eid ul-Adha (3rd day)" },
+  { date: "2025-07-06", name: "Ashura" },
+  { date: "2025-08-15", name: "National Mourning Day" },
+  { date: "2025-09-05", name: "Eid-e-Miladunnabi" },
+  { date: "2025-10-02", name: "Durga Puja" },
+  { date: "2025-12-16", name: "Victory Day" },
+  { date: "2025-12-25", name: "Christmas Day" },
+];
+
+// Check if a date is a bank holiday
+function isBankHoliday(date: Date): boolean {
+  const dateStr = format(date, 'yyyy-MM-dd');
+  return BANK_HOLIDAYS.some(h => h.date === dateStr);
+}
+
+// Get holiday name if date is a holiday
+function getHolidayName(date: Date): string | undefined {
+  const dateStr = format(date, 'yyyy-MM-dd');
+  return BANK_HOLIDAYS.find(h => h.date === dateStr)?.name;
+}
+
+// Check if a date is a non-business day (weekend or holiday)
+function isNonBusinessDay(date: Date): boolean {
+  return isWeekend(date) || isBankHoliday(date);
+}
+
+// Calculate the next business day (skipping weekends and holidays)
 function getNextBusinessDay(date: Date): Date {
   let nextDay = addDays(date, 1);
   
-  // Skip Saturday (6) and Sunday (0)
-  while (isWeekend(nextDay)) {
+  // Skip weekends and holidays
+  while (isNonBusinessDay(nextDay)) {
     nextDay = addDays(nextDay, 1);
   }
   
@@ -43,6 +98,7 @@ function isWeekendDay(date: Date): boolean {
 export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalancesDialogProps) {
   const [open, setOpen] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
+  const [showHolidays, setShowHolidays] = useState(false);
   const [sourceDate, setSourceDate] = useState<Date | undefined>(
     availableDates?.[0] ? parseISO(availableDates[0]) : undefined
   );
@@ -56,6 +112,14 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
       setTargetDate(getNextBusinessDay(sourceDate));
     }
   }, [sourceDate]);
+
+  // Get upcoming holidays (next 6 months)
+  const upcomingHolidays = BANK_HOLIDAYS.filter(h => {
+    const holidayDate = parseISO(h.date);
+    const today = new Date();
+    const sixMonthsLater = addDays(today, 180);
+    return holidayDate >= today && holidayDate <= sixMonthsLater;
+  }).slice(0, 8);
 
   const handleCopy = async () => {
     if (!sourceDate || !targetDate) {
@@ -174,11 +238,14 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
                   selected={targetDate}
                   onSelect={setTargetDate}
                   initialFocus
+                  className="pointer-events-auto"
                   modifiers={{
-                    weekend: (date) => isWeekendDay(date)
+                    weekend: (date) => isWeekendDay(date),
+                    holiday: (date) => isBankHoliday(date)
                   }}
                   modifiersStyles={{
-                    weekend: { color: 'hsl(var(--muted-foreground))', opacity: 0.5 }
+                    weekend: { color: 'hsl(var(--muted-foreground))', opacity: 0.5 },
+                    holiday: { color: 'hsl(var(--destructive))', fontWeight: 'bold' }
                   }}
                 />
               </PopoverContent>
@@ -188,12 +255,44 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
                 Note: Selected date is a weekend
               </p>
             )}
+            {targetDate && isBankHoliday(targetDate) && (
+              <p className="text-xs text-destructive">
+                Note: Selected date is a bank holiday ({getHolidayName(targetDate)})
+              </p>
+            )}
             {targetDate && availableDates?.includes(format(targetDate, 'yyyy-MM-dd')) && (
               <p className="text-xs text-amber-500">
                 Warning: This date already has data that will be replaced
               </p>
             )}
           </div>
+
+          {/* Upcoming Holidays Section */}
+          <Collapsible open={showHolidays} onOpenChange={setShowHolidays}>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm" className="w-full justify-between text-muted-foreground">
+                <span className="text-xs">View configured bank holidays ({BANK_HOLIDAYS.length})</span>
+                {showHolidays ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <div className="max-h-32 overflow-y-auto rounded border bg-muted/50 p-2">
+                <p className="text-xs font-medium text-muted-foreground mb-2">Upcoming holidays:</p>
+                <div className="space-y-1">
+                  {upcomingHolidays.length > 0 ? (
+                    upcomingHolidays.map((h) => (
+                      <div key={h.date} className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">{format(parseISO(h.date), 'PP')}</span>
+                        <span className="text-foreground">{h.name}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">No upcoming holidays</p>
+                  )}
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setOpen(false)} disabled={isCopying}>
