@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { Percent, TrendingUp, TrendingDown, ExternalLink, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/balance-utils";
 import { cn } from "@/lib/utils";
-
 interface DepartmentPerformance {
   name: string;
   currentPeriod: number;
@@ -34,6 +35,7 @@ export function ProfitCommissionObject({
   departments,
   insights,
 }: ProfitCommissionObjectProps) {
+  const [isReportOpen, setIsReportOpen] = useState(false);
   const targetAchievement = monthTarget > 0 ? (totalCommission / monthTarget) * 100 : 0;
   const targetStatus =
     targetAchievement >= 100 ? "outperform" : targetAchievement >= 80 ? "flat" : "underperform";
@@ -67,7 +69,12 @@ export function ProfitCommissionObject({
             </div>
           </div>
 
-          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground h-8">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="text-xs text-muted-foreground hover:text-foreground h-8"
+            onClick={() => setIsReportOpen(true)}
+          >
             Full Report
             <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
           </Button>
@@ -174,6 +181,101 @@ export function ProfitCommissionObject({
           </ul>
         </div>
       </div>
+
+      {/* Full Report Dialog */}
+      <Dialog open={isReportOpen} onOpenChange={setIsReportOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">Profit & Commission Report</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-6 mt-4">
+            {/* Summary Metrics */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">Commission MTD</span>
+                <p className="text-xl font-bold text-primary mt-1">{formatCurrency(totalCommission)}</p>
+                <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", statusConfig[targetStatus].bg, statusConfig[targetStatus].text)}>
+                  {targetAchievement.toFixed(1)}% of target
+                </span>
+              </div>
+              <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">Monthly Target</span>
+                <p className="text-xl font-bold mt-1">{formatCurrency(monthTarget)}</p>
+                <span className="text-xs text-muted-foreground">Gap: {formatCurrency(Math.abs(monthTarget - totalCommission))}</span>
+              </div>
+              <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">Net Revenue</span>
+                <p className="text-xl font-bold mt-1">{formatCurrency(netRevenue)}</p>
+                <span className="text-xs text-muted-foreground">After rebates</span>
+              </div>
+              <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">Blended Take Rate</span>
+                <p className="text-xl font-bold text-accent mt-1">{blendedTakeRate.toFixed(3)}%</p>
+              </div>
+            </div>
+
+            {/* Department Performance Table */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Department Performance</h4>
+              <div className="border border-border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-medium">Department</th>
+                      <th className="text-right px-4 py-3 font-medium">Current Period</th>
+                      <th className="text-right px-4 py-3 font-medium">Previous Period</th>
+                      <th className="text-right px-4 py-3 font-medium">Change %</th>
+                      <th className="text-right px-4 py-3 font-medium">Contribution %</th>
+                      <th className="text-center px-4 py-3 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {departments.map((dept, idx) => (
+                      <tr key={dept.name} className={cn("border-t border-border/50", idx % 2 === 0 ? "bg-background" : "bg-muted/20")}>
+                        <td className="px-4 py-3 font-medium">{dept.name}</td>
+                        <td className="px-4 py-3 text-right">{formatCurrency(dept.currentPeriod)}</td>
+                        <td className="px-4 py-3 text-right text-muted-foreground">{formatCurrency(dept.previousPeriod)}</td>
+                        <td className={cn("px-4 py-3 text-right font-medium", dept.changePercent > 0 ? "text-success" : dept.changePercent < 0 ? "text-destructive" : "")}>
+                          {dept.changePercent > 0 ? "+" : ""}{dept.changePercent.toFixed(1)}%
+                        </td>
+                        <td className="px-4 py-3 text-right">{dept.contributionPercent.toFixed(1)}%</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={cn("text-xs px-2 py-1 rounded-full", statusConfig[dept.status].bg, statusConfig[dept.status].text)}>
+                            {statusConfig[dept.status].label}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* All Insights */}
+            <div>
+              <h4 className="text-sm font-semibold mb-3">Key Insights</h4>
+              <ul className="space-y-2">
+                {insights.map((insight, index) => (
+                  <li
+                    key={index}
+                    className={cn(
+                      "text-sm pl-4 py-2 rounded-lg relative before:absolute before:left-2 before:top-3.5 before:w-1.5 before:h-1.5 before:rounded-full",
+                      insight.type === "positive"
+                        ? "bg-success/10 text-success before:bg-success"
+                        : insight.type === "negative"
+                        ? "bg-destructive/10 text-destructive before:bg-destructive"
+                        : "bg-muted text-muted-foreground before:bg-muted-foreground"
+                    )}
+                  >
+                    {insight.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
