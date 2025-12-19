@@ -152,39 +152,48 @@ export function UserManagementTab() {
   const pendingCount = profiles?.filter(p => !p.is_approved).length ?? 0;
   const approvedCount = profiles?.filter(p => p.is_approved).length ?? 0;
 
+  // Calculate role distribution
+  const roleDistribution = userRoles?.reduce((acc, role) => {
+    acc[role.role] = (acc[role.role] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>) ?? {};
+
+  const adminCount = roleDistribution.admin ?? 0;
+  const mancomCount = roleDistribution.mancom ?? 0;
+  const rmCount = roleDistribution.rm ?? 0;
+  const branchManagerCount = roleDistribution.branch_manager ?? 0;
+  const agentCount = roleDistribution.agent ?? 0;
+  const userCount = roleDistribution.user ?? 0;
+
+  const roleColors: Record<string, string> = {
+    admin: "bg-destructive",
+    mancom: "bg-primary",
+    rm: "bg-success",
+    branch_manager: "bg-warning",
+    agent: "bg-secondary",
+    user: "bg-muted-foreground",
+  };
+
+  const roleLabels: Record<string, string> = {
+    admin: "Admin",
+    mancom: "MANCOM",
+    rm: "RM",
+    branch_manager: "Branch Mgr",
+    agent: "Agent",
+    user: "User",
+  };
+
+  const totalRoles = Object.values(roleDistribution).reduce((a, b) => a + b, 0);
+
   return (
     <div className="space-y-6">
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card className="glass-card">
           <CardContent className="flex items-center gap-4 p-6">
             <div className="p-3 rounded-lg bg-primary/10">
               <Users className="h-6 w-6 text-primary" />
-      </div>
-
-      {/* Admin Actions */}
-      <Card className="glass-card">
-        <CardContent className="p-4">
-          <div className="flex flex-wrap gap-3 items-center">
-            <span className="text-sm font-medium text-muted-foreground">Admin Actions:</span>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={syncDepartments}
-              disabled={isSyncing}
-            >
-              {isSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-              Sync Departments
-            </Button>
-            <ImportDepartmentHeadsDialog 
-              onSuccess={() => queryClient.invalidateQueries({ queryKey: ["admin-profiles"] })} 
-            />
-            <ImportMANCOMDialog 
-              onSuccess={() => queryClient.invalidateQueries({ queryKey: ["admin-profiles", "admin-user-roles"] })} 
-            />
-          </div>
-        </CardContent>
-      </Card>
+            </div>
             <div>
               <p className="text-2xl font-bold">{profiles?.length ?? 0}</p>
               <p className="text-sm text-muted-foreground">Total Users</p>
@@ -213,7 +222,80 @@ export function UserManagementTab() {
             </div>
           </CardContent>
         </Card>
+        <Card className="glass-card">
+          <CardContent className="flex items-center gap-4 p-6">
+            <div className="p-3 rounded-lg bg-destructive/10">
+              <Shield className="h-6 w-6 text-destructive" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{adminCount}</p>
+              <p className="text-sm text-muted-foreground">Administrators</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Role Distribution */}
+      <Card className="glass-card">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Role Distribution</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {/* Progress Bar */}
+            <div className="h-3 rounded-full bg-muted overflow-hidden flex">
+              {Object.entries(roleDistribution).map(([role, count]) => {
+                const percentage = totalRoles > 0 ? (count / totalRoles) * 100 : 0;
+                return percentage > 0 ? (
+                  <div
+                    key={role}
+                    className={`${roleColors[role] || "bg-muted-foreground"} transition-all`}
+                    style={{ width: `${percentage}%` }}
+                    title={`${roleLabels[role] || role}: ${count}`}
+                  />
+                ) : null;
+              })}
+            </div>
+            {/* Legend */}
+            <div className="flex flex-wrap gap-4">
+              {Object.entries(roleDistribution)
+                .sort((a, b) => b[1] - a[1])
+                .map(([role, count]) => (
+                  <div key={role} className="flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${roleColors[role] || "bg-muted-foreground"}`} />
+                    <span className="text-sm text-muted-foreground">
+                      {roleLabels[role] || role}: <span className="font-medium text-foreground">{count}</span>
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Admin Actions */}
+      <Card className="glass-card">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap gap-3 items-center">
+            <span className="text-sm font-medium text-muted-foreground">Admin Actions:</span>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={syncDepartments}
+              disabled={isSyncing}
+            >
+              {isSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              Sync Departments
+            </Button>
+            <ImportDepartmentHeadsDialog 
+              onSuccess={() => queryClient.invalidateQueries({ queryKey: ["admin-profiles"] })} 
+            />
+            <ImportMANCOMDialog 
+              onSuccess={() => queryClient.invalidateQueries({ queryKey: ["admin-profiles", "admin-user-roles"] })} 
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Filters */}
       <Card className="glass-card">
