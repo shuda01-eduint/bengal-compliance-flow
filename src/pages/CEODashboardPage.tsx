@@ -55,50 +55,90 @@ const CEODashboardPage = () => {
   const latestDate = availableDates?.[0];
   const previousDate = availableDates?.[1];
 
-  // Fetch balance data for latest date
+  // Fetch balance data for latest date (paginated)
   const { data: rawBalances, isLoading: balancesLoading } = useQuery({
     queryKey: ["ceo-balances", latestDate],
     queryFn: async () => {
       if (!latestDate) return [];
-      const { data, error } = await supabase
-        .from("balances_raw")
-        .select("*")
-        .eq("as_of_date", latestDate)
-        .limit(100000);
-      if (error) throw error;
-      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} balance rows for ${latestDate}`);
-      return data as BalanceRawRow[];
+      const allData: BalanceRawRow[] = [];
+      const batchSize = 1000;
+      let offset = 0;
+      
+      while (true) {
+        const { data, error } = await supabase
+          .from("balances_raw")
+          .select("*")
+          .eq("as_of_date", latestDate)
+          .range(offset, offset + batchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allData.push(...(data as BalanceRawRow[]));
+        if (data.length < batchSize) break;
+        offset += batchSize;
+      }
+      
+      console.log(`[CEO Dashboard] Fetched ${allData.length} balance rows for ${latestDate} (paginated)`);
+      return allData;
     },
     enabled: !!latestDate,
   });
 
-  // Fetch previous period balance data for comparison
+  // Fetch previous period balance data for comparison (paginated)
   const { data: previousBalances } = useQuery({
     queryKey: ["ceo-balances-prev", previousDate],
     queryFn: async () => {
       if (!previousDate) return [];
-      const { data, error } = await supabase
-        .from("balances_raw")
-        .select("*")
-        .eq("as_of_date", previousDate)
-        .limit(100000);
-      if (error) throw error;
-      return data as BalanceRawRow[];
+      const allData: BalanceRawRow[] = [];
+      const batchSize = 1000;
+      let offset = 0;
+      
+      while (true) {
+        const { data, error } = await supabase
+          .from("balances_raw")
+          .select("*")
+          .eq("as_of_date", previousDate)
+          .range(offset, offset + batchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allData.push(...(data as BalanceRawRow[]));
+        if (data.length < batchSize) break;
+        offset += batchSize;
+      }
+      
+      console.log(`[CEO Dashboard] Fetched ${allData.length} previous balance rows for ${previousDate} (paginated)`);
+      return allData;
     },
     enabled: !!previousDate,
   });
 
-  // Fetch investor data
+  // Fetch investor data (paginated)
   const { data: investorData } = useQuery({
     queryKey: ["ceo-investor-data"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("investors")
-        .select("investor_code, interest_rate, brokerage_commission, account_type")
-        .limit(100000);
-      if (error) throw error;
-      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} investors`);
-      return data || [];
+      const allInvestors: { investor_code: string; interest_rate: number | null; brokerage_commission: number | null; account_type: string | null }[] = [];
+      const batchSize = 1000;
+      let offset = 0;
+      
+      while (true) {
+        const { data, error } = await supabase
+          .from("investors")
+          .select("investor_code, interest_rate, brokerage_commission, account_type")
+          .range(offset, offset + batchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allInvestors.push(...data);
+        if (data.length < batchSize) break;
+        offset += batchSize;
+      }
+      
+      console.log(`[CEO Dashboard] Fetched ${allInvestors.length} investors (paginated)`);
+      return allInvestors;
     },
   });
 
@@ -126,19 +166,32 @@ const CEODashboardPage = () => {
     },
   });
 
-  // Fetch trade history for turnover calculation (current month)
+  // Fetch trade history for turnover calculation (current month) - paginated
   const { data: tradeHistory } = useQuery({
     queryKey: ["ceo-trade-history"],
     queryFn: async () => {
       const startOfMonth = format(new Date(), "yyyy-MM-01");
-      const { data, error } = await supabase
-        .from("trade_history")
-        .select("value, side, trade_date, department, client_code")
-        .gte("trade_date", startOfMonth)
-        .limit(500000);
-      if (error) throw error;
-      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} trades for ${startOfMonth}`);
-      return data || [];
+      const allTrades: { value: number | null; side: string | null; trade_date: string | null; department: string | null; client_code: string | null }[] = [];
+      const batchSize = 1000;
+      let offset = 0;
+      
+      while (true) {
+        const { data, error } = await supabase
+          .from("trade_history")
+          .select("value, side, trade_date, department, client_code")
+          .gte("trade_date", startOfMonth)
+          .range(offset, offset + batchSize - 1);
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allTrades.push(...data);
+        if (data.length < batchSize) break;
+        offset += batchSize;
+      }
+      
+      console.log(`[CEO Dashboard] Fetched ${allTrades.length} trades for ${startOfMonth} (paginated)`);
+      return allTrades;
     },
   });
 
