@@ -1,7 +1,9 @@
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertCircle, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown, Filter } from "lucide-react";
 
 interface ParsedTrade {
   action: string;
@@ -48,10 +50,45 @@ interface ReconciliationResultsProps {
   results: ReconciliationResult[];
 }
 
+const statusPriority: Record<string, number> = {
+  'unmatched': 1,
+  'warning': 2,
+  'matched': 3,
+};
+
 export function ReconciliationResults({ results }: ReconciliationResultsProps) {
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
   const matched = results.filter(r => r.status === 'matched').length;
   const warnings = results.filter(r => r.status === 'warning').length;
   const unmatched = results.filter(r => r.status === 'unmatched').length;
+
+  const filteredResults = useMemo(() => {
+    let data = [...results];
+    
+    // Apply filter
+    if (statusFilter !== "all") {
+      data = data.filter(r => r.status === statusFilter);
+    }
+    
+    // Apply sort
+    if (sortDirection) {
+      data.sort((a, b) => {
+        const aPriority = statusPriority[a.status] || 0;
+        const bPriority = statusPriority[b.status] || 0;
+        return sortDirection === "asc" ? aPriority - bPriority : bPriority - aPriority;
+      });
+    }
+    
+    return data;
+  }, [results, statusFilter, sortDirection]);
+
+  const handleSortClick = () => {
+    if (sortDirection === null) setSortDirection("asc");
+    else if (sortDirection === "asc") setSortDirection("desc");
+    else setSortDirection(null);
+  };
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-BD', {
@@ -132,14 +169,45 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
       {/* Results Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Reconciliation Details</CardTitle>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <CardTitle>Reconciliation Details</CardTitle>
+            <div className="flex items-center gap-3">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Filter by Status:</span>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-36">
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All ({results.length})</SelectItem>
+                  <SelectItem value="matched">Matched ({matched})</SelectItem>
+                  <SelectItem value="warning">Warning ({warnings})</SelectItem>
+                  <SelectItem value="unmatched">Unmatched ({unmatched})</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Status</TableHead>
+                  <TableHead 
+                    className="cursor-pointer hover:bg-muted/50 select-none"
+                    onClick={handleSortClick}
+                  >
+                    <div className="flex items-center gap-1">
+                      Status
+                      {sortDirection === "asc" ? (
+                        <ArrowUp className="h-4 w-4" />
+                      ) : sortDirection === "desc" ? (
+                        <ArrowDown className="h-4 w-4" />
+                      ) : (
+                        <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                  </TableHead>
                   <TableHead>Client Code</TableHead>
                   <TableHead>Investor Name</TableHead>
                   <TableHead>RM Name</TableHead>
@@ -151,7 +219,7 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {results.map((result, index) => (
+                {filteredResults.map((result, index) => (
                   <TableRow key={index} className={result.status === 'unmatched' ? 'bg-red-500/5' : result.status === 'warning' ? 'bg-yellow-500/5' : ''}>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -184,6 +252,11 @@ export function ReconciliationResults({ results }: ReconciliationResultsProps) {
               </TableBody>
             </Table>
           </div>
+          {statusFilter !== "all" && (
+            <p className="text-sm text-muted-foreground mt-3">
+              Showing {filteredResults.length} of {results.length} results
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
