@@ -1298,42 +1298,7 @@ export type Database = {
       }
     }
     Views: {
-      investors_limited: {
-        Row: {
-          account_type: string | null
-          created_at: string | null
-          id: string | null
-          investor_code: string | null
-          investor_name: string | null
-          investor_type: string | null
-          status: string | null
-          trader: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          account_type?: string | null
-          created_at?: string | null
-          id?: string | null
-          investor_code?: string | null
-          investor_name?: string | null
-          investor_type?: string | null
-          status?: string | null
-          trader?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          account_type?: string | null
-          created_at?: string | null
-          id?: string | null
-          investor_code?: string | null
-          investor_name?: string | null
-          investor_type?: string | null
-          status?: string | null
-          trader?: string | null
-          updated_at?: string | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
       bulk_assign_department_heads: {
