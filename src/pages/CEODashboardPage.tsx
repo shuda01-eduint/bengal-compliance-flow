@@ -126,17 +126,32 @@ const CEODashboardPage = () => {
       const startOfMonth = format(new Date(), "yyyy-MM-01");
       const { data, error } = await supabase
         .from("trade_history")
-        .select("value, side, trade_date")
+        .select("value, side, trade_date, department, client_code")
         .gte("trade_date", startOfMonth);
       if (error) throw error;
       return data || [];
     },
   });
 
-  // Calculate actual turnover from trade history
-  const tradeTurnover = useMemo(() => {
-    if (!tradeHistory || tradeHistory.length === 0) return 0;
-    return tradeHistory.reduce((sum, trade) => sum + (trade.value || 0), 0);
+  // Calculate actual turnover from trade history (total and by department)
+  const { tradeTurnover, turnoverByDepartment } = useMemo(() => {
+    if (!tradeHistory || tradeHistory.length === 0) {
+      return { tradeTurnover: 0, turnoverByDepartment: {} as Record<string, number> };
+    }
+    
+    const deptTurnover: Record<string, number> = {};
+    let total = 0;
+    
+    tradeHistory.forEach((trade) => {
+      const value = trade.value || 0;
+      total += value;
+      
+      // Use department from trade or "Unassigned"
+      const dept = trade.department || "Unassigned";
+      deptTurnover[dept] = (deptTurnover[dept] || 0) + value;
+    });
+    
+    return { tradeTurnover: total, turnoverByDepartment: deptTurnover };
   }, [tradeHistory]);
 
   // Create lookup maps
@@ -222,11 +237,12 @@ const CEODashboardPage = () => {
           changePercent: 0,
           contributionPercent: totalBrokerage > 0 ? (data.total / totalBrokerage) * 100 : 0,
           status: "flat" as const,
+          turnover: turnoverByDepartment[name] || 0,
         }))
         .sort((a, b) => b.currentPeriod - a.currentPeriod),
       totalBrokerage,
     };
-  }, [enrichedData, emailToDepartmentMap]);
+  }, [enrichedData, emailToDepartmentMap, turnoverByDepartment]);
 
   // Top clients calculation
   const topClients = useMemo(() => {
