@@ -1,10 +1,11 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
+import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, ChevronDown, ChevronRight, Calendar as CalendarIcon, Eye, X, AlertCircle } from "lucide-react";
+import { Search, Users, TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronRight, Calendar as CalendarIcon, Eye, X, Percent } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -20,8 +21,6 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImportBalancesRawDialog } from "@/components/admin/ImportBalancesRawDialog";
 import { CopyBalancesDialog } from "@/components/admin/CopyBalancesDialog";
-import { BalanceKPICards } from "@/components/admin/BalanceKPICards";
-import { DepartmentCommissionSection } from "@/components/admin/DepartmentCommissionSection";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, parseISO } from "date-fns";
@@ -583,38 +582,118 @@ const AdminBalancesPage = () => {
           </div>
         )}
 
-        {/* KPI Cards - Grouped by Portfolio Health and Credit/Collections */}
-        <BalanceKPICards 
-          summary={summaryData} 
-          balanceData={enrichedData?.map(r => ({
-            investor_code: r.investor_code,
-            total_mv: r.total_mv,
-            total_cost: r.total_cost,
-            unrealized_pnl: r.unrealized_pnl,
-            pnl_pct: r.pnl_pct,
-            adjusted_ledger: r.adjusted_ledger,
-            receivable_sale: r.receivable_sale,
-            cq_in_transit: r.cq_in_transit,
-            accrued_interest: r.accrued_interest,
-            risk_flag: r.risk_flag,
-          }))}
-        />
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Users className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Investors</span>
+            </div>
+            <p className="text-xl font-semibold">{summaryData.total_clients}</p>
+          </div>
 
-        {/* Brokerage Commission by Department */}
-        <div className="mt-4">
-          <DepartmentCommissionSection 
-            departments={brokerageByDepartment.departments}
-            totalBrokerage={brokerageByDepartment.totalBrokerage}
-            balanceData={enrichedData?.map(r => ({
-              investor_code: r.investor_code,
-              rm_email: r.rm_email,
-              rm_name: r.rm_name,
-              total_mv: r.total_mv,
-              brokerage_amount: r.brokerage_amount,
-              adjusted_ledger: r.adjusted_ledger,
-            }))}
-            emailToDepartmentMap={emailToDepartmentMap}
-          />
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Market Value</span>
+            </div>
+            <p className="text-xl font-semibold">{formatCurrency(summaryData.total_mv_sum)}</p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Total Cost</span>
+            </div>
+            <p className="text-xl font-semibold">{formatCurrency(summaryData.total_cost_sum)}</p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              {summaryData.unrealized_pnl_sum >= 0 ? (
+                <TrendingUp className="h-4 w-4 text-success" />
+              ) : (
+                <TrendingDown className="h-4 w-4 text-destructive" />
+              )}
+              <span className="text-xs text-muted-foreground">Unrealized P&L</span>
+            </div>
+            <p className={cn("text-xl font-semibold", summaryData.unrealized_pnl_sum >= 0 ? "text-success" : "text-destructive")}>
+              {formatCurrency(summaryData.unrealized_pnl_sum)}
+            </p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              <span className="text-xs text-muted-foreground">Negative Ledger</span>
+            </div>
+            <p className="text-xl font-semibold text-destructive">{summaryData.negative_ledger_clients_count}</p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Wallet className="h-4 w-4 text-amber-400" />
+              <span className="text-xs text-muted-foreground">Receivables</span>
+            </div>
+            <p className="text-xl font-semibold text-amber-400">
+              {formatCurrency(summaryData.receivable_sum + summaryData.cq_sum)}
+            </p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingDown className="h-4 w-4 text-orange-400" />
+              <span className="text-xs text-muted-foreground">Accrued Interest</span>
+            </div>
+            <p className="text-xl font-semibold text-orange-400">
+              {formatCurrency(summaryData.total_accrued_interest)}
+            </p>
+          </div>
+
+          <div className="glass-card rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Wallet className="h-4 w-4 text-red-400" />
+              <span className="text-xs text-muted-foreground">Margin Loan</span>
+            </div>
+            <p className="text-xl font-semibold text-red-400">
+              {formatCurrency(summaryData.total_margin_loan)}
+            </p>
+          </div>
+        </div>
+
+        {/* Brokerage Commission by Department Card */}
+        <div className="glass-card rounded-xl p-4 mt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Percent className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium">Brokerage Commission by Department</span>
+            <span className="text-xs text-muted-foreground ml-auto">
+              Total: {formatCurrency(brokerageByDepartment.totalBrokerage)}
+            </span>
+          </div>
+          {brokerageByDepartment.departments.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {brokerageByDepartment.departments.slice(0, 12).map((dept) => (
+                <div key={dept.name} className="bg-secondary/50 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground truncate mb-1" title={dept.name}>
+                    {dept.name}
+                  </p>
+                  <p className="text-sm font-semibold text-primary">
+                    {formatCurrency(dept.total)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {dept.percentage.toFixed(1)}% • {dept.count} clients
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No brokerage data available</p>
+          )}
+          {brokerageByDepartment.departments.length > 12 && (
+            <p className="text-xs text-muted-foreground mt-2">
+              +{brokerageByDepartment.departments.length - 12} more departments
+            </p>
+          )}
         </div>
       </div>
 
