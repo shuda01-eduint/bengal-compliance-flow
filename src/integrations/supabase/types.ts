@@ -1672,6 +1672,27 @@ export type Database = {
           rm_name: string
         }[]
       }
+      get_balances_for_ceo_dashboard: {
+        Args: { target_date: string }
+        Returns: {
+          as_of_date: string
+          avg_cost: number
+          cq_in_transit: number
+          id: string
+          instrument: string
+          investor_code: string
+          ledger_balance: number
+          matured_balance: number
+          receivable_sale: number
+          rm_email: string
+          rm_id: string
+          rm_name: string
+          saleable: number
+          total_cost: number
+          total_mv: number
+          total_stock: number
+        }[]
+      }
       get_employee_id_for_user: { Args: never; Returns: string }
       get_investor_filter_options: {
         Args: never

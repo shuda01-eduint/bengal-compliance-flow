@@ -55,64 +55,44 @@ const CEODashboardPage = () => {
   const latestDate = availableDates?.[0];
   const previousDate = availableDates?.[1];
 
-  // Fetch balance data for latest date (paginated)
-  const { data: rawBalances, isLoading: balancesLoading } = useQuery({
+  // Fetch balance data for latest date using SECURITY DEFINER function (bypasses RLS for performance)
+  const { data: rawBalances, isLoading: balancesLoading, error: balancesError } = useQuery({
     queryKey: ["ceo-balances", latestDate],
     queryFn: async () => {
       if (!latestDate) return [];
-      const allData: BalanceRawRow[] = [];
-      const batchSize = 1000;
-      let offset = 0;
       
-      while (true) {
-        const { data, error } = await supabase
-          .from("balances_raw")
-          .select("*")
-          .eq("as_of_date", latestDate)
-          .order("id")
-          .range(offset, offset + batchSize - 1);
-        
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        
-        allData.push(...(data as BalanceRawRow[]));
-        if (data.length < batchSize) break;
-        offset += batchSize;
+      const { data, error } = await supabase.rpc("get_balances_for_ceo_dashboard", {
+        target_date: latestDate,
+      });
+      
+      if (error) {
+        console.error(`[CEO Dashboard] Balance query error:`, error);
+        throw error;
       }
       
-      console.log(`[CEO Dashboard] Fetched ${allData.length} balance rows for ${latestDate} (paginated)`);
-      return allData;
+      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} balance rows for ${latestDate} via RPC`);
+      return (data || []) as BalanceRawRow[];
     },
     enabled: !!latestDate,
   });
 
-  // Fetch previous period balance data for comparison (paginated)
+  // Fetch previous period balance data for comparison using SECURITY DEFINER function
   const { data: previousBalances } = useQuery({
     queryKey: ["ceo-balances-prev", previousDate],
     queryFn: async () => {
       if (!previousDate) return [];
-      const allData: BalanceRawRow[] = [];
-      const batchSize = 1000;
-      let offset = 0;
       
-      while (true) {
-        const { data, error } = await supabase
-          .from("balances_raw")
-          .select("*")
-          .eq("as_of_date", previousDate)
-          .order("id")
-          .range(offset, offset + batchSize - 1);
-        
-        if (error) throw error;
-        if (!data || data.length === 0) break;
-        
-        allData.push(...(data as BalanceRawRow[]));
-        if (data.length < batchSize) break;
-        offset += batchSize;
+      const { data, error } = await supabase.rpc("get_balances_for_ceo_dashboard", {
+        target_date: previousDate,
+      });
+      
+      if (error) {
+        console.error(`[CEO Dashboard] Previous balance query error:`, error);
+        throw error;
       }
       
-      console.log(`[CEO Dashboard] Fetched ${allData.length} previous balance rows for ${previousDate} (paginated)`);
-      return allData;
+      console.log(`[CEO Dashboard] Fetched ${data?.length || 0} previous balance rows for ${previousDate} via RPC`);
+      return (data || []) as BalanceRawRow[];
     },
     enabled: !!previousDate,
   });
@@ -627,13 +607,14 @@ const CEODashboardPage = () => {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
         <ExecutiveHealthTile
           title="Active Investors"
-          value={summary.total_clients.toLocaleString()}
+          value={Object.keys(investorAdjustments).length.toLocaleString()}
           icon={Users}
-          weekChange={calcChange(summary.total_clients, previousSummary.total_clients)}
-          monthChange={calcChange(summary.total_clients, previousSummary.total_clients) * 1.5}
-          status={getStatus("active_investors", summary.total_clients, calcChange(summary.total_clients, previousSummary.total_clients), calcChange(summary.total_clients, previousSummary.total_clients) * 1.5)}
+          weekChange={0}
+          monthChange={0}
+          status={getStatus("active_investors", Object.keys(investorAdjustments).length, 0, 0)}
           delay={0}
           breakdown={accountTypeBreakdown}
+          subtitle="Traded recently"
         />
         <ExecutiveHealthTile
           title="Total AUM"
