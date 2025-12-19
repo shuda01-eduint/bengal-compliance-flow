@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImportBalancesRawDialog } from "@/components/admin/ImportBalancesRawDialog";
+import { CopyBalancesDialog } from "@/components/admin/CopyBalancesDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, parseISO } from "date-fns";
@@ -560,7 +561,13 @@ const AdminBalancesPage = () => {
             )}
           </div>
 
-          <ImportBalancesRawDialog onImportComplete={handleImportComplete} />
+          <div className="flex gap-2">
+            <CopyBalancesDialog 
+              availableDates={availableDates || []} 
+              onCopyComplete={handleImportComplete} 
+            />
+            <ImportBalancesRawDialog onImportComplete={handleImportComplete} />
+          </div>
         </div>
 
         {/* RM Preview Banner */}
