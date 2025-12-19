@@ -1497,6 +1497,14 @@ export type Database = {
         }[]
       }
       get_employee_id_for_user: { Args: never; Returns: string }
+      get_investor_filter_options: {
+        Args: never
+        Returns: {
+          account_types: string[]
+          investor_types: string[]
+          statuses: string[]
+        }[]
+      }
       get_trade_file_stats: {
         Args: never
         Returns: {
