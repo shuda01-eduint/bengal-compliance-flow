@@ -21,7 +21,7 @@ interface InsightBullet {
 interface ProfitCommissionObjectProps {
   totalCommission: number;
   monthTarget: number;
-  blendedTakeRate: number;
+  turnover: number;
   netRevenue: number;
   departments: DepartmentPerformance[];
   insights: InsightBullet[];
@@ -30,7 +30,7 @@ interface ProfitCommissionObjectProps {
 export function ProfitCommissionObject({
   totalCommission,
   monthTarget,
-  blendedTakeRate,
+  turnover,
   netRevenue,
   departments,
   insights,
@@ -110,9 +110,9 @@ export function ProfitCommissionObject({
           </div>
 
           <div className="stat-card">
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Take Rate</span>
-            <p className="text-lg font-bold text-accent mt-2">{blendedTakeRate.toFixed(3)}%</p>
-            <p className="text-[10px] text-muted-foreground mt-1">Blended</p>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Turnover</span>
+            <p className="text-lg font-bold text-accent mt-2">{formatCurrency(turnover)}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">Trade Volume</p>
           </div>
         </div>
 
@@ -210,8 +210,8 @@ export function ProfitCommissionObject({
                 <span className="text-xs text-muted-foreground">After rebates</span>
               </div>
               <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
-                <span className="text-xs text-muted-foreground uppercase tracking-wider">Blended Take Rate</span>
-                <p className="text-xl font-bold text-accent mt-1">{blendedTakeRate.toFixed(3)}%</p>
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">Turnover</span>
+                <p className="text-xl font-bold text-accent mt-1">{formatCurrency(turnover)}</p>
               </div>
             </div>
 
