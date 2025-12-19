@@ -1,7 +1,7 @@
 import { MainLayout } from "@/components/layout/MainLayout";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,16 +22,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImportBalancesRawDialog } from "@/components/admin/ImportBalancesRawDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, parseISO, addDays } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  BalanceRawRow,
-  EnrichedBalanceRow,
   Portfolio,
-  InvestorAdjustment,
-  InvestorData,
-  enrichBalanceRow,
-  calculateSummary,
   groupByInvestor,
   groupByInstrument,
   groupByPortfolio,
@@ -39,16 +34,50 @@ import {
   formatCurrency,
   formatNumber,
   formatPercent,
-  InvestorGroupedRow,
-  InstrumentSummary,
-  PortfolioSummary,
-  RMSummary,
+  EnrichedBalanceRow,
 } from "@/lib/balance-utils";
+
+// Type for enriched row from RPC
+interface EnrichedBalanceRPCRow {
+  id: string;
+  as_of_date: string;
+  investor_code: string;
+  instrument: string | null;
+  total_stock: number;
+  saleable: number;
+  avg_cost: number | null;
+  total_cost: number | null;
+  total_mv: number | null;
+  ledger_balance: number | null;
+  matured_balance: number | null;
+  receivable_sale: number | null;
+  cq_in_transit: number | null;
+  rm_id: string | null;
+  rm_name: string | null;
+  rm_email: string | null;
+  unrealized_pnl: number;
+  pnl_pct: number | null;
+  net_available: number;
+  risk_flag: 'OK' | 'Watch' | 'High';
+  adjusted_ledger: number;
+  deposits: number;
+  withdrawals: number;
+  net_sell: number;
+  net_buy: number;
+  gross_buy: number;
+  gross_sell: number;
+  brokerage_amount: number;
+  accrued_interest: number;
+  receivable_payable: number;
+  brokerage_commission_rate: number;
+  interest_rate: number;
+  account_type: string | null;
+}
 
 type SortField = 'investor_code' | 'instrument' | 'total_stock' | 'saleable' | 'avg_cost' | 'total_cost' | 'total_mv' | 'unrealized_pnl' | 'pnl_pct' | 'ledger_balance' | 'adjusted_ledger' | 'deposits' | 'withdrawals' | 'net_sell' | 'net_buy' | 'matured_balance' | 'receivable_sale' | 'cq_in_transit' | 'net_available' | 'risk_flag' | 'accrued_interest' | 'receivable_payable';
 type SortDirection = 'asc' | 'desc';
 
-const ROWS_PER_PAGE = 50;
+const ROW_HEIGHT = 40;
 
 const AdminBalancesPage = () => {
   const queryClient = useQueryClient();
@@ -62,19 +91,17 @@ const AdminBalancesPage = () => {
   const [expandedInvestors, setExpandedInvestors] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>('investor_code');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [currentPage, setCurrentPage] = useState(1);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, isLoading: false });
   const [previewAsRM, setPreviewAsRM] = useState<string>("all");
+  
+  const tableContainerRef = useRef<HTMLDivElement>(null);
 
   // Fetch RMs for preview dropdown using optimized RPC function
   const { data: rmList } = useQuery({
     queryKey: ['rm-list-for-preview'],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_balance_rms');
-      
       if (error) throw error;
-      
       return (data || []).map((d: { rm_email: string; rm_name: string | null }) => ({
         email: d.rm_email,
         name: d.rm_name || d.rm_email,
@@ -87,7 +114,6 @@ const AdminBalancesPage = () => {
     queryKey: ['balances-raw-dates'],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_balance_dates');
-      
       if (error) throw error;
       return (data || []).map((d: { as_of_date: string }) => d.as_of_date);
     },
@@ -100,294 +126,101 @@ const AdminBalancesPage = () => {
     }
   }, [availableDates, selectedDate]);
 
-  // Helper function to fetch balance data for a specific date (used for prefetching)
-  // Uses keyset pagination (no OFFSET) to avoid timeouts on large datasets.
-  const fetchBalanceData = useCallback(async (dateStr: string): Promise<BalanceRawRow[]> => {
-    let allData: BalanceRawRow[] = [];
-    const batchSize = 1000;
-    const maxRetries = 3;
-
-    let lastId: string | null = null;
-
-    while (true) {
-      let lastError: Error | null = null;
-      let data: BalanceRawRow[] | null = null;
-
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          let query = supabase
-            .from('balances_raw')
-            .select('*')
-            .eq('as_of_date', dateStr)
-            .order('id', { ascending: true })
-            .limit(batchSize);
-
-          if (lastId) query = query.gt('id', lastId);
-
-          const result = await query;
-
-          if (result.error) {
-            lastError = new Error(result.error.message);
-            if (attempt < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
-            }
-            continue;
-          }
-
-          data = result.data as BalanceRawRow[];
-          lastError = null;
-          break;
-        } catch (err) {
-          lastError = err instanceof Error ? err : new Error('Unknown error');
-          if (attempt < maxRetries - 1) {
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
-          }
-        }
-      }
-
-      if (lastError) throw lastError;
-      if (!data || data.length === 0) break;
-
-      allData = [...allData, ...data];
-
-      if (data.length < batchSize) break;
-      lastId = data[data.length - 1]?.id ?? null;
-      if (!lastId) break;
-    }
-
-    return allData;
-  }, []);
-
-  // Fetch raw balance data for selected date with retry logic
-  // Uses keyset pagination (no OFFSET) to avoid timeouts on large datasets.
-  const { data: rawBalances, isLoading, error, refetch: refetchBalances } = useQuery({
-    queryKey: ['balances-raw', selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined],
+  // Fetch enriched balance data using optimized RPC - single query does all the work!
+  const { data: enrichedData, isLoading, error, refetch: refetchBalances } = useQuery({
+    queryKey: ['balances-enriched', selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined, previewAsRM],
     queryFn: async () => {
       if (!selectedDate) return [];
-
-      setLoadingProgress({ loaded: 0, isLoading: true });
-
+      
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      let allData: BalanceRawRow[] = [];
-      const batchSize = 1000;
-      const maxRetries = 3;
-
+      const rmEmail = previewAsRM && previewAsRM !== 'all' ? previewAsRM : null;
+      
+      // Fetch all data in batches using keyset pagination
+      let allData: EnrichedBalanceRPCRow[] = [];
       let lastId: string | null = null;
-
+      const batchSize = 5000;
+      
       while (true) {
-        let lastError: Error | null = null;
-        let data: BalanceRawRow[] | null = null;
-
-        // Retry logic for each batch
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-          try {
-            let query = supabase
-              .from('balances_raw')
-              .select('*')
-              .eq('as_of_date', dateStr)
-              .order('id', { ascending: true })
-              .limit(batchSize);
-
-            if (lastId) query = query.gt('id', lastId);
-
-            const result = await query;
-
-            if (result.error) {
-              lastError = new Error(result.error.message);
-              if (attempt < maxRetries - 1) {
-                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
-              }
-              continue;
-            }
-
-            data = result.data as BalanceRawRow[];
-            lastError = null;
-            break;
-          } catch (err) {
-            lastError = err instanceof Error ? err : new Error('Unknown error');
-            if (attempt < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
-            }
-          }
-        }
-
-        if (lastError) {
-          setLoadingProgress({ loaded: allData.length, isLoading: false });
-          throw lastError;
-        }
+        const { data, error } = await supabase.rpc('get_admin_balances_enriched', {
+          p_date: dateStr,
+          p_rm_email: rmEmail,
+          p_limit: batchSize,
+          p_cursor_id: lastId,
+        });
+        
+        if (error) throw error;
         if (!data || data.length === 0) break;
-
-        allData = [...allData, ...data];
-        setLoadingProgress({ loaded: allData.length, isLoading: true });
-
+        
+        allData = [...allData, ...(data as EnrichedBalanceRPCRow[])];
+        
         if (data.length < batchSize) break;
         lastId = data[data.length - 1]?.id ?? null;
         if (!lastId) break;
       }
-
-      setLoadingProgress({ loaded: allData.length, isLoading: false });
-      return allData;
+      
+      // Convert to EnrichedBalanceRow format for compatibility with existing grouping functions
+      return allData.map(row => ({
+        ...row,
+        total_stock: row.total_stock ?? 0,
+        saleable: row.saleable ?? 0,
+        avg_cost: row.avg_cost ?? 0,
+        total_cost: row.total_cost ?? 0,
+        total_mv: row.total_mv ?? 0,
+        ledger_balance: row.ledger_balance ?? 0,
+        matured_balance: row.matured_balance ?? 0,
+        receivable_sale: row.receivable_sale ?? 0,
+        cq_in_transit: row.cq_in_transit ?? 0,
+      })) as EnrichedBalanceRow[];
     },
     enabled: !!selectedDate,
-    retry: 2,
-    retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 10000),
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-    gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 
-  // Prefetch adjacent dates in background after current data loads
-  useEffect(() => {
-    if (!rawBalances || !availableDates || availableDates.length === 0 || !selectedDate) return;
-
-    // Avoid heavy background work when the current date dataset is large
-    if (rawBalances.length > 15000) return;
-
-    const currentDateStr = format(selectedDate, 'yyyy-MM-dd');
-    const currentIndex = availableDates.indexOf(currentDateStr);
-
-    // Prefetch just the nearest previous + next dates (common navigation)
-    const datesToPrefetch: string[] = [];
-    if (currentIndex > 0) datesToPrefetch.push(availableDates[currentIndex - 1]);
-    if (currentIndex < availableDates.length - 1) datesToPrefetch.push(availableDates[currentIndex + 1]);
-
-    const timeouts: number[] = [];
-
-    datesToPrefetch.forEach((dateStr, index) => {
-      const t = window.setTimeout(() => {
-        queryClient.prefetchQuery({
-          queryKey: ['balances-raw', dateStr],
-          queryFn: () => fetchBalanceData(dateStr),
-          staleTime: 5 * 60 * 1000,
-        });
-      }, (index + 1) * 4000); // stagger more gently
-
-      timeouts.push(t);
-    });
-
-    return () => {
-      timeouts.forEach(t => window.clearTimeout(t));
-    };
-  }, [rawBalances, availableDates, selectedDate, queryClient, fetchBalanceData]);
-
-  // Fetch next day's deposits/withdrawals
-  const { data: nextDayTransactions } = useQuery({
-    queryKey: ['next-day-transactions', selectedDate?.toISOString()],
+  // Fetch summary using optimized RPC - much faster than client-side aggregation
+  const { data: summary } = useQuery({
+    queryKey: ['balances-summary', selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined, previewAsRM],
     queryFn: async () => {
-      if (!selectedDate) return [];
-      const nextDay = addDays(selectedDate, 1);
-      const nextDayStr = format(nextDay, 'yyyy-MM-dd');
+      if (!selectedDate) return null;
       
-      const { data, error } = await supabase
-        .from('deposits_withdrawals')
-        .select('investor_code, transaction_type, amount')
-        .eq('transaction_date', nextDayStr);
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const rmEmail = previewAsRM && previewAsRM !== 'all' ? previewAsRM : null;
+      
+      const { data, error } = await supabase.rpc('get_admin_balances_summary', {
+        p_date: dateStr,
+        p_rm_email: rmEmail,
+      });
       
       if (error) throw error;
-      return data || [];
+      
+      const row = data?.[0];
+      return row ? {
+        total_clients: Number(row.total_clients) || 0,
+        total_mv_sum: Number(row.total_mv_sum) || 0,
+        total_cost_sum: Number(row.total_cost_sum) || 0,
+        unrealized_pnl_sum: Number(row.unrealized_pnl_sum) || 0,
+        negative_ledger_clients_count: Number(row.negative_ledger_count) || 0,
+        receivable_sum: Number(row.receivable_sum) || 0,
+        cq_sum: Number(row.cq_sum) || 0,
+        total_accrued_interest: Number(row.total_accrued_interest) || 0,
+        total_margin_loan: Number(row.total_margin_loan) || 0,
+        total_brokerage: Number(row.total_brokerage) || 0,
+      } : {
+        total_clients: 0,
+        total_mv_sum: 0,
+        total_cost_sum: 0,
+        unrealized_pnl_sum: 0,
+        negative_ledger_clients_count: 0,
+        receivable_sum: 0,
+        cq_sum: 0,
+        total_accrued_interest: 0,
+        total_margin_loan: 0,
+        total_brokerage: 0,
+      };
     },
     enabled: !!selectedDate,
+    staleTime: 5 * 60 * 1000,
   });
-
-  // Fetch securities for category lookup (DSE settlement rules)
-  const { data: securities } = useQuery({
-    queryKey: ['securities-categories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('securities')
-        .select('trading_code, category');
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
-  // Create category lookup map
-  const categoryMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    securities?.forEach(sec => {
-      if (sec.trading_code) {
-        map[sec.trading_code.toUpperCase()] = sec.category?.toUpperCase() || '';
-      }
-    });
-    return map;
-  }, [securities]);
-
-  // Fetch latest trade date from trade_history
-  const { data: latestTradeDate } = useQuery({
-    queryKey: ['latest-trade-date'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('trade_history')
-        .select('trade_date')
-        .not('trade_date', 'is', null)
-        .order('trade_date', { ascending: false })
-        .limit(1);
-      
-      if (error) throw error;
-      return data?.[0]?.trade_date || null;
-    },
-  });
-
-  // DSE Settlement Rules: Use latest trade date for calculations
-  // Fetch all trades from the latest trade date
-  const { data: maturedTrades, isLoading: tradesLoading } = useQuery({
-    queryKey: ['matured-trades', latestTradeDate],
-    queryFn: async () => {
-      if (!latestTradeDate) return [];
-      
-      console.log('Fetching trades for latest trade date:', latestTradeDate);
-      
-      // Fetch all trades from the latest trade date
-      const { data, error } = await supabase
-        .from('trade_history')
-        .select('client_code, side, value, security_code, trade_date')
-        .eq('trade_date', latestTradeDate);
-      
-      if (error) throw error;
-      console.log('Trades found for latest date:', data?.length || 0);
-      return data || [];
-    },
-    enabled: !!latestTradeDate,
-  });
-
-  // Calculate adjustments per investor from next day's data and latest trades
-  const investorAdjustments = useMemo(() => {
-    const adjustments: Record<string, InvestorAdjustment> = {};
-    
-    // Process transactions (deposits/withdrawals)
-    nextDayTransactions?.forEach(tx => {
-      if (!adjustments[tx.investor_code]) {
-        adjustments[tx.investor_code] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0, gross_buy: 0, gross_sell: 0 };
-      }
-      if (tx.transaction_type === 'Deposit') {
-        adjustments[tx.investor_code].deposits += Number(tx.amount) || 0;
-      } else if (tx.transaction_type === 'Withdrawal') {
-        adjustments[tx.investor_code].withdrawals += Number(tx.amount) || 0;
-      }
-    });
-    
-    // Process all trades from the latest trade date
-    maturedTrades?.forEach(trade => {
-      const clientCode = trade.client_code;
-      if (!clientCode) return;
-      
-      if (!adjustments[clientCode]) {
-        adjustments[clientCode] = { deposits: 0, withdrawals: 0, net_sell: 0, net_buy: 0, gross_buy: 0, gross_sell: 0 };
-      }
-      
-      const value = Number(trade.value) || 0;
-      if (trade.side?.toUpperCase() === 'SELL' || trade.side?.toUpperCase() === 'S') {
-        adjustments[clientCode].net_sell += value;
-        adjustments[clientCode].net_buy -= value;
-        adjustments[clientCode].gross_sell += value;
-      } else if (trade.side?.toUpperCase() === 'BUY' || trade.side?.toUpperCase() === 'B') {
-        adjustments[clientCode].net_sell -= value;
-        adjustments[clientCode].net_buy += value;
-        adjustments[clientCode].gross_buy += value;
-      }
-    });
-    
-    return adjustments;
-  }, [nextDayTransactions, maturedTrades]);
 
   // Fetch portfolios for grouping
   const { data: portfolios } = useQuery({
@@ -396,22 +229,8 @@ const AdminBalancesPage = () => {
       const { data, error } = await supabase
         .from('portfolios')
         .select('id, name, description, investor_code');
-      
       if (error) throw error;
       return data as Portfolio[];
-    },
-  });
-
-  // Fetch investor data for accrued interest and brokerage commission calculations
-  const { data: investorData } = useQuery({
-    queryKey: ['investor-data-for-balance'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('investors')
-        .select('investor_code, interest_rate, brokerage_commission, account_type');
-      
-      if (error) throw error;
-      return data || [];
     },
   });
 
@@ -422,7 +241,6 @@ const AdminBalancesPage = () => {
       const { data, error } = await supabase
         .from('employees')
         .select('email, department');
-      
       if (error) throw error;
       return data || [];
     },
@@ -439,46 +257,14 @@ const AdminBalancesPage = () => {
     return map;
   }, [employeeDepartments]);
 
-  // Create investor data map for quick lookup
-  const investorDataMap = useMemo(() => {
-    const map: Record<string, InvestorData> = {};
-    investorData?.forEach(inv => {
-      map[inv.investor_code] = {
-        interest_rate: Number(inv.interest_rate) || 0,
-        brokerage_commission: Number(inv.brokerage_commission) || 0,
-        account_type: inv.account_type,
-      };
-    });
-    return map;
-  }, [investorData]);
-
-  // Enrich data with computed fields including next-day adjustments
-  const enrichedData = useMemo(() => {
-    if (!rawBalances) return [];
-    let data = rawBalances.map(row => enrichBalanceRow(row, investorAdjustments, investorDataMap));
-    
-    // Apply RM preview filter
-    if (previewAsRM && previewAsRM !== "all") {
-      data = data.filter(row => row.rm_email?.toLowerCase() === previewAsRM.toLowerCase());
-    }
-    
-    return data;
-  }, [rawBalances, investorAdjustments, investorDataMap, previewAsRM]);
-
-  // Calculate summary (now reflects RM preview filter)
-  const summary = useMemo(() => {
-    return calculateSummary(enrichedData);
-  }, [enrichedData]);
-
   // Calculate brokerage commission by department
   const brokerageByDepartment = useMemo(() => {
     const deptMap: Record<string, { total: number; count: number }> = {};
     let totalBrokerage = 0;
 
-    // Group by investor first to avoid double counting (since each investor can have multiple holdings)
     const investorBrokerage: Record<string, { brokerage: number; rmEmail: string | null }> = {};
     
-    enrichedData.forEach(row => {
+    enrichedData?.forEach(row => {
       if (!investorBrokerage[row.investor_code]) {
         investorBrokerage[row.investor_code] = {
           brokerage: row.brokerage_amount || 0,
@@ -487,7 +273,6 @@ const AdminBalancesPage = () => {
       }
     });
 
-    // Now aggregate by department
     Object.values(investorBrokerage).forEach(({ brokerage, rmEmail }) => {
       const department = rmEmail ? emailToDepartmentMap[rmEmail.toLowerCase()] : null;
       const deptName = department || 'Unassigned';
@@ -500,7 +285,6 @@ const AdminBalancesPage = () => {
       totalBrokerage += brokerage;
     });
 
-    // Convert to sorted array
     const departments = Object.entries(deptMap)
       .map(([name, data]) => ({
         name,
@@ -515,23 +299,15 @@ const AdminBalancesPage = () => {
 
   // Apply filters
   const filteredData = useMemo(() => {
+    if (!enrichedData) return [];
     const query = searchQuery.trim().toLowerCase();
 
     return enrichedData.filter(row => {
-      // Search filter
-      // - investor_code: exact match only
-      // - instrument: partial match
       const matchesSearch = query === '' ||
         row.investor_code.toLowerCase() === query ||
         (row.instrument?.toLowerCase().includes(query) ?? false);
-
-      // Risk filter
       const matchesRisk = riskFilter === 'all' || row.risk_flag === riskFilter;
-
-      // Negative ledger filter (uses adjusted_ledger now)
       const matchesNegative = !onlyNegativeLedger || row.adjusted_ledger < 0;
-
-      // Receivables filter
       const matchesReceivables = !onlyReceivables || (row.receivable_sale + row.cq_in_transit) > 0;
 
       return matchesSearch && matchesRisk && matchesNegative && matchesReceivables;
@@ -561,13 +337,13 @@ const AdminBalancesPage = () => {
     });
   }, [filteredData, sortField, sortDirection]);
 
-  // Paginate
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * ROWS_PER_PAGE;
-    return sortedData.slice(start, start + ROWS_PER_PAGE);
-  }, [sortedData, currentPage]);
-
-  const totalPages = Math.ceil(sortedData.length / ROWS_PER_PAGE);
+  // Virtual scrolling for the main table
+  const rowVirtualizer = useVirtualizer({
+    count: sortedData.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 20,
+  });
 
   // Group by investor
   const investorGroups = useMemo(() => {
@@ -576,18 +352,18 @@ const AdminBalancesPage = () => {
 
   // Group by instrument for second tab
   const instrumentSummary = useMemo(() => {
-    return groupByInstrument(enrichedData);
+    return groupByInstrument(enrichedData || []);
   }, [enrichedData]);
 
   // Group by portfolio for third tab
   const portfolioSummary = useMemo(() => {
-    if (!portfolios) return [];
+    if (!portfolios || !enrichedData) return [];
     return groupByPortfolio(enrichedData, portfolios);
   }, [enrichedData, portfolios]);
 
   // Group by RM for fourth tab
   const rmSummary = useMemo(() => {
-    if (!portfolios) return [];
+    if (!portfolios || !enrichedData) return [];
     return groupByRM(enrichedData, portfolios);
   }, [enrichedData, portfolios]);
 
@@ -600,12 +376,9 @@ const AdminBalancesPage = () => {
 
     return portfolioSummary.filter((p) => {
       if (isNumericQuery) {
-        // Numeric searches should match codes exactly (prevents 3008 matching 13008 / OBO3008)
         if (p.portfolio_name.toLowerCase() === query) return true;
         return p.investor_codes.some((code) => code.toLowerCase() === query);
       }
-
-      // Text searches: partial match on name/description, exact match on codes
       if (p.portfolio_name.toLowerCase().includes(query)) return true;
       if (p.description?.toLowerCase().includes(query)) return true;
       if (p.investor_codes.some((code) => code.toLowerCase() === query)) return true;
@@ -617,7 +390,6 @@ const AdminBalancesPage = () => {
     return [...filteredPortfolioSummary].sort((a, b) => b.total_mv - a.total_mv);
   }, [filteredPortfolioSummary]);
 
-  // Filter RM summary
   const filteredRMSummary = useMemo(() => {
     const queryRaw = rmSearchQuery.trim();
     if (!queryRaw) return rmSummary;
@@ -644,7 +416,6 @@ const AdminBalancesPage = () => {
       setSortField(field);
       setSortDirection('asc');
     }
-    setCurrentPage(1);
   };
 
   const toggleInvestorExpand = (code: string) => {
@@ -660,7 +431,8 @@ const AdminBalancesPage = () => {
   };
 
   const handleImportComplete = () => {
-    queryClient.invalidateQueries({ queryKey: ['balances-raw'] });
+    queryClient.invalidateQueries({ queryKey: ['balances-enriched'] });
+    queryClient.invalidateQueries({ queryKey: ['balances-summary'] });
     queryClient.invalidateQueries({ queryKey: ['balances-raw-dates'] });
   };
 
@@ -689,6 +461,18 @@ const AdminBalancesPage = () => {
     </TableHead>
   );
 
+  const summaryData = summary || {
+    total_clients: 0,
+    total_mv_sum: 0,
+    total_cost_sum: 0,
+    unrealized_pnl_sum: 0,
+    negative_ledger_clients_count: 0,
+    receivable_sum: 0,
+    cq_sum: 0,
+    total_accrued_interest: 0,
+    total_margin_loan: 0,
+  };
+
   if (error) {
     return (
       <MainLayout title="Admin Balances" subtitle="Balance data analysis">
@@ -699,7 +483,6 @@ const AdminBalancesPage = () => {
           <Button onClick={() => refetchBalances()} variant="outline">
             Retry Loading
           </Button>
-          <p className="text-sm text-muted-foreground">{error.message}</p>
         </div>
       </MainLayout>
     );
@@ -774,7 +557,7 @@ const AdminBalancesPage = () => {
         </div>
 
         {/* RM Preview Banner */}
-        {previewAsRM && (
+        {previewAsRM && previewAsRM !== "all" && (
           <div className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2">
             <Eye className="h-4 w-4 text-primary" />
             <span className="text-sm">
@@ -791,7 +574,7 @@ const AdminBalancesPage = () => {
               <Users className="h-4 w-4 text-muted-foreground" />
               <span className="text-xs text-muted-foreground">Investors</span>
             </div>
-            <p className="text-xl font-semibold">{summary.total_clients}</p>
+            <p className="text-xl font-semibold">{summaryData.total_clients}</p>
           </div>
 
           <div className="glass-card rounded-xl p-4">
@@ -799,7 +582,7 @@ const AdminBalancesPage = () => {
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
               <span className="text-xs text-muted-foreground">Market Value</span>
             </div>
-            <p className="text-xl font-semibold">{formatCurrency(summary.total_mv_sum)}</p>
+            <p className="text-xl font-semibold">{formatCurrency(summaryData.total_mv_sum)}</p>
           </div>
 
           <div className="glass-card rounded-xl p-4">
@@ -807,20 +590,20 @@ const AdminBalancesPage = () => {
               <Wallet className="h-4 w-4 text-muted-foreground" />
               <span className="text-xs text-muted-foreground">Total Cost</span>
             </div>
-            <p className="text-xl font-semibold">{formatCurrency(summary.total_cost_sum)}</p>
+            <p className="text-xl font-semibold">{formatCurrency(summaryData.total_cost_sum)}</p>
           </div>
 
           <div className="glass-card rounded-xl p-4">
             <div className="flex items-center gap-2 mb-1">
-              {summary.unrealized_pnl_sum >= 0 ? (
+              {summaryData.unrealized_pnl_sum >= 0 ? (
                 <TrendingUp className="h-4 w-4 text-success" />
               ) : (
                 <TrendingDown className="h-4 w-4 text-destructive" />
               )}
               <span className="text-xs text-muted-foreground">Unrealized P&L</span>
             </div>
-            <p className={cn("text-xl font-semibold", summary.unrealized_pnl_sum >= 0 ? "text-success" : "text-destructive")}>
-              {formatCurrency(summary.unrealized_pnl_sum)}
+            <p className={cn("text-xl font-semibold", summaryData.unrealized_pnl_sum >= 0 ? "text-success" : "text-destructive")}>
+              {formatCurrency(summaryData.unrealized_pnl_sum)}
             </p>
           </div>
 
@@ -829,7 +612,7 @@ const AdminBalancesPage = () => {
               <AlertCircle className="h-4 w-4 text-destructive" />
               <span className="text-xs text-muted-foreground">Negative Ledger</span>
             </div>
-            <p className="text-xl font-semibold text-destructive">{summary.negative_ledger_clients_count}</p>
+            <p className="text-xl font-semibold text-destructive">{summaryData.negative_ledger_clients_count}</p>
           </div>
 
           <div className="glass-card rounded-xl p-4">
@@ -838,7 +621,7 @@ const AdminBalancesPage = () => {
               <span className="text-xs text-muted-foreground">Receivables</span>
             </div>
             <p className="text-xl font-semibold text-amber-400">
-              {formatCurrency(summary.receivable_sum + summary.cq_sum)}
+              {formatCurrency(summaryData.receivable_sum + summaryData.cq_sum)}
             </p>
           </div>
 
@@ -848,7 +631,7 @@ const AdminBalancesPage = () => {
               <span className="text-xs text-muted-foreground">Accrued Interest</span>
             </div>
             <p className="text-xl font-semibold text-orange-400">
-              {formatCurrency(summary.total_accrued_interest)}
+              {formatCurrency(summaryData.total_accrued_interest)}
             </p>
           </div>
 
@@ -858,7 +641,7 @@ const AdminBalancesPage = () => {
               <span className="text-xs text-muted-foreground">Margin Loan</span>
             </div>
             <p className="text-xl font-semibold text-red-400">
-              {formatCurrency(summary.total_margin_loan)}
+              {formatCurrency(summaryData.total_margin_loan)}
             </p>
           </div>
         </div>
@@ -901,7 +684,7 @@ const AdminBalancesPage = () => {
 
       <Tabs defaultValue="all" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="all">All Holdings</TabsTrigger>
+          <TabsTrigger value="all">All Holdings ({sortedData.length.toLocaleString()})</TabsTrigger>
           <TabsTrigger value="by-instrument">By Instrument</TabsTrigger>
           <TabsTrigger value="by-portfolio">By Portfolio</TabsTrigger>
           <TabsTrigger value="by-rm">By RM</TabsTrigger>
@@ -915,12 +698,12 @@ const AdminBalancesPage = () => {
               <Input
                 placeholder="Search investor code or instrument..."
                 value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 bg-secondary border-border"
               />
             </div>
 
-            <Select value={riskFilter} onValueChange={(v) => { setRiskFilter(v); setCurrentPage(1); }}>
+            <Select value={riskFilter} onValueChange={setRiskFilter}>
               <SelectTrigger className="w-[140px] bg-secondary border-border">
                 <SelectValue placeholder="Risk" />
               </SelectTrigger>
@@ -936,7 +719,7 @@ const AdminBalancesPage = () => {
               <Switch 
                 id="negative" 
                 checked={onlyNegativeLedger} 
-                onCheckedChange={(v) => { setOnlyNegativeLedger(v); setCurrentPage(1); }}
+                onCheckedChange={setOnlyNegativeLedger}
               />
               <Label htmlFor="negative" className="text-sm cursor-pointer">Negative ledger</Label>
             </div>
@@ -945,7 +728,7 @@ const AdminBalancesPage = () => {
               <Switch 
                 id="receivables" 
                 checked={onlyReceivables} 
-                onCheckedChange={(v) => { setOnlyReceivables(v); setCurrentPage(1); }}
+                onCheckedChange={setOnlyReceivables}
               />
               <Label htmlFor="receivables" className="text-sm cursor-pointer">Receivables &gt; 0</Label>
             </div>
@@ -965,13 +748,7 @@ const AdminBalancesPage = () => {
             {isLoading ? (
               <div className="p-12 text-center">
                 <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-                <p className="text-muted-foreground mb-3">Loading balance data...</p>
-                <div className="max-w-xs mx-auto space-y-2">
-                  <Progress value={loadingProgress.loaded > 0 ? Math.min((loadingProgress.loaded / 25000) * 100, 95) : 5} className="h-2" />
-                  <p className="text-sm font-medium text-foreground">
-                    {loadingProgress.loaded.toLocaleString()} records loaded
-                  </p>
-                </div>
+                <p className="text-muted-foreground">Loading balance data...</p>
               </div>
             ) : sortedData.length === 0 ? (
               <div className="p-12 text-center">
@@ -1086,38 +863,39 @@ const AdminBalancesPage = () => {
                 </Table>
               </div>
             ) : (
-              // Flat view with all columns
-              <>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
-                        <SortableHeader field="investor_code">Investor Code</SortableHeader>
-                        <SortableHeader field="instrument">Instrument</SortableHeader>
-                        <SortableHeader field="total_stock" className="text-right">Total Qty</SortableHeader>
-                        <SortableHeader field="saleable" className="text-right">Saleable</SortableHeader>
-                        <SortableHeader field="avg_cost" className="text-right">Avg Cost</SortableHeader>
-                        <SortableHeader field="total_cost" className="text-right">Total Cost</SortableHeader>
-                        <SortableHeader field="total_mv" className="text-right">Total M.V.</SortableHeader>
-                        <SortableHeader field="unrealized_pnl" className="text-right">P&L</SortableHeader>
-                        <SortableHeader field="pnl_pct" className="text-right">P&L %</SortableHeader>
-                        <SortableHeader field="ledger_balance" className="text-right">Ledger</SortableHeader>
-                        <SortableHeader field="deposits" className="text-right">Deposits</SortableHeader>
-                        <SortableHeader field="withdrawals" className="text-right">Withdraw</SortableHeader>
-                        <SortableHeader field="net_buy" className="text-right">Net Buy</SortableHeader>
-                        <SortableHeader field="net_sell" className="text-right">Net Sell</SortableHeader>
-                        <SortableHeader field="adjusted_ledger" className="text-right">Adj. Ledger</SortableHeader>
-                        <SortableHeader field="accrued_interest" className="text-right">Accrued Int.</SortableHeader>
-                        <SortableHeader field="receivable_payable" className="text-right">Recv/Pay</SortableHeader>
-                        <SortableHeader field="matured_balance" className="text-right">Matured</SortableHeader>
-                        <SortableHeader field="receivable_sale" className="text-right">Receivable</SortableHeader>
-                        <SortableHeader field="cq_in_transit" className="text-right">CQ</SortableHeader>
-                        <SortableHeader field="net_available" className="text-right">Net Avail.</SortableHeader>
-                        <SortableHeader field="risk_flag">Risk</SortableHeader>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {paginatedData.map((row) => (
+              // Flat view with virtual scrolling
+              <div 
+                ref={tableContainerRef}
+                className="overflow-auto max-h-[600px]"
+              >
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-secondary">
+                    <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
+                      <SortableHeader field="investor_code">Investor Code</SortableHeader>
+                      <SortableHeader field="instrument">Instrument</SortableHeader>
+                      <SortableHeader field="total_stock" className="text-right">Total Qty</SortableHeader>
+                      <SortableHeader field="saleable" className="text-right">Saleable</SortableHeader>
+                      <SortableHeader field="avg_cost" className="text-right">Avg Cost</SortableHeader>
+                      <SortableHeader field="total_cost" className="text-right">Total Cost</SortableHeader>
+                      <SortableHeader field="total_mv" className="text-right">Total M.V.</SortableHeader>
+                      <SortableHeader field="unrealized_pnl" className="text-right">P&L</SortableHeader>
+                      <SortableHeader field="pnl_pct" className="text-right">P&L %</SortableHeader>
+                      <SortableHeader field="ledger_balance" className="text-right">Ledger</SortableHeader>
+                      <SortableHeader field="deposits" className="text-right">Deposits</SortableHeader>
+                      <SortableHeader field="withdrawals" className="text-right">Withdraw</SortableHeader>
+                      <SortableHeader field="net_buy" className="text-right">Net Buy</SortableHeader>
+                      <SortableHeader field="net_sell" className="text-right">Net Sell</SortableHeader>
+                      <SortableHeader field="adjusted_ledger" className="text-right">Adj. Ledger</SortableHeader>
+                      <SortableHeader field="accrued_interest" className="text-right">Accrued Int.</SortableHeader>
+                      <SortableHeader field="receivable_payable" className="text-right">Recv/Pay</SortableHeader>
+                      <SortableHeader field="risk_flag">Risk</SortableHeader>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <tr style={{ height: `${rowVirtualizer.getVirtualItems()[0]?.start ?? 0}px` }} />
+                    {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const row = sortedData[virtualRow.index];
+                      return (
                         <TableRow 
                           key={row.id} 
                           className={cn(
@@ -1125,6 +903,7 @@ const AdminBalancesPage = () => {
                             row.risk_flag === 'High' && "bg-destructive/10 hover:bg-destructive/15",
                             row.risk_flag === 'Watch' && "bg-amber-500/10 hover:bg-amber-500/15"
                           )}
+                          style={{ height: `${ROW_HEIGHT}px` }}
                         >
                           <TableCell className="font-medium">{row.investor_code}</TableCell>
                           <TableCell>{row.instrument || '—'}</TableCell>
@@ -1163,55 +942,14 @@ const AdminBalancesPage = () => {
                           <TableCell className={cn("text-right", row.receivable_payable >= 0 ? "text-success" : "text-destructive")}>
                             {formatNumber(row.receivable_payable)}
                           </TableCell>
-                          <TableCell className="text-right">{formatNumber(row.matured_balance)}</TableCell>
-                          <TableCell className="text-right">
-                            {row.receivable_sale > 0 ? (
-                              <Badge className="bg-amber-500/20 text-amber-400">{formatNumber(row.receivable_sale)}</Badge>
-                            ) : formatNumber(row.receivable_sale)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {row.cq_in_transit > 0 ? (
-                              <Badge className="bg-amber-500/20 text-amber-400">{formatNumber(row.cq_in_transit)}</Badge>
-                            ) : formatNumber(row.cq_in_transit)}
-                          </TableCell>
-                          <TableCell className="text-right">{formatNumber(row.net_available)}</TableCell>
                           <TableCell>{getRiskBadge(row.risk_flag)}</TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                {/* Pagination */}
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between p-4 border-t border-border">
-                    <p className="text-sm text-muted-foreground">
-                      Showing {((currentPage - 1) * ROWS_PER_PAGE) + 1} to {Math.min(currentPage * ROWS_PER_PAGE, sortedData.length)} of {sortedData.length} rows
-                    </p>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                        disabled={currentPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <span className="flex items-center px-3 text-sm">
-                        Page {currentPage} of {totalPages}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        disabled={currentPage === totalPages}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </>
+                      );
+                    })}
+                    <tr style={{ height: `${rowVirtualizer.getTotalSize() - (rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end ?? 0)}px` }} />
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </div>
         </TabsContent>
@@ -1232,10 +970,8 @@ const AdminBalancesPage = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {instrumentSummary
-                    .sort((a, b) => b.total_mv - a.total_mv)
-                    .map((inst) => (
-                    <TableRow key={inst.instrument} className="border-border hover:bg-secondary/30">
+                  {instrumentSummary.map((inst) => (
+                    <TableRow key={inst.instrument} className="border-border">
                       <TableCell className="font-medium">{inst.instrument}</TableCell>
                       <TableCell className="text-right">{inst.total_qty.toLocaleString()}</TableCell>
                       <TableCell className="text-right">{formatNumber(inst.total_cost)}</TableCell>
@@ -1246,9 +982,7 @@ const AdminBalancesPage = () => {
                       <TableCell className={cn("text-right", (inst.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
                         {formatPercent(inst.pnl_pct)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant="secondary">{inst.investor_count}</Badge>
-                      </TableCell>
+                      <TableCell className="text-right">{inst.investor_count}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1258,20 +992,16 @@ const AdminBalancesPage = () => {
         </TabsContent>
 
         <TabsContent value="by-portfolio" className="space-y-4">
-          {/* Search filter for portfolios */}
-          <div className="flex items-center gap-4 p-4 glass-card rounded-xl">
-            <div className="relative flex-1 max-w-md">
+          <div className="flex flex-wrap items-center gap-4 p-4 glass-card rounded-xl">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search portfolio name, description, or investor code (exact)..."
+                placeholder="Search portfolio name or investor code..."
                 value={portfolioSearchQuery}
                 onChange={(e) => setPortfolioSearchQuery(e.target.value)}
                 className="pl-10 bg-secondary border-border"
               />
             </div>
-            <span className="text-sm text-muted-foreground">
-              {sortedPortfolioRows.length} portfolios
-            </span>
           </div>
 
           <div className="glass-card rounded-xl overflow-hidden">
@@ -1282,65 +1012,49 @@ const AdminBalancesPage = () => {
                     <TableHead className="text-muted-foreground">Portfolio</TableHead>
                     <TableHead className="text-muted-foreground">Description</TableHead>
                     <TableHead className="text-muted-foreground text-right">Investors</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Total Qty</TableHead>
                     <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
                     <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
                     <TableHead className="text-muted-foreground text-right">Unrealized P&L</TableHead>
                     <TableHead className="text-muted-foreground text-right">P&L %</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Negative Ledger</TableHead>
                     <TableHead className="text-muted-foreground">Risk</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedPortfolioRows.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
-                        No portfolios found with balance data
+                  {sortedPortfolioRows.map((port) => (
+                    <TableRow 
+                      key={port.portfolio_id} 
+                      className={cn(
+                        "border-border",
+                        port.high_risk_count > 0 && "bg-destructive/10",
+                        port.high_risk_count === 0 && port.watch_risk_count > 0 && "bg-amber-500/10"
+                      )}
+                    >
+                      <TableCell className="font-medium">{port.portfolio_name}</TableCell>
+                      <TableCell className="text-muted-foreground">{port.description || '—'}</TableCell>
+                      <TableCell className="text-right">{port.investor_count}</TableCell>
+                      <TableCell className="text-right">{formatNumber(port.total_cost)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(port.total_mv)}</TableCell>
+                      <TableCell className={cn("text-right", port.unrealized_pnl >= 0 ? "text-success" : "text-destructive")}>
+                        {formatNumber(port.unrealized_pnl)}
+                      </TableCell>
+                      <TableCell className={cn("text-right", (port.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
+                        {formatPercent(port.pnl_pct)}
+                      </TableCell>
+                      <TableCell className={cn("text-right", port.negative_ledger_count > 0 && "text-destructive")}>
+                        {port.negative_ledger_count}
+                      </TableCell>
+                      <TableCell>
+                        {port.high_risk_count > 0 ? (
+                          <Badge variant="destructive">{port.high_risk_count} High</Badge>
+                        ) : port.watch_risk_count > 0 ? (
+                          <Badge className="bg-amber-500/20 text-amber-400">{port.watch_risk_count} Watch</Badge>
+                        ) : (
+                          <Badge variant="secondary">OK</Badge>
+                        )}
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    sortedPortfolioRows.map((portfolio) => (
-                      <TableRow
-                        key={portfolio.portfolio_id}
-                        className={cn(
-                          "border-border hover:bg-secondary/30",
-                          portfolio.risk_flag === 'High' && "bg-destructive/10",
-                          portfolio.risk_flag === 'Watch' && "bg-amber-500/10"
-                        )}
-                      >
-                        <TableCell className="font-medium">{portfolio.portfolio_name}</TableCell>
-                        <TableCell className="text-muted-foreground max-w-[200px] truncate">
-                          {portfolio.description || '—'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant="secondary">{portfolio.investor_count}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">{portfolio.total_qty.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">{formatNumber(portfolio.total_cost)}</TableCell>
-                        <TableCell className="text-right">{formatNumber(portfolio.total_mv)}</TableCell>
-                        <TableCell
-                          className={cn(
-                            "text-right",
-                            portfolio.unrealized_pnl >= 0 ? "text-success" : "text-destructive"
-                          )}
-                        >
-                          {formatNumber(portfolio.unrealized_pnl)}
-                        </TableCell>
-                        <TableCell
-                          className={cn(
-                            "text-right",
-                            (portfolio.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive"
-                          )}
-                        >
-                          {formatPercent(portfolio.pnl_pct)}
-                        </TableCell>
-                        <TableCell className={cn("text-right", portfolio.ledger_balance < 0 && "text-destructive")}>
-                          {formatNumber(portfolio.ledger_balance)}
-                        </TableCell>
-                        <TableCell>{getRiskBadge(portfolio.risk_flag)}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
+                  ))}
                 </TableBody>
               </Table>
             </div>
@@ -1348,20 +1062,16 @@ const AdminBalancesPage = () => {
         </TabsContent>
 
         <TabsContent value="by-rm" className="space-y-4">
-          {/* Search filter for RMs */}
-          <div className="flex items-center gap-4 p-4 glass-card rounded-xl">
-            <div className="relative flex-1 max-w-md">
+          <div className="flex flex-wrap items-center gap-4 p-4 glass-card rounded-xl">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search RM name, ID, investor code, or portfolio..."
+                placeholder="Search RM name, ID, or investor code..."
                 value={rmSearchQuery}
                 onChange={(e) => setRMSearchQuery(e.target.value)}
                 className="pl-10 bg-secondary border-border"
               />
             </div>
-            <span className="text-sm text-muted-foreground">
-              {sortedRMRows.length} RMs
-            </span>
           </div>
 
           <div className="glass-card rounded-xl overflow-hidden">
@@ -1369,70 +1079,52 @@ const AdminBalancesPage = () => {
               <Table>
                 <TableHeader>
                   <TableRow className="border-border bg-secondary/50 hover:bg-secondary/50">
-                    <TableHead className="text-muted-foreground">RM ID</TableHead>
-                    <TableHead className="text-muted-foreground">RM Name</TableHead>
+                    <TableHead className="text-muted-foreground">RM</TableHead>
+                    <TableHead className="text-muted-foreground">Name</TableHead>
                     <TableHead className="text-muted-foreground text-right">Investors</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Portfolios</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Total Qty</TableHead>
                     <TableHead className="text-muted-foreground text-right">Total Cost</TableHead>
                     <TableHead className="text-muted-foreground text-right">Market Value</TableHead>
                     <TableHead className="text-muted-foreground text-right">Unrealized P&L</TableHead>
                     <TableHead className="text-muted-foreground text-right">P&L %</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Ledger Balance</TableHead>
+                    <TableHead className="text-muted-foreground text-right">Negative Ledger</TableHead>
                     <TableHead className="text-muted-foreground">Risk</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedRMRows.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
-                        No RM data found
+                  {sortedRMRows.map((rm) => (
+                    <TableRow 
+                      key={rm.rm_id} 
+                      className={cn(
+                        "border-border",
+                        rm.high_risk_count > 0 && "bg-destructive/10",
+                        rm.high_risk_count === 0 && rm.watch_risk_count > 0 && "bg-amber-500/10"
+                      )}
+                    >
+                      <TableCell className="font-medium">{rm.rm_id}</TableCell>
+                      <TableCell className="text-muted-foreground">{rm.rm_name || '—'}</TableCell>
+                      <TableCell className="text-right">{rm.investor_count}</TableCell>
+                      <TableCell className="text-right">{formatNumber(rm.total_cost)}</TableCell>
+                      <TableCell className="text-right">{formatNumber(rm.total_mv)}</TableCell>
+                      <TableCell className={cn("text-right", rm.unrealized_pnl >= 0 ? "text-success" : "text-destructive")}>
+                        {formatNumber(rm.unrealized_pnl)}
+                      </TableCell>
+                      <TableCell className={cn("text-right", (rm.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive")}>
+                        {formatPercent(rm.pnl_pct)}
+                      </TableCell>
+                      <TableCell className={cn("text-right", rm.negative_ledger_count > 0 && "text-destructive")}>
+                        {rm.negative_ledger_count}
+                      </TableCell>
+                      <TableCell>
+                        {rm.high_risk_count > 0 ? (
+                          <Badge variant="destructive">{rm.high_risk_count} High</Badge>
+                        ) : rm.watch_risk_count > 0 ? (
+                          <Badge className="bg-amber-500/20 text-amber-400">{rm.watch_risk_count} Watch</Badge>
+                        ) : (
+                          <Badge variant="secondary">OK</Badge>
+                        )}
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    sortedRMRows.map((rm) => (
-                      <TableRow
-                        key={rm.rm_id}
-                        className={cn(
-                          "border-border hover:bg-secondary/30",
-                          rm.risk_flag === 'High' && "bg-destructive/10",
-                          rm.risk_flag === 'Watch' && "bg-amber-500/10"
-                        )}
-                      >
-                        <TableCell className="font-mono text-sm">{rm.rm_id}</TableCell>
-                        <TableCell className="font-medium">{rm.rm_name || '—'}</TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant="secondary">{rm.investor_count}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant="outline">{rm.portfolio_count}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">{rm.total_qty.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">{formatNumber(rm.total_cost)}</TableCell>
-                        <TableCell className="text-right">{formatNumber(rm.total_mv)}</TableCell>
-                        <TableCell
-                          className={cn(
-                            "text-right",
-                            rm.unrealized_pnl >= 0 ? "text-success" : "text-destructive"
-                          )}
-                        >
-                          {formatNumber(rm.unrealized_pnl)}
-                        </TableCell>
-                        <TableCell
-                          className={cn(
-                            "text-right",
-                            (rm.pnl_pct ?? 0) >= 0 ? "text-success" : "text-destructive"
-                          )}
-                        >
-                          {formatPercent(rm.pnl_pct)}
-                        </TableCell>
-                        <TableCell className={cn("text-right", rm.ledger_balance < 0 && "text-destructive")}>
-                          {formatNumber(rm.ledger_balance)}
-                        </TableCell>
-                        <TableCell>{getRiskBadge(rm.risk_flag)}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
+                  ))}
                 </TableBody>
               </Table>
             </div>
