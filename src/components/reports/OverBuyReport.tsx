@@ -278,6 +278,7 @@ const evaluateFormula = (formula: string, data: ClientOverBuyData): string | num
 export function OverBuyReport() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<ClientOverBuyData[]>([]);
+  const [latestTradeDate, setLatestTradeDate] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selectedRm, setSelectedRm] = useState<string>("all");
   const [showViolationsOnly, setShowViolationsOnly] = useState(false);
@@ -327,66 +328,70 @@ export function OverBuyReport() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch clients with all balance data
-      const { data: clients, error: clientsError } = await supabase
-        .from("clients")
-        .select("inv_code, investor_name, rm_name, rm_email, ledger_balance, market_value, equity, accrued_interest, current_liabilities");
+      // Get latest trade date for filtering
+      const { data: latestDateData } = await supabase
+        .from("trade_history")
+        .select("trade_date")
+        .order("trade_date", { ascending: false })
+        .limit(1);
+      
+      const fetchedLatestTradeDate = latestDateData?.[0]?.trade_date || null;
+      setLatestTradeDate(fetchedLatestTradeDate);
 
-      if (clientsError) throw clientsError;
+      // Fetch accounting data - cash accounts only (server-side filter)
+      const { data: accountingData, error: accountingError } = await supabase.rpc('get_accounting_data', {
+        _search_term: null,
+        _from_trade_date: fetchedLatestTradeDate,
+        _to_trade_date: fetchedLatestTradeDate,
+        _page_size: 10000, // Get all matching records
+        _page_offset: 0,
+        _account_type_filter: 'cash', // Only cash accounts
+        _has_trades_filter: 'with_trades', // Only those with trades
+      });
 
-      // Fetch investor master data
+      if (accountingError) throw accountingError;
+
+      // Filter for negative ledger balance on client side
+      const negativeBalanceAccounts = (accountingData || []).filter(
+        (acc: any) => Number(acc.ledger_balance) < 0
+      );
+
+      // Get investor codes for additional data
+      const investorCodes = negativeBalanceAccounts.map((acc: any) => acc.investor_code);
+
+      // Fetch additional investor details
       const { data: investors, error: investorsError } = await supabase
         .from("investors")
-        .select("investor_code, account_type, investor_type, bo_id, brokerage_commission, interest_rate");
+        .select("investor_code, account_type, investor_type, bo_id, brokerage_commission, interest_rate")
+        .in("investor_code", investorCodes);
 
       if (investorsError) throw investorsError;
 
-      // Fetch deposits/withdrawals with date filter
-      let txQuery = supabase
-        .from("deposits_withdrawals")
-        .select("investor_code, transaction_type, amount, transaction_date");
-      
-      if (startDate) {
-        txQuery = txQuery.gte("transaction_date", format(startDate, "yyyy-MM-dd"));
-      }
-      if (endDate) {
-        txQuery = txQuery.lte("transaction_date", format(endDate, "yyyy-MM-dd"));
-      }
-      
-      const { data: transactions, error: txError } = await txQuery;
+      // Fetch RM info from clients table
+      const { data: clientsInfo, error: clientsError } = await supabase
+        .from("clients")
+        .select("inv_code, rm_name, rm_email, market_value, equity, current_liabilities")
+        .in("inv_code", investorCodes);
 
-      if (txError) throw txError;
+      if (clientsError) throw clientsError;
 
-      // Fetch all trade history with full details and date filter
+      // Fetch trade history for latest date only
       let tradeQuery = supabase
         .from("trade_history")
-        .select("client_code, side, value, quantity, price, security_code, category, trade_date, file_name");
+        .select("client_code, side, value, quantity, price, security_code, category, trade_date, file_name")
+        .in("client_code", investorCodes);
       
-      if (startDate) {
-        tradeQuery = tradeQuery.gte("trade_date", format(startDate, "yyyyMMdd"));
-      }
-      if (endDate) {
-        tradeQuery = tradeQuery.lte("trade_date", format(endDate, "yyyyMMdd"));
+      if (fetchedLatestTradeDate) {
+        tradeQuery = tradeQuery.eq("trade_date", fetchedLatestTradeDate);
       }
       
       const { data: trades, error: tradesError } = await tradeQuery;
 
       if (tradesError) throw tradesError;
 
-      // Index investor data
+      // Index data
       const investorMap = new Map(investors?.map(i => [i.investor_code, i]) || []);
-
-      // Group deposits/withdrawals by investor_code
-      const txByInvestor = new Map<string, { deposits: number; withdrawals: number }>();
-      transactions?.forEach((tx) => {
-        const current = txByInvestor.get(tx.investor_code) || { deposits: 0, withdrawals: 0 };
-        if (tx.transaction_type === "Deposit") {
-          current.deposits += Number(tx.amount) || 0;
-        } else if (tx.transaction_type === "Withdrawal") {
-          current.withdrawals += Number(tx.amount) || 0;
-        }
-        txByInvestor.set(tx.investor_code, current);
-      });
+      const clientMap = new Map(clientsInfo?.map(c => [c.inv_code, c]) || []);
 
       // Group trades by client with detailed breakdowns
       const tradesByClient = new Map<string, {
@@ -397,26 +402,13 @@ export function OverBuyReport() {
         count: number;
         firstDate: string | null;
         lastDate: string | null;
-        securities: Map<string, { 
-          category: string | null;
-          buyQty: number; 
-          buyVal: number; 
-          sellQty: number; 
-          sellVal: number;
-          count: number;
-        }>;
-        files: Map<string, {
-          count: number;
-          buyVal: number;
-          sellVal: number;
-          firstDate: string | null;
-          lastDate: string | null;
-        }>;
+        securities: Map<string, { category: string | null; buyQty: number; buyVal: number; sellQty: number; sellVal: number; count: number }>;
+        files: Map<string, { count: number; buyVal: number; sellVal: number; firstDate: string | null; lastDate: string | null }>;
       }>();
 
       trades?.forEach((trade) => {
         if (!trade.client_code) return;
-        
+
         let clientData = tradesByClient.get(trade.client_code);
         if (!clientData) {
           clientData = {
@@ -498,19 +490,19 @@ export function OverBuyReport() {
         }
       });
 
-      // Combine all data
-      const combinedData: ClientOverBuyData[] = (clients || []).map((client) => {
-        const tx = txByInvestor.get(client.inv_code) || { deposits: 0, withdrawals: 0 };
-        const tradeData = tradesByClient.get(client.inv_code);
-        const investor = investorMap.get(client.inv_code);
+      // Combine all data from accounting RPC
+      const combinedData: ClientOverBuyData[] = negativeBalanceAccounts.map((acc: any) => {
+        const tradeData = tradesByClient.get(acc.investor_code);
+        const investor = investorMap.get(acc.investor_code);
+        const clientInfo = clientMap.get(acc.investor_code);
         
-        const ledger_balance = Number(client.ledger_balance) || 0;
-        const total_deposits = tx.deposits;
-        const total_withdrawals = tx.withdrawals;
+        const ledger_balance = Number(acc.ledger_balance) || 0;
+        const total_deposits = Number(acc.total_deposits) || 0;
+        const total_withdrawals = Number(acc.total_withdrawals) || 0;
         const net_deposit = total_deposits - total_withdrawals;
-        const adjusted_balance = ledger_balance + net_deposit;
-        const net_buy = tradeData?.buy || 0;
-        const net_sell = tradeData?.sell || 0;
+        const adjusted_balance = Number(acc.adjusted_ledger) || (ledger_balance + net_deposit);
+        const net_buy = Number(acc.gross_buy) || 0;
+        const net_sell = Number(acc.gross_sell) || 0;
         const net_position = net_buy - net_sell;
         const violation_amount = Math.max(0, net_position - adjusted_balance);
         const is_violation = net_position > adjusted_balance && adjusted_balance >= 0;
@@ -547,20 +539,20 @@ export function OverBuyReport() {
         });
 
         return {
-          inv_code: client.inv_code,
-          investor_name: client.investor_name,
-          rm_name: client.rm_name,
-          rm_email: client.rm_email,
+          inv_code: acc.investor_code,
+          investor_name: acc.investor_name || '',
+          rm_name: clientInfo?.rm_name || '',
+          rm_email: clientInfo?.rm_email || null,
           ledger_balance,
-          market_value: Number(client.market_value) || 0,
-          equity: Number(client.equity) || 0,
-          accrued_interest: Number(client.accrued_interest) || 0,
-          current_liabilities: Number(client.current_liabilities) || 0,
-          account_type: investor?.account_type || null,
+          market_value: Number(clientInfo?.market_value) || 0,
+          equity: Number(clientInfo?.equity) || 0,
+          accrued_interest: Number(acc.accrued_interest) || 0,
+          current_liabilities: Number(clientInfo?.current_liabilities) || 0,
+          account_type: acc.account_type || investor?.account_type || null,
           investor_type: investor?.investor_type || null,
           bo_id: investor?.bo_id || null,
-          brokerage_commission: Number(investor?.brokerage_commission) || 0,
-          interest_rate: Number(investor?.interest_rate) || 0,
+          brokerage_commission: Number(acc.brokerage_commission) || Number(investor?.brokerage_commission) || 0,
+          interest_rate: Number(acc.interest_rate) || Number(investor?.interest_rate) || 0,
           total_deposits,
           total_withdrawals,
           net_deposit,
@@ -572,8 +564,8 @@ export function OverBuyReport() {
           total_sell_quantity: tradeData?.sellQty || 0,
           trade_count: tradeData?.count || 0,
           unique_securities_traded: tradeData?.securities.size || 0,
-          first_trade_date: tradeData?.firstDate || null,
-          last_trade_date: tradeData?.lastDate || null,
+          first_trade_date: tradeData?.firstDate || fetchedLatestTradeDate,
+          last_trade_date: tradeData?.lastDate || fetchedLatestTradeDate,
           violation_amount,
           is_violation,
           securities,
@@ -598,32 +590,13 @@ export function OverBuyReport() {
     const unique = [...new Set(data.map((d) => d.rm_name).filter((name): name is string => Boolean(name) && name.trim() !== ""))];
     return unique.sort();
   }, [data]);
-
-  // Get the global latest trade date from all data
-  const globalLatestTradeDate = useMemo(() => {
-    const allDates = data
-      .map(d => d.last_trade_date)
-      .filter((date): date is string => date !== null && date !== undefined);
-    if (allDates.length === 0) return null;
-    return allDates.sort().reverse()[0]; // Get the latest date
-  }, [data]);
-
   const filteredData = useMemo(() => {
     let result = data;
 
-    // CORE FILTERS: Only negative ledger balance, Cash accounts, traded on latest date
-    // Filter 1: Only negative ledger balance
-    result = result.filter((d) => d.ledger_balance < 0);
-
-    // Filter 2: Only Cash accounts (exclude Margin)
-    result = result.filter((d) => 
-      !d.account_type || d.account_type.toLowerCase() !== 'margin'
-    );
-
-    // Filter 3: Only clients who traded on the latest date
-    if (globalLatestTradeDate) {
-      result = result.filter((d) => d.last_trade_date === globalLatestTradeDate);
-    }
+    // Data is already pre-filtered from get_accounting_data RPC:
+    // - Cash accounts only
+    // - Negative ledger balance
+    // - Traded on latest date
 
     if (search) {
       const searchLower = search.toLowerCase();
@@ -680,7 +653,7 @@ export function OverBuyReport() {
     }
 
     return result;
-  }, [data, search, selectedRm, showViolationsOnly, sortColumn, sortDirection, customFields, globalLatestTradeDate]);
+  }, [data, search, selectedRm, showViolationsOnly, sortColumn, sortDirection, customFields]);
 
   const handleSort = (columnKey: string) => {
     if (sortColumn === columnKey) {
@@ -1055,7 +1028,7 @@ export function OverBuyReport() {
         {/* Filter Criteria Banner */}
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
           <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
-            Filtered: Cash accounts only • Negative ledger balance • Traded on {globalLatestTradeDate || "N/A"}
+            Filtered: Cash accounts only • Negative ledger balance • Traded on {latestTradeDate || "N/A"}
           </p>
         </div>
 
@@ -1067,7 +1040,7 @@ export function OverBuyReport() {
           </div>
           <div className="bg-secondary/50 rounded-lg p-4">
             <p className="text-sm text-muted-foreground">Latest Trade Date</p>
-            <p className="text-2xl font-bold">{globalLatestTradeDate || "N/A"}</p>
+            <p className="text-2xl font-bold">{latestTradeDate || "N/A"}</p>
           </div>
           <div className="bg-destructive/10 rounded-lg p-4 border border-destructive/20">
             <p className="text-sm text-muted-foreground">Violations</p>
