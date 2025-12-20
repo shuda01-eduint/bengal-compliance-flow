@@ -199,7 +199,7 @@ export function StockExchangeUpload() {
         return fillType && fillType.length > 0;
       });
       
-      console.log(`Filtered trades: ${tradesWithFillType.length} of ${trades.length} have fill_type value`);
+      
       
       // Validate and sanitize trade records before insert
       const validRecords: any[] = [];
@@ -281,50 +281,32 @@ export function StockExchangeUpload() {
         }
       }
       
-      if (validationErrors.length > 0) {
-        console.warn('Trade validation warnings:', validationErrors);
-      }
 
-      // Insert in batches of 500 to avoid Supabase limits
-      const batchSize = 500;
+      // Insert in batches of 1000 for faster processing
+      const batchSize = 1000;
       let inserted = 0;
-      
-      // Debug: Log sample records before insert
-      if (validRecords.length > 0) {
-        const cseRecords = validRecords.filter(r => r.board?.startsWith('CTG') || r.board?.startsWith('DHK'));
-        console.log(`Total valid records: ${validRecords.length}, CSE records: ${cseRecords.length}`);
-        if (cseRecords.length > 0) {
-          console.log('Sample CSE record to insert:', cseRecords[0]);
-        }
-      }
-      
       let totalUpserted = 0;
       
       for (let i = 0; i < validRecords.length; i += batchSize) {
         const batch = validRecords.slice(i, i + batchSize);
-        const batchNum = Math.floor(i / batchSize) + 1;
         
-        // Use upsert to handle re-uploads - update existing records based on exec_id, trade_date, client_code, board
-        const { data, error, count } = await supabase.from('trade_history').upsert(batch, { 
+        // Use upsert without returning data for speed
+        const { error, count } = await supabase.from('trade_history').upsert(batch, { 
           onConflict: 'exec_id,trade_date,client_code,board',
           ignoreDuplicates: false,
           count: 'exact'
-        }).select('id');
+        });
         
-        if (error) {
-          console.error(`Batch ${batchNum} upsert error:`, error);
-          throw error;
-        }
+        if (error) throw error;
         
-        const affectedRows = data?.length || count || 0;
-        totalUpserted += affectedRows;
-        console.log(`Batch ${batchNum}: sent ${batch.length} records, upserted ${affectedRows} rows`);
-        
+        totalUpserted += count || batch.length;
         inserted += batch.length;
         setProgress({ current: inserted, total: validRecords.length });
         
-        // Yield to keep UI responsive
-        await new Promise(resolve => requestAnimationFrame(resolve));
+        // Yield less frequently with setTimeout(0) for speed
+        if (i % 3000 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
       }
 
       console.log(`Save complete: Total records sent: ${validRecords.length}, Total upserted: ${totalUpserted}`);
@@ -367,51 +349,41 @@ export function StockExchangeUpload() {
     }
   };
 
+  // Pre-compiled regex for performance
+  const normalizeKeyRegex = /[\s_-]+/g;
+  const commaRegex = /,/g;
+
   const parseRowToTrade = (row: Record<string, unknown>): ParsedTrade | null => {
-    // Create normalized key mapping - remove spaces, underscores, and convert to lowercase
-    // This handles variations like "ClientCode", "Client Code", "Client_Code", "clientcode"
+    // Create normalized key mapping - optimized with pre-compiled regex
     const rowNormalized: Record<string, unknown> = {};
-    const originalKeys: string[] = [];
-    for (const key of Object.keys(row)) {
-      const normalizedKey = key.toLowerCase().replace(/[\s_-]+/g, '');
-      rowNormalized[normalizedKey] = row[key];
-      originalKeys.push(key);
+    const keys = Object.keys(row);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      rowNormalized[key.toLowerCase().replace(normalizeKeyRegex, '')] = row[key];
     }
     
-    // Treat dash "-" as empty value
     const getString = (key: string) => {
-      const normalizedKey = key.toLowerCase().replace(/[\s_-]+/g, '');
-      let val = String(rowNormalized[normalizedKey] ?? row[key] ?? '').trim();
-      if (val === '-') val = '';
-      return val;
+      const normalizedKey = key.toLowerCase().replace(normalizeKeyRegex, '');
+      const val = String(rowNormalized[normalizedKey] ?? row[key] ?? '').trim();
+      return val === '-' ? '' : val;
     };
     
     const getNumber = (key: string) => {
-      const normalizedKey = key.toLowerCase().replace(/[\s_-]+/g, '');
+      const normalizedKey = key.toLowerCase().replace(normalizeKeyRegex, '');
       const val = rowNormalized[normalizedKey] ?? row[key];
       if (typeof val === 'number') return val;
-      const strVal = String(val ?? '0').replace(/,/g, '');
-      if (strVal === '-') return 0;
-      return parseFloat(strVal) || 0;
+      const strVal = String(val ?? '0').replace(commaRegex, '');
+      return strVal === '-' ? 0 : (parseFloat(strVal) || 0);
     };
 
-    const sideRaw = getString('Side').toUpperCase();
-    const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
+    const action = getString('Action').toUpperCase();
+    if (action !== 'EXEC') return null;
+
     const clientCode = getString('ClientCode');
     const securityCode = getString('SecurityCode');
-    const action = getString('Action').toUpperCase();
+    if (!clientCode || !securityCode) return null;
 
-    // Only process EXEC trades - skip ORDER and other action types
-    if (action !== 'EXEC') {
-      return null;
-    }
-
-    if (!clientCode || !securityCode) {
-      console.log('Missing required fields:', { clientCode, securityCode, row: Object.keys(row).slice(0, 5) });
-      return null;
-    }
-
-    // Handle BOID in scientific notation (e.g., 1.20559E+15)
+    const sideRaw = getString('Side').toUpperCase();
     const boidRaw = getString('BOID');
     const boid = boidRaw && !isNaN(Number(boidRaw)) 
       ? String(BigInt(Math.round(Number(boidRaw)))) 
@@ -421,10 +393,7 @@ export function StockExchangeUpload() {
     const dateStr = getString('Date');
     const quantity = getNumber('Quantity');
     const price = getNumber('Price');
-    
-    // Generate unique exec_id if empty - use combination of trade details
     const execIdRaw = getString('ExecID');
-    const execId = execIdRaw || `${orderId}_${clientCode}_${securityCode}_${dateStr}_${quantity}_${price}`;
 
     return {
       action: getString('Action'),
@@ -433,7 +402,7 @@ export function StockExchangeUpload() {
       asset_class: getString('AssetClass'),
       order_id: orderId,
       ref_order_id: getString('RefOrderID'),
-      side,
+      side: sideRaw === 'S' ? 'SELL' : 'BUY',
       boid,
       security_code: securityCode,
       board: getString('Board'),
@@ -442,7 +411,7 @@ export function StockExchangeUpload() {
       quantity,
       price,
       value: getNumber('Value') || quantity * price,
-      exec_id: execId,
+      exec_id: execIdRaw || `${orderId}_${clientCode}_${securityCode}_${dateStr}_${quantity}_${price}`,
       session: getString('Session'),
       fill_type: getString('FillType'),
       category: getString('Category'),
@@ -454,11 +423,11 @@ export function StockExchangeUpload() {
     };
   };
 
-  // Process rows in chunks to prevent UI blocking
+  // Process rows in chunks - optimized for speed
   const processInChunks = async <T, R>(
     items: T[],
     processor: (item: T) => R | null,
-    chunkSize = 500
+    chunkSize = 2000
   ): Promise<R[]> => {
     const results: R[] = [];
     const total = items.length;
@@ -469,10 +438,9 @@ export function StockExchangeUpload() {
         const result = processor(item);
         if (result) results.push(result);
       }
-      // Update progress
       setProgress({ current: Math.min(i + chunkSize, total), total });
-      // Yield to the main thread to keep UI responsive
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      // Use setTimeout(0) - faster than requestAnimationFrame
+      await new Promise(resolve => setTimeout(resolve, 0));
     }
     return results;
   };
@@ -612,63 +580,36 @@ export function StockExchangeUpload() {
     if (!file) return [];
     
     const content = await file.text();
-    console.log('XML content preview:', content.substring(0, 500));
-    
     const parser = new DOMParser();
     const doc = parser.parseFromString(content, 'text/xml');
     
-    // Check for parsing errors
     const parseError = doc.querySelector('parsererror');
-    if (parseError) {
-      console.error('XML Parse Error:', parseError.textContent);
-      return [];
-    }
+    if (parseError) return [];
     
     const trades: ParsedTrade[] = [];
     
-    // Try to find rows - handle various XML formats
-    // Excel XML uses Worksheet > Table > Row structure
     let rows = doc.getElementsByTagName('Row');
-    console.log('Found Row elements:', rows.length);
-    
-    // If no rows found, try lowercase
     if (rows.length === 0) {
       rows = doc.getElementsByTagName('row');
-      console.log('Found row (lowercase) elements:', rows.length);
     }
     
     if (rows.length > 0) {
-      // First row is typically headers
       const headerRow = rows[0];
       const headerCells = headerRow.getElementsByTagName('Cell');
       const headers: string[] = [];
       
-      // Parse headers with ss:Index support (same as data rows)
       let headerIndex = 0;
       for (let i = 0; i < headerCells.length; i++) {
         const cell = headerCells[i];
-        
-        // Handle ss:Index attribute for sparse cells (Excel skips empty cells)
         const indexAttr = cell.getAttribute('ss:Index');
         if (indexAttr) {
-          headerIndex = parseInt(indexAttr) - 1; // ss:Index is 1-based
+          headerIndex = parseInt(indexAttr) - 1;
         }
-        
-        // Get Data element content
         const dataEl = cell.getElementsByTagName('Data')[0];
-        const value = dataEl?.textContent?.trim() || '';
-        
-        // Store header at correct index position
-        headers[headerIndex] = value;
+        headers[headerIndex] = dataEl?.textContent?.trim() || '';
         headerIndex++;
       }
       
-      // Log headers with their indices for debugging
-      console.log('XML Headers found (with indices):', headers.map((h, idx) => `[${idx}]=${h}`).filter(Boolean));
-      
-      console.log('XML Headers found:', headers);
-      
-      // Process data rows (skip header row)
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const cells = row.getElementsByTagName('Cell');
@@ -677,109 +618,55 @@ export function StockExchangeUpload() {
         let currentIndex = 0;
         for (let j = 0; j < cells.length; j++) {
           const cell = cells[j];
-          
-          // Handle ss:Index attribute for sparse cells (Excel skips empty cells)
           const indexAttr = cell.getAttribute('ss:Index');
           if (indexAttr) {
-            currentIndex = parseInt(indexAttr) - 1; // ss:Index is 1-based
+            currentIndex = parseInt(indexAttr) - 1;
           }
-          
           const dataEl = cell.getElementsByTagName('Data')[0];
-          const value = dataEl?.textContent?.trim() || '';
-          
           if (headers[currentIndex]) {
-            rowData[headers[currentIndex]] = value;
+            rowData[headers[currentIndex]] = dataEl?.textContent?.trim() || '';
           }
           currentIndex++;
         }
         
-        if (i <= 3) {
-          console.log(`Row ${i} data:`, rowData);
-        }
-        
-        // Debug logging for client 11770
-        const rowValues = Object.values(rowData).map(v => String(v));
-        const clientCodeValue = rowData['ClientCode'] || rowData['clientcode'] || rowData['Client Code'];
-        const actionValue = rowData['Action'] || rowData['action'] || '';
-        if (rowValues.some(v => v.includes('11770')) || String(clientCodeValue).includes('11770')) {
-          console.log(`🔍 FOUND 11770 in Row ${i}:`, {
-            clientCode: clientCodeValue,
-            action: actionValue,
-            securityCode: rowData['SecurityCode'] || rowData['securitycode'],
-            side: rowData['Side'] || rowData['side'],
-            quantity: rowData['Quantity'] || rowData['quantity'],
-            price: rowData['Price'] || rowData['price'],
-            fullRow: rowData
-          });
-        }
-        
         const trade = parseRowToTrade(rowData);
-        
-        // Log if 11770 trade was parsed or skipped
-        if (String(clientCodeValue).includes('11770')) {
-          if (trade) {
-            console.log(`✅ Client 11770 EXEC trade PARSED:`, trade);
-          } else {
-            const isExec = String(actionValue).toUpperCase() === 'EXEC';
-            console.log(`❌ Client 11770 trade SKIPPED - Action: ${actionValue}, isEXEC: ${isExec}`);
-          }
-        }
-        
         if (trade) trades.push(trade);
       }
     } else {
-      // Fallback: Try other common XML structures (like <Trades><Detail .../> format)
-      console.log('No Row elements found, trying alternative structures...');
-      console.log('Root element:', doc.documentElement.tagName);
-      
-      // Look for Detail elements (common stock exchange format)
+      // Fallback for <Trades><Detail .../> format
       const detailElements = doc.getElementsByTagName('Detail');
-      console.log('Found Detail elements:', detailElements.length);
       
       if (detailElements.length > 0) {
         for (let i = 0; i < detailElements.length; i++) {
           const element = detailElements[i];
           const rowData: Record<string, unknown> = {};
-          
-          // Extract all attributes as trade data
           for (let j = 0; j < element.attributes.length; j++) {
             const attr = element.attributes[j];
             rowData[attr.name] = attr.value;
           }
-          
-          if (i < 3) {
-            console.log(`Detail ${i} attributes:`, rowData);
-          }
-          
           const trade = parseRowToTrade(rowData);
           if (trade) trades.push(trade);
         }
       } else {
-        // Try generic Trade, Record, Item elements
         const tradeElements = doc.querySelectorAll('Trade, trade, Record, record, Item, item');
         tradeElements.forEach(element => {
           const rowData: Record<string, unknown> = {};
-          
-          // Get attributes
           Array.from(element.attributes).forEach(attr => {
             rowData[attr.name] = attr.value;
           });
-          
-          // Get child element text content
           element.childNodes.forEach(node => {
             if (node.nodeType === 1) {
               const el = node as Element;
               rowData[el.tagName] = el.textContent?.trim() || '';
             }
           });
-          
           const trade = parseRowToTrade(rowData);
           if (trade) trades.push(trade);
         });
       }
     }
     
-    console.log('Total parsed XML trades:', trades.length);
+    return trades;
     return trades;
   };
 
