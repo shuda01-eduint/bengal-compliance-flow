@@ -49,6 +49,8 @@ interface ClientOverBuyData {
   rm_email: string | null;
   // Client balance data
   ledger_balance: number;
+  closing_balance: number; // Final balance after trades
+  brokerage_amount: number; // Brokerage deducted
   market_value: number;
   equity: number;
   accrued_interest: number;
@@ -105,15 +107,17 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { key: "account_type", label: "Account Type", visible: false },
   { key: "investor_type", label: "Investor Type", visible: false },
   { key: "ledger_balance", label: "Ledger Balance", visible: true },
+  { key: "net_buy", label: "Buy", visible: true },
+  { key: "net_sell", label: "Sell", visible: true },
+  { key: "brokerage_amount", label: "Brokerage", visible: true },
+  { key: "closing_balance", label: "Closing Balance", visible: true },
   { key: "market_value", label: "Market Value", visible: false },
   { key: "equity", label: "Equity", visible: false },
-  { key: "total_deposits", label: "Deposits", visible: true },
-  { key: "total_withdrawals", label: "Withdrawals", visible: true },
-  { key: "net_deposit", label: "Net Deposit", visible: true },
-  { key: "adjusted_balance", label: "Adjusted Balance", visible: true },
-  { key: "net_buy", label: "Net Buy", visible: true },
-  { key: "net_sell", label: "Net Sell", visible: true },
-  { key: "net_position", label: "Net Position", visible: true },
+  { key: "total_deposits", label: "Deposits", visible: false },
+  { key: "total_withdrawals", label: "Withdrawals", visible: false },
+  { key: "net_deposit", label: "Net Deposit", visible: false },
+  { key: "adjusted_balance", label: "Adjusted Balance", visible: false },
+  { key: "net_position", label: "Net Position", visible: false },
   { key: "trade_count", label: "Trade Count", visible: false },
   { key: "unique_securities_traded", label: "Securities Traded", visible: false },
   { key: "violation_amount", label: "Violation", visible: true },
@@ -351,9 +355,10 @@ export function OverBuyReport() {
 
       if (accountingError) throw accountingError;
 
-      // Filter for negative ledger balance on client side
+      // Filter for negative closing balance (final_balance) on client side
+      // This is the balance AFTER trades, not the raw ledger balance
       const negativeBalanceAccounts = (accountingData || []).filter(
-        (acc: any) => Number(acc.ledger_balance) < 0
+        (acc: any) => Number(acc.final_balance) < 0
       );
 
       // Get investor codes for additional data
@@ -512,6 +517,8 @@ export function OverBuyReport() {
         const net_buy = Number(acc.gross_buy) || 0;
         const net_sell = Number(acc.gross_sell) || 0;
         const net_position = net_buy - net_sell;
+        const brokerage_amount = Number(acc.brokerage_amount) || 0;
+        const closing_balance = Number(acc.final_balance) || (ledger_balance + net_sell - net_buy - brokerage_amount);
         const violation_amount = Math.max(0, net_position - adjusted_balance);
         const is_violation = net_position > adjusted_balance && adjusted_balance >= 0;
 
@@ -552,6 +559,8 @@ export function OverBuyReport() {
           rm_name: clientInfo?.rm_name || '',
           rm_email: clientInfo?.rm_email || null,
           ledger_balance,
+          closing_balance,
+          brokerage_amount,
           market_value: Number(clientInfo?.market_value) || 0,
           equity: Number(clientInfo?.equity) || 0,
           accrued_interest: Number(acc.accrued_interest) || 0,
