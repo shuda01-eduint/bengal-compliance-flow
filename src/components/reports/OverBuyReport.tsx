@@ -395,14 +395,12 @@ export function OverBuyReport() {
 
       if (tradesError) throw tradesError;
 
-      // Filter for actual fills: PF/FILL status OR empty status with valid value (executed trades)
+      // Filter for actual fills: Only count trades with fill_type = 'FILL' (final executed trades)
+      // This excludes PF (partial fills) to avoid double-counting and empty fill_type
       const trades = (rawTrades || []).filter(t => {
-        const status = ((t as any).status || '').toUpperCase();
         const fillType = ((t as any).fill_type || '').toUpperCase();
-        const value = Number((t as any).value) || 0;
-        // Include PF/FILL status trades OR trades with empty status but valid value (these are executed trades)
-        return status === 'PF' || status === 'FILL' || fillType === 'PF' || fillType === 'FILL' || 
-               (status === '' && fillType === '' && value > 0);
+        // Only count FILL type trades (the final executed trade)
+        return fillType === 'FILL';
       });
 
       // Index data
