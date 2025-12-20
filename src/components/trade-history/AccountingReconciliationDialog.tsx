@@ -179,13 +179,22 @@ export function AccountingReconciliationDialog({
       if (!investor?.investor_code) return [];
       const { data, error } = await supabase
         .from('trade_history')
-        .select('trade_date, security_code, side, quantity, value, category')
+        .select('trade_date, security_code, side, quantity, value, category, status, fill_type')
         .eq('client_code', investor.investor_code)
         .gte('trade_date', fromTradeDateStr)
         .lte('trade_date', toTradeDateStr)
+        .gt('value', 0)
         .order('trade_date', { ascending: true });
       if (error) throw error;
-      return data || [];
+      
+      // Filter to only include actual fills (PF or FILL status)
+      const filteredData = (data || []).filter(t => {
+        const status = (t.status || '').toUpperCase();
+        const fillType = (t.fill_type || '').toUpperCase();
+        return status === 'PF' || status === 'FILL' || fillType === 'PF' || fillType === 'FILL';
+      });
+      
+      return filteredData;
     },
     enabled: !!investor?.investor_code,
   });
