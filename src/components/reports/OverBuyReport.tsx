@@ -395,11 +395,14 @@ export function OverBuyReport() {
 
       if (tradesError) throw tradesError;
 
-      // Filter for actual fills only (PF or FILL status)
+      // Filter for actual fills: PF/FILL status OR empty status with valid value (executed trades)
       const trades = (rawTrades || []).filter(t => {
         const status = ((t as any).status || '').toUpperCase();
         const fillType = ((t as any).fill_type || '').toUpperCase();
-        return status === 'PF' || status === 'FILL' || fillType === 'PF' || fillType === 'FILL';
+        const value = Number((t as any).value) || 0;
+        // Include PF/FILL status trades OR trades with empty status but valid value (these are executed trades)
+        return status === 'PF' || status === 'FILL' || fillType === 'PF' || fillType === 'FILL' || 
+               (status === '' && fillType === '' && value > 0);
       });
 
       // Index data
