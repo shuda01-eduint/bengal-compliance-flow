@@ -363,10 +363,10 @@ export function OverBuyReport() {
         .select("client_code, side, value, quantity, price, security_code, category, trade_date, file_name");
       
       if (startDate) {
-        tradeQuery = tradeQuery.gte("trade_date", format(startDate, "yyyy-MM-dd"));
+        tradeQuery = tradeQuery.gte("trade_date", format(startDate, "yyyyMMdd"));
       }
       if (endDate) {
-        tradeQuery = tradeQuery.lte("trade_date", format(endDate, "yyyy-MM-dd"));
+        tradeQuery = tradeQuery.lte("trade_date", format(endDate, "yyyyMMdd"));
       }
       
       const { data: trades, error: tradesError } = await tradeQuery;
