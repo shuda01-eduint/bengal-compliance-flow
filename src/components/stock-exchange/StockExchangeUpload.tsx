@@ -628,13 +628,28 @@ export function StockExchangeUpload() {
       const headerCells = headerRow.getElementsByTagName('Cell');
       const headers: string[] = [];
       
+      // Parse headers with ss:Index support (same as data rows)
+      let headerIndex = 0;
       for (let i = 0; i < headerCells.length; i++) {
         const cell = headerCells[i];
+        
+        // Handle ss:Index attribute for sparse cells (Excel skips empty cells)
+        const indexAttr = cell.getAttribute('ss:Index');
+        if (indexAttr) {
+          headerIndex = parseInt(indexAttr) - 1; // ss:Index is 1-based
+        }
+        
         // Get Data element content
         const dataEl = cell.getElementsByTagName('Data')[0];
         const value = dataEl?.textContent?.trim() || '';
-        headers.push(value);
+        
+        // Store header at correct index position
+        headers[headerIndex] = value;
+        headerIndex++;
       }
+      
+      // Log headers with their indices for debugging
+      console.log('XML Headers found (with indices):', headers.map((h, idx) => `[${idx}]=${h}`).filter(Boolean));
       
       console.log('XML Headers found:', headers);
       
