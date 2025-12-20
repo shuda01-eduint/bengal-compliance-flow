@@ -192,12 +192,21 @@ export function StockExchangeUpload() {
         }
       }
       
+      // Filter out trades with empty fill_type - only import actual fills (PF or FILL)
+      // This prevents importing ACK, EXPIRED, RPLD and other non-executed trades
+      const tradesWithFillType = trades.filter(trade => {
+        const fillType = trade.fill_type?.trim();
+        return fillType && fillType.length > 0;
+      });
+      
+      console.log(`Filtered trades: ${tradesWithFillType.length} of ${trades.length} have fill_type value`);
+      
       // Validate and sanitize trade records before insert
       const validRecords: any[] = [];
       const validationErrors: string[] = [];
       
-      for (let i = 0; i < trades.length; i++) {
-        const trade = trades[i];
+      for (let i = 0; i < tradesWithFillType.length; i++) {
+        const trade = tradesWithFillType[i];
         const clientCode = sanitizeString(trade.client_code);
         const investorData = clientCode ? investorMap[clientCode] : null;
         const clientData = clientCode ? clientMap[clientCode] : null;
