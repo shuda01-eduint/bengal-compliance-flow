@@ -359,21 +359,27 @@ export function StockExchangeUpload() {
   };
 
   const parseRowToTrade = (row: Record<string, unknown>): ParsedTrade | null => {
-    // Create case-insensitive getter (XML attributes may vary in case)
-    const rowLower: Record<string, unknown> = {};
+    // Create normalized key mapping - remove spaces, underscores, and convert to lowercase
+    // This handles variations like "ClientCode", "Client Code", "Client_Code", "clientcode"
+    const rowNormalized: Record<string, unknown> = {};
+    const originalKeys: string[] = [];
     for (const key of Object.keys(row)) {
-      rowLower[key.toLowerCase()] = row[key];
+      const normalizedKey = key.toLowerCase().replace(/[\s_-]+/g, '');
+      rowNormalized[normalizedKey] = row[key];
+      originalKeys.push(key);
     }
     
     // Treat dash "-" as empty value
     const getString = (key: string) => {
-      let val = String(rowLower[key.toLowerCase()] ?? row[key] ?? '').trim();
+      const normalizedKey = key.toLowerCase().replace(/[\s_-]+/g, '');
+      let val = String(rowNormalized[normalizedKey] ?? row[key] ?? '').trim();
       if (val === '-') val = '';
       return val;
     };
     
     const getNumber = (key: string) => {
-      const val = rowLower[key.toLowerCase()] ?? row[key];
+      const normalizedKey = key.toLowerCase().replace(/[\s_-]+/g, '');
+      const val = rowNormalized[normalizedKey] ?? row[key];
       if (typeof val === 'number') return val;
       const strVal = String(val ?? '0').replace(/,/g, '');
       if (strVal === '-') return 0;
