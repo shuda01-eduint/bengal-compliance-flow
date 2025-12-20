@@ -423,24 +423,15 @@ export function StockExchangeUpload() {
     };
   };
 
-  // Process rows in chunks - optimized for speed
-  const processInChunks = async <T, R>(
+  // Fast direct processing - no chunking for parsing (only for DB saves)
+  const processDirectly = <T, R>(
     items: T[],
-    processor: (item: T) => R | null,
-    chunkSize = 2000
-  ): Promise<R[]> => {
+    processor: (item: T) => R | null
+  ): R[] => {
     const results: R[] = [];
-    const total = items.length;
-    
-    for (let i = 0; i < items.length; i += chunkSize) {
-      const chunk = items.slice(i, i + chunkSize);
-      for (const item of chunk) {
-        const result = processor(item);
-        if (result) results.push(result);
-      }
-      setProgress({ current: Math.min(i + chunkSize, total), total });
-      // Use setTimeout(0) - faster than requestAnimationFrame
-      await new Promise(resolve => setTimeout(resolve, 0));
+    for (let i = 0; i < items.length; i++) {
+      const result = processor(items[i]);
+      if (result) results.push(result);
     }
     return results;
   };
@@ -448,31 +439,23 @@ export function StockExchangeUpload() {
   const parseExcelFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
     
-    setProgress({ current: 0, total: 100 }); // Initial progress
-    
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: 'array' });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet);
     
     console.log('Total rows to parse:', jsonData.length);
-    if (jsonData.length > 0) {
-      console.log('Headers:', Object.keys(jsonData[0]));
-    }
     
-    return processInChunks(jsonData, parseRowToTrade);
+    return processDirectly(jsonData, parseRowToTrade);
   };
 
   const parseHtmlFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
     
-    setProgress({ current: 0, total: 100 });
-    
     const content = await file.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(content, 'text/html');
     
-    // Collect all row objects first
     const allRowObjects: Record<string, unknown>[] = [];
     const tables = doc.querySelectorAll('table');
     
@@ -499,16 +482,12 @@ export function StockExchangeUpload() {
       });
     });
     
-    // Process with progress updates
-    return processInChunks(allRowObjects, parseRowToTrade);
+    return processDirectly(allRowObjects, parseRowToTrade);
   };
 
   // Parse pipe-delimited text file (CSE/DSE format)
-  // Format: board|code|security|side|qty|price|client|?|?|exec_id|exec_date|exec_time|order_date|order_time|flag
   const parsePipeDelimitedFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
-    
-    setProgress({ current: 0, total: 100 });
     
     const content = await file.text();
     const lines = content.split('\n').filter(line => line.trim());
@@ -568,13 +547,11 @@ export function StockExchangeUpload() {
       };
     };
     
-    return processInChunks(lines, parseLine);
+    return processDirectly(lines, parseLine);
   };
 
   const parseXmlFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
-    
-    setProgress({ current: 0, total: 100 });
     
     const content = await file.text();
     const parser = new DOMParser();
@@ -583,7 +560,6 @@ export function StockExchangeUpload() {
     const parseError = doc.querySelector('parsererror');
     if (parseError) return [];
     
-    // Collect all row data objects first
     const allRowData: Record<string, unknown>[] = [];
     
     let rows = doc.getElementsByTagName('Row');
@@ -629,7 +605,6 @@ export function StockExchangeUpload() {
         allRowData.push(rowData);
       }
     } else {
-      // Fallback for <Trades><Detail .../> format
       const detailElements = doc.getElementsByTagName('Detail');
       
       if (detailElements.length > 0) {
@@ -660,8 +635,7 @@ export function StockExchangeUpload() {
       }
     }
     
-    // Process with progress updates
-    return processInChunks(allRowData, parseRowToTrade);
+    return processDirectly(allRowData, parseRowToTrade);
   };
 
   const handleParseFile = async () => {
