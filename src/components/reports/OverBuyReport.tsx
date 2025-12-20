@@ -599,8 +599,31 @@ export function OverBuyReport() {
     return unique.sort();
   }, [data]);
 
+  // Get the global latest trade date from all data
+  const globalLatestTradeDate = useMemo(() => {
+    const allDates = data
+      .map(d => d.last_trade_date)
+      .filter((date): date is string => date !== null && date !== undefined);
+    if (allDates.length === 0) return null;
+    return allDates.sort().reverse()[0]; // Get the latest date
+  }, [data]);
+
   const filteredData = useMemo(() => {
     let result = data;
+
+    // CORE FILTERS: Only negative ledger balance, Cash accounts, traded on latest date
+    // Filter 1: Only negative ledger balance
+    result = result.filter((d) => d.ledger_balance < 0);
+
+    // Filter 2: Only Cash accounts (exclude Margin)
+    result = result.filter((d) => 
+      !d.account_type || d.account_type.toLowerCase() !== 'margin'
+    );
+
+    // Filter 3: Only clients who traded on the latest date
+    if (globalLatestTradeDate) {
+      result = result.filter((d) => d.last_trade_date === globalLatestTradeDate);
+    }
 
     if (search) {
       const searchLower = search.toLowerCase();
@@ -657,7 +680,7 @@ export function OverBuyReport() {
     }
 
     return result;
-  }, [data, search, selectedRm, showViolationsOnly, sortColumn, sortDirection, customFields]);
+  }, [data, search, selectedRm, showViolationsOnly, sortColumn, sortDirection, customFields, globalLatestTradeDate]);
 
   const handleSort = (columnKey: string) => {
     if (sortColumn === columnKey) {
@@ -1029,11 +1052,22 @@ export function OverBuyReport() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Filter Criteria Banner */}
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+          <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+            Filtered: Cash accounts only • Negative ledger balance • Traded on {globalLatestTradeDate || "N/A"}
+          </p>
+        </div>
+
         {/* Summary Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-secondary/50 rounded-lg p-4">
-            <p className="text-sm text-muted-foreground">Total Clients</p>
+            <p className="text-sm text-muted-foreground">Matching Clients</p>
             <p className="text-2xl font-bold">{stats.totalClients}</p>
+          </div>
+          <div className="bg-secondary/50 rounded-lg p-4">
+            <p className="text-sm text-muted-foreground">Latest Trade Date</p>
+            <p className="text-2xl font-bold">{globalLatestTradeDate || "N/A"}</p>
           </div>
           <div className="bg-destructive/10 rounded-lg p-4 border border-destructive/20">
             <p className="text-sm text-muted-foreground">Violations</p>
