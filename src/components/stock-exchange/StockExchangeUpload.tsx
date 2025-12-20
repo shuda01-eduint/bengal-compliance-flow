@@ -390,6 +390,12 @@ export function StockExchangeUpload() {
     const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
     const clientCode = getString('ClientCode');
     const securityCode = getString('SecurityCode');
+    const action = getString('Action').toUpperCase();
+
+    // Only process EXEC trades - skip ORDER and other action types
+    if (action !== 'EXEC') {
+      return null;
+    }
 
     if (!clientCode || !securityCode) {
       console.log('Missing required fields:', { clientCode, securityCode, row: Object.keys(row).slice(0, 5) });
@@ -685,9 +691,11 @@ export function StockExchangeUpload() {
         // Debug logging for client 11770
         const rowValues = Object.values(rowData).map(v => String(v));
         const clientCodeValue = rowData['ClientCode'] || rowData['clientcode'] || rowData['Client Code'];
+        const actionValue = rowData['Action'] || rowData['action'] || '';
         if (rowValues.some(v => v.includes('11770')) || String(clientCodeValue).includes('11770')) {
           console.log(`🔍 FOUND 11770 in Row ${i}:`, {
             clientCode: clientCodeValue,
+            action: actionValue,
             securityCode: rowData['SecurityCode'] || rowData['securitycode'],
             side: rowData['Side'] || rowData['side'],
             quantity: rowData['Quantity'] || rowData['quantity'],
@@ -701,9 +709,10 @@ export function StockExchangeUpload() {
         // Log if 11770 trade was parsed or skipped
         if (String(clientCodeValue).includes('11770')) {
           if (trade) {
-            console.log(`✅ Client 11770 trade PARSED:`, trade);
+            console.log(`✅ Client 11770 EXEC trade PARSED:`, trade);
           } else {
-            console.log(`❌ Client 11770 trade SKIPPED - parseRowToTrade returned null`);
+            const isExec = String(actionValue).toUpperCase() === 'EXEC';
+            console.log(`❌ Client 11770 trade SKIPPED - Action: ${actionValue}, isEXEC: ${isExec}`);
           }
         }
         
