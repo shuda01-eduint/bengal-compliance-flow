@@ -378,16 +378,24 @@ export function OverBuyReport() {
       // Fetch trade history for latest date only
       let tradeQuery = supabase
         .from("trade_history")
-        .select("client_code, side, value, quantity, price, security_code, category, trade_date, file_name")
-        .in("client_code", investorCodes);
+        .select("client_code, side, value, quantity, price, security_code, category, trade_date, file_name, status, fill_type")
+        .in("client_code", investorCodes)
+        .gt("value", 0); // Exclude zero-value rows
       
       if (fetchedLatestTradeDate) {
         tradeQuery = tradeQuery.eq("trade_date", fetchedLatestTradeDate);
       }
       
-      const { data: trades, error: tradesError } = await tradeQuery;
+      const { data: rawTrades, error: tradesError } = await tradeQuery;
 
       if (tradesError) throw tradesError;
+
+      // Filter for actual fills only (PF or FILL status)
+      const trades = (rawTrades || []).filter(t => {
+        const status = ((t as any).status || '').toUpperCase();
+        const fillType = ((t as any).fill_type || '').toUpperCase();
+        return status === 'PF' || status === 'FILL' || fillType === 'PF' || fillType === 'FILL';
+      });
 
       // Index data
       const investorMap = new Map(investors?.map(i => [i.investor_code, i]) || []);
