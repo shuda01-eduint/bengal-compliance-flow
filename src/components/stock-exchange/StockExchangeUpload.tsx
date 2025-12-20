@@ -466,11 +466,14 @@ export function StockExchangeUpload() {
   const parseHtmlFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
     
+    setProgress({ current: 0, total: 100 });
+    
     const content = await file.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(content, 'text/html');
     
-    const trades: ParsedTrade[] = [];
+    // Collect all row objects first
+    const allRowObjects: Record<string, unknown>[] = [];
     const tables = doc.querySelectorAll('table');
     
     tables.forEach(table => {
@@ -491,12 +494,13 @@ export function StockExchangeUpload() {
               rowObj[headers[i]] = cell.textContent?.trim() || '';
             }
           });
-          const trade = parseRowToTrade(rowObj);
-          if (trade) trades.push(trade);
+          allRowObjects.push(rowObj);
         }
       });
     });
-    return trades;
+    
+    // Process with progress updates
+    return processInChunks(allRowObjects, parseRowToTrade);
   };
 
   // Parse pipe-delimited text file (CSE/DSE format)
@@ -504,29 +508,28 @@ export function StockExchangeUpload() {
   const parsePipeDelimitedFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
     
+    setProgress({ current: 0, total: 100 });
+    
     const content = await file.text();
     const lines = content.split('\n').filter(line => line.trim());
-    const trades: ParsedTrade[] = [];
     
-    for (const line of lines) {
+    const parseLine = (line: string): ParsedTrade | null => {
       const parts = line.split('|');
-      if (parts.length < 11) continue;
+      if (parts.length < 11) return null;
       
-      // Format: board|ref_code|security_code|side|quantity|price|client_code|???|???|exec_id|trade_date|trade_time|...
       const board = parts[0]?.trim() || '';
-      const clientCode = parts[6]?.trim() || ''; // Client code is at position 6
+      const clientCode = parts[6]?.trim() || '';
       const securityCode = parts[2]?.trim() || '';
       const sideRaw = parts[3]?.trim().toUpperCase() || '';
       const side: "BUY" | "SELL" = sideRaw === 'S' ? 'SELL' : 'BUY';
       const quantity = parseFloat(parts[4]?.replace(/,/g, '') || '0') || 0;
       const price = parseFloat(parts[5]?.replace(/,/g, '') || '0') || 0;
       const execIdRaw = parts[9]?.trim() || '';
-      const dateRaw = parts[10]?.trim() || ''; // DD/MM/YYYY
+      const dateRaw = parts[10]?.trim() || '';
       const timeRaw = parts[11]?.trim() || '';
       
-      if (!clientCode || !securityCode) continue;
+      if (!clientCode || !securityCode) return null;
       
-      // Convert DD/MM/YYYY to YYYYMMDD (same format as DSE trades)
       let date = dateRaw;
       if (dateRaw.includes('/')) {
         const [day, month, year] = dateRaw.split('/');
@@ -535,16 +538,9 @@ export function StockExchangeUpload() {
         }
       }
       
-      // Generate unique exec_id if empty to avoid unique constraint issues
-      // Format: BOARD_CLIENT_SECURITY_DATE_TIME_QTY_PRICE
       const execId = execIdRaw || `${board}_${clientCode}_${securityCode}_${date}_${timeRaw}_${quantity}_${price}`.replace(/[^a-zA-Z0-9_]/g, '');
       
-      // Debug: Log first few CSE trades
-      if (trades.length < 3 && (board.startsWith('CTG') || board.startsWith('DHK'))) {
-        console.log('CSE Trade parsed:', { board, clientCode, securityCode, side, quantity, price, execId, date, timeRaw });
-      }
-      
-      trades.push({
+      return {
         action: '',
         status: 'FILL',
         isin: '',
@@ -569,15 +565,16 @@ export function StockExchangeUpload() {
         trader_dealer_id: '',
         owner_dealer_id: '',
         trade_report_type: '',
-      });
-    }
+      };
+    };
     
-    console.log('Total parsed pipe-delimited trades:', trades.length);
-    return trades;
+    return processInChunks(lines, parseLine);
   };
 
   const parseXmlFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
+    
+    setProgress({ current: 0, total: 100 });
     
     const content = await file.text();
     const parser = new DOMParser();
@@ -586,7 +583,8 @@ export function StockExchangeUpload() {
     const parseError = doc.querySelector('parsererror');
     if (parseError) return [];
     
-    const trades: ParsedTrade[] = [];
+    // Collect all row data objects first
+    const allRowData: Record<string, unknown>[] = [];
     
     let rows = doc.getElementsByTagName('Row');
     if (rows.length === 0) {
@@ -628,9 +626,7 @@ export function StockExchangeUpload() {
           }
           currentIndex++;
         }
-        
-        const trade = parseRowToTrade(rowData);
-        if (trade) trades.push(trade);
+        allRowData.push(rowData);
       }
     } else {
       // Fallback for <Trades><Detail .../> format
@@ -644,8 +640,7 @@ export function StockExchangeUpload() {
             const attr = element.attributes[j];
             rowData[attr.name] = attr.value;
           }
-          const trade = parseRowToTrade(rowData);
-          if (trade) trades.push(trade);
+          allRowData.push(rowData);
         }
       } else {
         const tradeElements = doc.querySelectorAll('Trade, trade, Record, record, Item, item');
@@ -660,14 +655,13 @@ export function StockExchangeUpload() {
               rowData[el.tagName] = el.textContent?.trim() || '';
             }
           });
-          const trade = parseRowToTrade(rowData);
-          if (trade) trades.push(trade);
+          allRowData.push(rowData);
         });
       }
     }
     
-    return trades;
-    return trades;
+    // Process with progress updates
+    return processInChunks(allRowData, parseRowToTrade);
   };
 
   const handleParseFile = async () => {
