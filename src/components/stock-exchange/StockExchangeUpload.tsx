@@ -423,21 +423,37 @@ export function StockExchangeUpload() {
     };
   };
 
-  // Fast direct processing - no chunking for parsing (only for DB saves)
-  const processDirectly = <T, R>(
+  // Process with periodic UI updates for progress display
+  const processWithProgress = async <T, R>(
     items: T[],
     processor: (item: T) => R | null
-  ): R[] => {
+  ): Promise<R[]> => {
     const results: R[] = [];
+    const total = items.length;
+    
+    // Set initial progress
+    setProgress({ current: 0, total });
+    
     for (let i = 0; i < items.length; i++) {
       const result = processor(items[i]);
       if (result) results.push(result);
+      
+      // Yield to UI every 10,000 rows (minimal overhead, allows progress updates)
+      if (i % 10000 === 0 && i > 0) {
+        setProgress({ current: i, total });
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
     }
+    
+    setProgress({ current: total, total });
     return results;
   };
 
   const parseExcelFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
+    
+    // Show "reading file" state
+    setProgress({ current: 0, total: 0 });
     
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: 'array' });
@@ -446,11 +462,14 @@ export function StockExchangeUpload() {
     
     console.log('Total rows to parse:', jsonData.length);
     
-    return processDirectly(jsonData, parseRowToTrade);
+    return processWithProgress(jsonData, parseRowToTrade);
   };
 
   const parseHtmlFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
+    
+    // Show "reading file" state
+    setProgress({ current: 0, total: 0 });
     
     const content = await file.text();
     const parser = new DOMParser();
@@ -482,12 +501,15 @@ export function StockExchangeUpload() {
       });
     });
     
-    return processDirectly(allRowObjects, parseRowToTrade);
+    return processWithProgress(allRowObjects, parseRowToTrade);
   };
 
   // Parse pipe-delimited text file (CSE/DSE format)
   const parsePipeDelimitedFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
+    
+    // Show "reading file" state
+    setProgress({ current: 0, total: 0 });
     
     const content = await file.text();
     const lines = content.split('\n').filter(line => line.trim());
@@ -547,11 +569,14 @@ export function StockExchangeUpload() {
       };
     };
     
-    return processDirectly(lines, parseLine);
+    return processWithProgress(lines, parseLine);
   };
 
   const parseXmlFile = async (): Promise<ParsedTrade[]> => {
     if (!file) return [];
+    
+    // Show "reading file" state
+    setProgress({ current: 0, total: 0 });
     
     const content = await file.text();
     const parser = new DOMParser();
@@ -635,7 +660,7 @@ export function StockExchangeUpload() {
       }
     }
     
-    return processDirectly(allRowData, parseRowToTrade);
+    return processWithProgress(allRowData, parseRowToTrade);
   };
 
   const handleParseFile = async () => {
