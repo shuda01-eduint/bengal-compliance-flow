@@ -682,7 +682,31 @@ export function StockExchangeUpload() {
           console.log(`Row ${i} data:`, rowData);
         }
         
+        // Debug logging for client 11770
+        const rowValues = Object.values(rowData).map(v => String(v));
+        const clientCodeValue = rowData['ClientCode'] || rowData['clientcode'] || rowData['Client Code'];
+        if (rowValues.some(v => v.includes('11770')) || String(clientCodeValue).includes('11770')) {
+          console.log(`🔍 FOUND 11770 in Row ${i}:`, {
+            clientCode: clientCodeValue,
+            securityCode: rowData['SecurityCode'] || rowData['securitycode'],
+            side: rowData['Side'] || rowData['side'],
+            quantity: rowData['Quantity'] || rowData['quantity'],
+            price: rowData['Price'] || rowData['price'],
+            fullRow: rowData
+          });
+        }
+        
         const trade = parseRowToTrade(rowData);
+        
+        // Log if 11770 trade was parsed or skipped
+        if (String(clientCodeValue).includes('11770')) {
+          if (trade) {
+            console.log(`✅ Client 11770 trade PARSED:`, trade);
+          } else {
+            console.log(`❌ Client 11770 trade SKIPPED - parseRowToTrade returned null`);
+          }
+        }
+        
         if (trade) trades.push(trade);
       }
     } else {
