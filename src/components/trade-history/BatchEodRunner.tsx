@@ -460,14 +460,27 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           });
         }
 
-        // Get day's trades
-        const { data: dateTrades } = await supabase
-          .from("trade_history")
-          .select("client_code, side, value, fill_type, status")
-          .eq("trade_date", tradeDateFormatted);
-
+        // Get day's trades - paginated to fetch ALL (Supabase default limit is 1000)
         const tradeMap = new Map<string, { grossBuys: number; netSells: number }>();
         let tradeFilesCount = 0;
+        let allTrades: { client_code: string | null; side: string | null; value: number | null; fill_type: string | null; status: string | null }[] = [];
+        let tradeOffset = 0;
+        const tradeBatchSize = 1000;
+        
+        while (true) {
+          const { data: tradeBatch } = await supabase
+            .from("trade_history")
+            .select("client_code, side, value, fill_type, status")
+            .eq("trade_date", tradeDateFormatted)
+            .range(tradeOffset, tradeOffset + tradeBatchSize - 1);
+          
+          if (!tradeBatch || tradeBatch.length === 0) break;
+          allTrades = [...allTrades, ...tradeBatch];
+          if (tradeBatch.length < tradeBatchSize) break;
+          tradeOffset += tradeBatchSize;
+        }
+        
+        const dateTrades = allTrades;
 
         // DEBUG: Log trade count for this date
         console.log(`[EOD ${dateStr}] Found ${dateTrades?.length || 0} trades`);
