@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import * as XLSX from "xlsx";
 import { format, subDays } from "date-fns";
+import { BatchEodRunner } from "./BatchEodRunner";
 import {
   DepositsWithdrawalsRecordSchema,
   validateRecords,
@@ -755,6 +756,10 @@ export const DepositsWithdrawalsTable = () => {
                 )}
                 Run EOD
               </Button>
+              <BatchEodRunner onComplete={() => {
+                fetchTotalCount();
+                fetchTransactions();
+              }} />
             </div>
           </div>
         </div>
