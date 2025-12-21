@@ -279,6 +279,19 @@ const AccountingTab = () => {
     },
   });
 
+  // Fetch turnover by department
+  const { data: departmentTurnover } = useQuery({
+    queryKey: ['accounting-turnover-by-department', fromDateStr, toDateStr],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_accounting_turnover_by_department', {
+        _from_tx_date: fromDateStr,
+        _to_tx_date: toDateStr,
+      });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   // Process accounting data with custom fields (filtering now done server-side)
   const accountingData = useMemo(() => {
     if (!accountingResult) return [];
@@ -547,15 +560,48 @@ const AccountingTab = () => {
             </CardContent>
           </Card>
 
-          <Card className="glass-card border-primary/30">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Calculator className="h-4 w-4 text-primary" />
-                <span className="text-xs text-muted-foreground">Turnover</span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Card className="glass-card border-primary/30 cursor-pointer hover:border-primary/50 transition-colors">
+                <CardContent className="p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Calculator className="h-4 w-4 text-primary" />
+                    <span className="text-xs text-muted-foreground">Turnover</span>
+                    <ChevronDown className="h-3 w-3 text-muted-foreground ml-auto" />
+                  </div>
+                  <p className="text-lg font-semibold text-primary">{formatCurrency(summary.totalTradeValue)}</p>
+                </CardContent>
+              </Card>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-0" align="end">
+              <div className="p-3 border-b border-border">
+                <h4 className="font-semibold text-sm">Turnover by Department</h4>
+                <p className="text-xs text-muted-foreground">Click card to see breakdown</p>
               </div>
-              <p className="text-lg font-semibold text-primary">{formatCurrency(summary.totalTradeValue)}</p>
-            </CardContent>
-          </Card>
+              <div className="max-h-64 overflow-y-auto">
+                {departmentTurnover && departmentTurnover.length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {departmentTurnover.map((dept: { department: string; total_buy: number; total_sell: number; turnover: number }, index: number) => (
+                      <div key={index} className="p-3 hover:bg-muted/50">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="text-sm font-medium truncate max-w-[140px]">{dept.department || 'Unknown'}</span>
+                          <span className="text-sm font-semibold text-primary">{formatCurrency(Number(dept.turnover))}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span className="text-red-400">Buy: {formatCurrency(Number(dept.total_buy))}</span>
+                          <span className="text-green-400">Sell: {formatCurrency(Number(dept.total_sell))}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4 text-center text-sm text-muted-foreground">
+                    No department data available
+                  </div>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
