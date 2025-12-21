@@ -1828,6 +1828,8 @@ export type Database = {
       get_margin_composition_by_department: {
         Args: { p_from_date?: string; p_to_date?: string }
         Returns: {
+          actual_from_date: string
+          actual_to_date: string
           beginning_loan: number
           change_percent: number
           client_count: number

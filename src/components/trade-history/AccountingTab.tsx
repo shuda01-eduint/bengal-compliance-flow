@@ -662,6 +662,14 @@ const AccountingTab = () => {
                   {/* Margin Loan Summary */}
                   <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
                     <h4 className="text-sm font-semibold mb-2">Margin Loan Summary</h4>
+                    {/* Display actual dates being used */}
+                    {balanceComparison && balanceComparison.length > 0 && (
+                      <div className="mb-2 text-[10px] text-muted-foreground bg-muted/30 rounded px-2 py-1">
+                        <span>Data: {balanceComparison[0]?.actual_from_date ? format(new Date(balanceComparison[0].actual_from_date), 'MMM dd') : 'N/A'}</span>
+                        <ArrowRight className="inline h-3 w-3 mx-1" />
+                        <span>{balanceComparison[0]?.actual_to_date ? format(new Date(balanceComparison[0].actual_to_date), 'MMM dd, yyyy') : 'N/A'}</span>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <div className="p-2 rounded-lg bg-muted/30 border border-border/50">
                         <span className="text-xs text-muted-foreground">Beginning Loan</span>
@@ -696,6 +704,27 @@ const AccountingTab = () => {
                           {formatCurrency(Math.abs(balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0))}
                         </p>
                       </div>
+                      {/* Show note when beginning and ending values are identical */}
+                      {balanceComparison && balanceComparison.length > 0 && 
+                        balanceComparison[0]?.actual_from_date === balanceComparison[0]?.actual_to_date && (
+                        <div className="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                          <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                            <FileText className="h-3 w-3" />
+                            Same date used for both periods - no change data available
+                          </p>
+                        </div>
+                      )}
+                      {/* Show note when values are identical but dates are different */}
+                      {balanceComparison && balanceComparison.length > 0 && 
+                        balanceComparison[0]?.actual_from_date !== balanceComparison[0]?.actual_to_date &&
+                        (balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) === 0 && (
+                        <div className="mt-2 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                          <p className="text-[10px] text-blue-400 flex items-center gap-1">
+                            <FileText className="h-3 w-3" />
+                            No change in margin loan between dates
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
