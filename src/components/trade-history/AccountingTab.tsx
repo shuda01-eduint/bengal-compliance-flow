@@ -480,69 +480,6 @@ const AccountingTab = () => {
     <div className="space-y-4 lg:space-y-6 w-full overflow-x-hidden">
       {/* Summary Cards - Sticky */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-3 lg:pb-4 -mx-4 px-4 pt-2">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2 lg:gap-3">
-          <Card className="glass-card">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Users className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Accounts</span>
-              </div>
-              <p className="text-lg font-semibold">{summary.totalAccounts.toLocaleString()}</p>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Percent className="h-4 w-4 text-blue-400" />
-                <span className="text-xs text-muted-foreground">Margin</span>
-              </div>
-              <p className="text-lg font-semibold text-blue-400">{summary.marginAccounts.toLocaleString()}</p>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Wallet className="h-4 w-4 text-red-400" />
-                <span className="text-xs text-muted-foreground">Margin Loan</span>
-              </div>
-              <p className="text-lg font-semibold text-red-400">{formatCurrency(summary.totalMarginLoan)}</p>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <TrendingUp className="h-4 w-4 text-orange-400" />
-                <span className="text-xs text-muted-foreground">Accrued Int.</span>
-              </div>
-              <p className="text-lg font-semibold text-orange-400">{formatCurrency(summary.totalAccruedInterest)}</p>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <ArrowDownToLine className="h-4 w-4 text-green-400" />
-                <span className="text-xs text-muted-foreground">Receivable</span>
-              </div>
-              <p className="text-lg font-semibold text-green-400">{formatCurrency(summary.totalReceivable)}</p>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <ArrowUpFromLine className="h-4 w-4 text-amber-400" />
-                <span className="text-xs text-muted-foreground">Payable</span>
-              </div>
-              <p className="text-lg font-semibold text-amber-400">{formatCurrency(summary.totalPayable)}</p>
-            </CardContent>
-          </Card>
-
-        </div>
-
         {/* Turnover Pie Chart - Always Visible */}
         {departmentTurnover && departmentTurnover.length > 0 && (
           <Card className="mt-4 glass-card">
