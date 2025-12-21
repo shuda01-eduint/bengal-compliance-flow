@@ -581,18 +581,35 @@ const AccountingTab = () => {
               <div className="max-h-64 overflow-y-auto">
                 {departmentTurnover && departmentTurnover.length > 0 ? (
                   <div className="divide-y divide-border">
-                    {departmentTurnover.map((dept: { department: string; total_buy: number; total_sell: number; turnover: number }, index: number) => (
-                      <div key={index} className="p-3 hover:bg-muted/50">
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="text-sm font-medium truncate max-w-[140px]">{dept.department || 'Unknown'}</span>
-                          <span className="text-sm font-semibold text-primary">{formatCurrency(Number(dept.turnover))}</span>
-                        </div>
-                        <div className="flex justify-between text-xs text-muted-foreground">
-                          <span className="text-red-400">Buy: {formatCurrency(Number(dept.total_buy))}</span>
-                          <span className="text-green-400">Sell: {formatCurrency(Number(dept.total_sell))}</span>
-                        </div>
-                      </div>
-                    ))}
+                    {(() => {
+                      const totalTurnover = departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0);
+                      return departmentTurnover.map((dept: { department: string; total_buy: number; total_sell: number; turnover: number }, index: number) => {
+                        const sharePercent = totalTurnover > 0 ? (Number(dept.turnover) / totalTurnover) * 100 : 0;
+                        return (
+                          <div key={index} className="p-3 hover:bg-muted/50">
+                            <div className="flex justify-between items-start mb-1">
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span className="text-sm font-medium truncate">{dept.department || 'Unknown'}</span>
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium shrink-0">
+                                  {sharePercent.toFixed(1)}%
+                                </span>
+                              </div>
+                              <span className="text-sm font-semibold text-primary ml-2">{formatCurrency(Number(dept.turnover))}</span>
+                            </div>
+                            <div className="flex justify-between text-xs text-muted-foreground">
+                              <span className="text-red-400">Buy: {formatCurrency(Number(dept.total_buy))}</span>
+                              <span className="text-green-400">Sell: {formatCurrency(Number(dept.total_sell))}</span>
+                            </div>
+                            <div className="mt-1.5 h-1 bg-muted rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-primary/60 rounded-full transition-all"
+                                style={{ width: `${Math.min(sharePercent, 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 ) : (
                   <div className="p-4 text-center text-sm text-muted-foreground">
