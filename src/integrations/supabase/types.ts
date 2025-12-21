@@ -778,6 +778,39 @@ export type Database = {
         }
         Relationships: []
       }
+      eod_ledger_snapshots: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          eod_date: string
+          id: string
+          investor_code: string
+          investor_name: string | null
+          ledger_balance: number
+          rm_email: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          eod_date: string
+          id?: string
+          investor_code: string
+          investor_name?: string | null
+          ledger_balance?: number
+          rm_email?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          eod_date?: string
+          id?: string
+          investor_code?: string
+          investor_name?: string | null
+          ledger_balance?: number
+          rm_email?: string | null
+        }
+        Relationships: []
+      }
       holdings: {
         Row: {
           avg_cost: number | null

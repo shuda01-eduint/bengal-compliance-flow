@@ -19,7 +19,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Upload, Search, Trash2, Download, Loader2 } from "lucide-react";
+import { Upload, Search, Trash2, Download, Loader2, Play } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import * as XLSX from "xlsx";
 import { format } from "date-fns";
 import {
@@ -54,9 +55,11 @@ interface DepositWithdrawal {
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 export const DepositsWithdrawalsTable = () => {
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState<DepositWithdrawal[]>([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [runningEod, setRunningEod] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -441,6 +444,57 @@ export const DepositsWithdrawalsTable = () => {
     toast.success("Export complete");
   };
 
+  // Run EOD - capture and store ledger balances for today
+  const handleRunEod = async () => {
+    setRunningEod(true);
+    try {
+      const today = format(new Date(), "yyyy-MM-dd");
+      
+      // Fetch all clients with their current ledger balances
+      const { data: clients, error: clientsError } = await supabase
+        .from("clients")
+        .select("inv_code, investor_name, ledger_balance, rm_email");
+      
+      if (clientsError) throw clientsError;
+      
+      if (!clients || clients.length === 0) {
+        toast.warning("No client data found to snapshot");
+        return;
+      }
+
+      // Prepare EOD snapshot records
+      const eodRecords = clients.map((client) => ({
+        eod_date: today,
+        investor_code: client.inv_code,
+        investor_name: client.investor_name,
+        ledger_balance: client.ledger_balance || 0,
+        rm_email: client.rm_email,
+        created_by: user?.id,
+      }));
+
+      // Upsert in batches (to handle existing records for the same day)
+      const BATCH_SIZE = 500;
+      let upsertedCount = 0;
+
+      for (let i = 0; i < eodRecords.length; i += BATCH_SIZE) {
+        const batch = eodRecords.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase
+          .from("eod_ledger_snapshots")
+          .upsert(batch, { onConflict: "eod_date,investor_code" });
+        
+        if (error) throw error;
+        upsertedCount += batch.length;
+      }
+
+      toast.success(`EOD snapshot saved: ${upsertedCount} ledger balances for ${today}`);
+    } catch (error: any) {
+      console.error("EOD error:", error);
+      toast.error("Failed to run EOD", { description: error.message });
+    } finally {
+      setRunningEod(false);
+    }
+  };
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-US", {
       minimumFractionDigits: 2,
@@ -515,6 +569,19 @@ export const DepositsWithdrawalsTable = () => {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            <Button
+              onClick={handleRunEod}
+              disabled={runningEod}
+              size="sm"
+              className="bg-primary hover:bg-primary/90"
+            >
+              {runningEod ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 mr-2" />
+              )}
+              Run EOD
+            </Button>
           </div>
         </div>
       </CardHeader>
