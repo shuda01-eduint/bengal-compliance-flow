@@ -320,12 +320,48 @@ export const DepositsWithdrawalsTable = () => {
         return;
       }
 
+      // Fetch existing records to check for duplicates
+      toast.info("Checking for duplicates...");
+      const { data: existingRecords, error: fetchError } = await supabase
+        .from("deposits_withdrawals")
+        .select("investor_code, amount, transaction_type, transaction_date");
+      
+      if (fetchError) {
+        console.error("Error fetching existing records:", fetchError);
+        throw fetchError;
+      }
+
+      // Create a Set of existing record keys for fast lookup
+      const existingKeys = new Set(
+        (existingRecords || []).map(r => 
+          `${r.investor_code}|${r.amount}|${r.transaction_type}|${r.transaction_date}`
+        )
+      );
+
+      // Filter out duplicates
+      const uniqueRecords = valid.filter(record => {
+        const key = `${record.investor_code}|${record.amount}|${record.transaction_type}|${record.transaction_date || format(new Date(), "yyyy-MM-dd")}`;
+        return !existingKeys.has(key);
+      });
+
+      const duplicateCount = valid.length - uniqueRecords.length;
+      if (duplicateCount > 0) {
+        toast.warning(`${duplicateCount} duplicate records skipped`, {
+          description: "Records with same investor, amount, type, and date already exist",
+        });
+      }
+
+      if (uniqueRecords.length === 0) {
+        toast.info("No new records to import - all were duplicates");
+        return;
+      }
+
       // Insert in batches
       const BATCH_SIZE = 500;
       let inserted = 0;
 
-      for (let i = 0; i < valid.length; i += BATCH_SIZE) {
-        const batch = valid.slice(i, i + BATCH_SIZE).map((record) => ({
+      for (let i = 0; i < uniqueRecords.length; i += BATCH_SIZE) {
+        const batch = uniqueRecords.slice(i, i + BATCH_SIZE).map((record) => ({
           investor_code: record.investor_code,
           transaction_type: record.transaction_type,
           amount: record.amount,
