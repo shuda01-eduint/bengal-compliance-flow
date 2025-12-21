@@ -150,7 +150,7 @@ const AccountingTab = () => {
   const [isColumnDialogOpen, setIsColumnDialogOpen] = useState(false);
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldFormula, setNewFieldFormula] = useState("");
-  const [chartView, setChartView] = useState<ChartView>('turnover');
+  const [chartView, setChartView] = useState<ChartView>('commission');
   const [selectedInvestor, setSelectedInvestor] = useState<AccountingRow | null>(null);
   const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 2));
   const [toDate, setToDate] = useState<Date>(new Date());
