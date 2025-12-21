@@ -140,6 +140,8 @@ const evaluateFormula = (formula: string, row: AccountingRow): number => {
   }
 };
 
+type ChartView = 'turnover' | 'margin' | 'commission';
+
 const AccountingTab = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
@@ -148,6 +150,7 @@ const AccountingTab = () => {
   const [isColumnDialogOpen, setIsColumnDialogOpen] = useState(false);
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldFormula, setNewFieldFormula] = useState("");
+  const [chartView, setChartView] = useState<ChartView>('turnover');
   const [selectedInvestor, setSelectedInvestor] = useState<AccountingRow | null>(null);
   const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 2));
   const [toDate, setToDate] = useState<Date>(new Date());
@@ -291,6 +294,33 @@ const AccountingTab = () => {
       if (error) throw error;
       return data || [];
     },
+  });
+
+  // Fetch margin composition by department
+  const { data: marginComposition } = useQuery({
+    queryKey: ['accounting-margin-by-department', toDateStr],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_margin_composition_by_department', {
+        p_date: toDateStr,
+      });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: chartView === 'margin',
+  });
+
+  // Fetch commission by department
+  const { data: commissionByDept } = useQuery({
+    queryKey: ['accounting-commission-by-department', fromDateStr, toDateStr],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_commission_by_department', {
+        _from_tx_date: fromDateStr,
+        _to_tx_date: toDateStr,
+      });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: chartView === 'commission',
   });
 
   // Process accounting data with custom fields (filtering now done server-side)
@@ -480,116 +510,379 @@ const AccountingTab = () => {
     <div className="space-y-4 lg:space-y-6 w-full overflow-x-hidden">
       {/* Summary Cards - Sticky */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-3 lg:pb-4 -mx-4 px-4 pt-2">
-        {/* Turnover Pie Chart - Always Visible */}
-        {departmentTurnover && departmentTurnover.length > 0 && (
-          <Card className="mt-4 glass-card">
-            <CardContent className="p-4">
-              <div className="flex flex-col lg:flex-row gap-4">
-                {/* Pie Chart */}
-                <div className="flex-shrink-0">
-                  <h4 className="text-sm font-semibold mb-2">Turnover by Department</h4>
-                  <div className="h-48 w-full lg:w-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={(() => {
-                            const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                            return departmentTurnover.map((dept: { department: string; turnover: number }, index: number) => ({
-                              name: dept.department || 'Unknown',
-                              value: Number(dept.turnover),
-                              color: COLORS[index % COLORS.length]
-                            }));
-                          })()}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={40}
-                          outerRadius={70}
-                          paddingAngle={2}
-                          dataKey="value"
-                        >
-                          {(() => {
-                            const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                            return departmentTurnover.map((_: any, index: number) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ));
-                          })()}
-                        </Pie>
-                        <Tooltip 
-                          formatter={(value: number) => formatCurrency(value)}
-                          contentStyle={{ 
-                            backgroundColor: 'hsl(var(--popover))', 
-                            border: '1px solid hsl(var(--border))',
-                            borderRadius: '6px',
-                            fontSize: '12px'
-                          }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+        {/* Department Charts - Clickable Toggle */}
+        <Card className="mt-4 glass-card">
+          <CardContent className="p-4">
+            {/* Chart View Tabs */}
+            <div className="flex gap-1 mb-4 p-1 bg-muted/30 rounded-lg w-fit">
+              <button
+                onClick={() => setChartView('turnover')}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                  chartView === 'turnover' 
+                    ? "bg-primary text-primary-foreground shadow-sm" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                )}
+              >
+                Turnover
+              </button>
+              <button
+                onClick={() => setChartView('margin')}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                  chartView === 'margin' 
+                    ? "bg-primary text-primary-foreground shadow-sm" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                )}
+              >
+                Margin (EOD)
+              </button>
+              <button
+                onClick={() => setChartView('commission')}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                  chartView === 'commission' 
+                    ? "bg-primary text-primary-foreground shadow-sm" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                )}
+              >
+                Commission
+              </button>
+            </div>
 
-                {/* Trade Summary */}
-                <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
-                  <h4 className="text-sm font-semibold mb-2">Trade Summary</h4>
-                  <div className="space-y-2">
-                    <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
-                      <span className="text-xs text-muted-foreground">Total Turnover</span>
-                      <p className="text-xl font-bold text-primary">
-                        {formatCurrency(departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0))}
-                      </p>
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Turnover View */}
+              {chartView === 'turnover' && departmentTurnover && departmentTurnover.length > 0 && (
+                <>
+                  {/* Pie Chart */}
+                  <div className="flex-shrink-0">
+                    <h4 className="text-sm font-semibold mb-2">Turnover by Department</h4>
+                    <div className="h-48 w-full lg:w-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={(() => {
+                              const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                              return departmentTurnover.map((dept: { department: string; turnover: number }, index: number) => ({
+                                name: dept.department || 'Unknown',
+                                value: Number(dept.turnover),
+                                color: COLORS[index % COLORS.length]
+                              }));
+                            })()}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={40}
+                            outerRadius={70}
+                            paddingAngle={2}
+                            dataKey="value"
+                          >
+                            {(() => {
+                              const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                              return departmentTurnover.map((_: any, index: number) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ));
+                            })()}
+                          </Pie>
+                          <Tooltip 
+                            formatter={(value: number) => formatCurrency(value)}
+                            contentStyle={{ 
+                              backgroundColor: 'hsl(var(--popover))', 
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '6px',
+                              fontSize: '12px'
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
                     </div>
-                    <div className="flex gap-2">
-                      <div className="flex-1 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
-                        <span className="text-xs text-muted-foreground">Total Buy</span>
-                        <p className="text-sm font-semibold text-red-400">
-                          {formatCurrency(departmentTurnover.reduce((sum: number, d: { total_buy: number }) => sum + Number(d.total_buy), 0))}
+                  </div>
+
+                  {/* Trade Summary */}
+                  <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
+                    <h4 className="text-sm font-semibold mb-2">Trade Summary</h4>
+                    <div className="space-y-2">
+                      <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
+                        <span className="text-xs text-muted-foreground">Total Turnover</span>
+                        <p className="text-xl font-bold text-primary">
+                          {formatCurrency(departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0))}
                         </p>
                       </div>
-                      <div className="flex-1 p-2 rounded-lg bg-green-500/10 border border-green-500/20">
-                        <span className="text-xs text-muted-foreground">Total Sell</span>
-                        <p className="text-sm font-semibold text-green-400">
-                          {formatCurrency(departmentTurnover.reduce((sum: number, d: { total_sell: number }) => sum + Number(d.total_sell), 0))}
-                        </p>
+                      <div className="flex gap-2">
+                        <div className="flex-1 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                          <span className="text-xs text-muted-foreground">Total Buy</span>
+                          <p className="text-sm font-semibold text-red-400">
+                            {formatCurrency(departmentTurnover.reduce((sum: number, d: { total_buy: number }) => sum + Number(d.total_buy), 0))}
+                          </p>
+                        </div>
+                        <div className="flex-1 p-2 rounded-lg bg-green-500/10 border border-green-500/20">
+                          <span className="text-xs text-muted-foreground">Total Sell</span>
+                          <p className="text-sm font-semibold text-green-400">
+                            {formatCurrency(departmentTurnover.reduce((sum: number, d: { total_sell: number }) => sum + Number(d.total_sell), 0))}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Department List */}
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-sm font-semibold mb-2">Department Breakdown</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-                    {(() => {
-                      const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                      const totalTurnover = departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0);
-                      
-                      return departmentTurnover.map((dept: { department: string; total_buy: number; total_sell: number; turnover: number }, index: number) => {
-                        const sharePercent = totalTurnover > 0 ? (Number(dept.turnover) / totalTurnover) * 100 : 0;
-                        return (
-                          <div key={index} className="p-2 rounded-lg bg-muted/30 border border-border/50 flex items-center gap-2">
-                            <div 
-                              className="w-3 h-3 rounded-full shrink-0" 
-                              style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex justify-between items-center">
-                                <span className="text-xs font-medium truncate">{dept.department || 'Unknown'}</span>
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold ml-1">
-                                  {sharePercent.toFixed(1)}%
-                                </span>
+                  {/* Department List */}
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-semibold mb-2">Department Breakdown</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                      {(() => {
+                        const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                        const totalTurnover = departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0);
+                        
+                        return departmentTurnover.map((dept: { department: string; total_buy: number; total_sell: number; turnover: number }, index: number) => {
+                          const sharePercent = totalTurnover > 0 ? (Number(dept.turnover) / totalTurnover) * 100 : 0;
+                          return (
+                            <div key={index} className="p-2 rounded-lg bg-muted/30 border border-border/50 flex items-center gap-2">
+                              <div 
+                                className="w-3 h-3 rounded-full shrink-0" 
+                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs font-medium truncate">{dept.department || 'Unknown'}</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold ml-1">
+                                    {sharePercent.toFixed(1)}%
+                                  </span>
+                                </div>
+                                <span className="text-xs text-muted-foreground">{formatCurrency(Number(dept.turnover))}</span>
                               </div>
-                              <span className="text-xs text-muted-foreground">{formatCurrency(Number(dept.turnover))}</span>
                             </div>
-                          </div>
-                        );
-                      });
-                    })()}
+                          );
+                        });
+                      })()}
+                    </div>
                   </div>
+                </>
+              )}
+
+              {/* Margin View */}
+              {chartView === 'margin' && (
+                <>
+                  {/* Pie Chart */}
+                  <div className="flex-shrink-0">
+                    <h4 className="text-sm font-semibold mb-2">Margin Loan by Department</h4>
+                    <div className="h-48 w-full lg:w-64">
+                      {marginComposition && marginComposition.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={(() => {
+                                const COLORS = ['hsl(var(--destructive))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                                return marginComposition.map((dept: { department: string; margin_loan: number }, index: number) => ({
+                                  name: dept.department || 'Unknown',
+                                  value: Number(dept.margin_loan),
+                                  color: COLORS[index % COLORS.length]
+                                }));
+                              })()}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={40}
+                              outerRadius={70}
+                              paddingAngle={2}
+                              dataKey="value"
+                            >
+                              {(() => {
+                                const COLORS = ['hsl(var(--destructive))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                                return marginComposition.map((_: any, index: number) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ));
+                              })()}
+                            </Pie>
+                            <Tooltip 
+                              formatter={(value: number) => formatCurrency(value)}
+                              contentStyle={{ 
+                                backgroundColor: 'hsl(var(--popover))', 
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '6px',
+                                fontSize: '12px'
+                              }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                          No margin data available
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Margin Summary */}
+                  <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
+                    <h4 className="text-sm font-semibold mb-2">Margin Summary</h4>
+                    <div className="space-y-2">
+                      <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                        <span className="text-xs text-muted-foreground">Total Margin Loan</span>
+                        <p className="text-xl font-bold text-red-400">
+                          {formatCurrency(marginComposition?.reduce((sum: number, d: { margin_loan: number }) => sum + Number(d.margin_loan), 0) || 0)}
+                        </p>
+                      </div>
+                      <div className="p-2 rounded-lg bg-muted/30 border border-border/50">
+                        <span className="text-xs text-muted-foreground">Departments with Margin</span>
+                        <p className="text-sm font-semibold">{marginComposition?.length || 0}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Department List */}
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-semibold mb-2">Department Breakdown</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                      {marginComposition && marginComposition.length > 0 ? (() => {
+                        const COLORS = ['hsl(var(--destructive))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                        const totalLoan = marginComposition.reduce((sum: number, d: { margin_loan: number }) => sum + Number(d.margin_loan), 0);
+                        
+                        return marginComposition.map((dept: { department: string; margin_loan: number; margin_accounts: number }, index: number) => {
+                          const sharePercent = totalLoan > 0 ? (Number(dept.margin_loan) / totalLoan) * 100 : 0;
+                          return (
+                            <div key={index} className="p-2 rounded-lg bg-muted/30 border border-border/50 flex items-center gap-2">
+                              <div 
+                                className="w-3 h-3 rounded-full shrink-0" 
+                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs font-medium truncate">{dept.department || 'Unknown'}</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-semibold ml-1">
+                                    {sharePercent.toFixed(1)}%
+                                  </span>
+                                </div>
+                                <span className="text-xs text-muted-foreground">{formatCurrency(Number(dept.margin_loan))}</span>
+                              </div>
+                            </div>
+                          );
+                        });
+                      })() : (
+                        <div className="col-span-3 text-center text-muted-foreground text-sm py-4">
+                          No margin data available for this date
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Commission View */}
+              {chartView === 'commission' && (
+                <>
+                  {/* Pie Chart */}
+                  <div className="flex-shrink-0">
+                    <h4 className="text-sm font-semibold mb-2">Commission by Department</h4>
+                    <div className="h-48 w-full lg:w-64">
+                      {commissionByDept && commissionByDept.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={(() => {
+                                const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                                return commissionByDept.map((dept: { department: string; total_commission: number }, index: number) => ({
+                                  name: dept.department || 'Unknown',
+                                  value: Number(dept.total_commission),
+                                  color: COLORS[index % COLORS.length]
+                                }));
+                              })()}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={40}
+                              outerRadius={70}
+                              paddingAngle={2}
+                              dataKey="value"
+                            >
+                              {(() => {
+                                const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                                return commissionByDept.map((_: any, index: number) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ));
+                              })()}
+                            </Pie>
+                            <Tooltip 
+                              formatter={(value: number) => formatCurrency(value)}
+                              contentStyle={{ 
+                                backgroundColor: 'hsl(var(--popover))', 
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '6px',
+                                fontSize: '12px'
+                              }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                          No commission data available
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Commission Summary */}
+                  <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
+                    <h4 className="text-sm font-semibold mb-2">Commission Summary</h4>
+                    <div className="space-y-2">
+                      <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                        <span className="text-xs text-muted-foreground">Total Commission</span>
+                        <p className="text-xl font-bold text-green-400">
+                          {formatCurrency(commissionByDept?.reduce((sum: number, d: { total_commission: number }) => sum + Number(d.total_commission), 0) || 0)}
+                        </p>
+                      </div>
+                      <div className="p-2 rounded-lg bg-muted/30 border border-border/50">
+                        <span className="text-xs text-muted-foreground">Total Turnover</span>
+                        <p className="text-sm font-semibold">
+                          {formatCurrency(commissionByDept?.reduce((sum: number, d: { total_turnover: number }) => sum + Number(d.total_turnover), 0) || 0)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Department List */}
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-semibold mb-2">Department Breakdown</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                      {commissionByDept && commissionByDept.length > 0 ? (() => {
+                        const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                        const totalCommission = commissionByDept.reduce((sum: number, d: { total_commission: number }) => sum + Number(d.total_commission), 0);
+                        
+                        return commissionByDept.map((dept: { department: string; total_commission: number; total_turnover: number }, index: number) => {
+                          const sharePercent = totalCommission > 0 ? (Number(dept.total_commission) / totalCommission) * 100 : 0;
+                          return (
+                            <div key={index} className="p-2 rounded-lg bg-muted/30 border border-border/50 flex items-center gap-2">
+                              <div 
+                                className="w-3 h-3 rounded-full shrink-0" 
+                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-xs font-medium truncate">{dept.department || 'Unknown'}</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 font-semibold ml-1">
+                                    {sharePercent.toFixed(1)}%
+                                  </span>
+                                </div>
+                                <span className="text-xs text-muted-foreground">{formatCurrency(Number(dept.total_commission))}</span>
+                              </div>
+                            </div>
+                          );
+                        });
+                      })() : (
+                        <div className="col-span-3 text-center text-muted-foreground text-sm py-4">
+                          No commission data available for this period
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Empty state for turnover */}
+              {chartView === 'turnover' && (!departmentTurnover || departmentTurnover.length === 0) && (
+                <div className="w-full text-center text-muted-foreground text-sm py-8">
+                  No turnover data available for this period
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Controls */}
