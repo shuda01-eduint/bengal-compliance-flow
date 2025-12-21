@@ -505,10 +505,12 @@ export const DepositsWithdrawalsTable = () => {
       }
 
       // 4. Get today's trades per investor (Buys and Sells)
+      // Trade dates are stored in YYYYMMDD format (e.g., "20251221")
+      const tradeDateFormatted = format(new Date(), "yyyyMMdd");
       const { data: todayTrades, error: tradesError } = await supabase
         .from("trade_history")
-        .select("client_code, side, value")
-        .eq("trade_date", today);
+        .select("client_code, side, value, fill_type, status")
+        .eq("trade_date", tradeDateFormatted);
       
       const tradeMap = new Map<string, { buys: number; sells: number }>();
       let tradeFilesCount = 0;
@@ -517,6 +519,11 @@ export const DepositsWithdrawalsTable = () => {
         tradeFilesCount = todayTrades.length > 0 ? 1 : 0; // Simplified count
         todayTrades.forEach((trade) => {
           if (!trade.client_code || !trade.value) return;
+          
+          // Only include filled trades (FILL or PF status)
+          const fillType = (trade.fill_type || trade.status || "").toUpperCase();
+          if (!["FILL", "PF"].includes(fillType)) return;
+          
           const current = tradeMap.get(trade.client_code) || { buys: 0, sells: 0 };
           const side = (trade.side || "").toUpperCase();
           if (side === "BUY" || side === "B") {
