@@ -140,7 +140,7 @@ const evaluateFormula = (formula: string, row: AccountingRow): number => {
   }
 };
 
-type ChartView = 'turnover' | 'margin' | 'commission';
+type ChartView = 'margin' | 'commission';
 
 const AccountingTab = () => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -517,17 +517,6 @@ const AccountingTab = () => {
             {/* Chart View Tabs */}
             <div className="flex gap-1 mb-4 p-1 bg-muted/30 rounded-lg w-fit">
               <button
-                onClick={() => setChartView('turnover')}
-                className={cn(
-                  "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                  chartView === 'turnover' 
-                    ? "bg-primary text-primary-foreground shadow-sm" 
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                )}
-              >
-                Turnover
-              </button>
-              <button
                 onClick={() => setChartView('margin')}
                 className={cn(
                   "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
@@ -553,112 +542,6 @@ const AccountingTab = () => {
 
             <div className="flex flex-col lg:flex-row gap-4">
               {/* Turnover View */}
-              {chartView === 'turnover' && departmentTurnover && departmentTurnover.length > 0 && (
-                <>
-                  {/* Pie Chart */}
-                  <div className="flex-shrink-0">
-                    <h4 className="text-sm font-semibold mb-2">Turnover by Department</h4>
-                    <div className="h-48 w-full lg:w-64">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={(() => {
-                              const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                              return departmentTurnover.map((dept: { department: string; turnover: number }, index: number) => ({
-                                name: dept.department || 'Unknown',
-                                value: Number(dept.turnover),
-                                color: COLORS[index % COLORS.length]
-                              }));
-                            })()}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={40}
-                            outerRadius={70}
-                            paddingAngle={2}
-                            dataKey="value"
-                          >
-                            {(() => {
-                              const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                              return departmentTurnover.map((_: any, index: number) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ));
-                            })()}
-                          </Pie>
-                          <Tooltip 
-                            formatter={(value: number) => formatCurrency(value)}
-                            contentStyle={{ 
-                              backgroundColor: 'hsl(var(--popover))', 
-                              border: '1px solid hsl(var(--border))',
-                              borderRadius: '6px',
-                              fontSize: '12px'
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* Trade Summary */}
-                  <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
-                    <h4 className="text-sm font-semibold mb-2">Trade Summary</h4>
-                    <div className="space-y-2">
-                      <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
-                        <span className="text-xs text-muted-foreground">Total Turnover</span>
-                        <p className="text-xl font-bold text-primary">
-                          {formatCurrency(departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0))}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="flex-1 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
-                          <span className="text-xs text-muted-foreground">Total Buy</span>
-                          <p className="text-sm font-semibold text-red-400">
-                            {formatCurrency(departmentTurnover.reduce((sum: number, d: { total_buy: number }) => sum + Number(d.total_buy), 0))}
-                          </p>
-                        </div>
-                        <div className="flex-1 p-2 rounded-lg bg-green-500/10 border border-green-500/20">
-                          <span className="text-xs text-muted-foreground">Total Sell</span>
-                          <p className="text-sm font-semibold text-green-400">
-                            {formatCurrency(departmentTurnover.reduce((sum: number, d: { total_sell: number }) => sum + Number(d.total_sell), 0))}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Department List */}
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-semibold mb-2">Department Breakdown</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-                      {(() => {
-                        const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                        const totalTurnover = departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0);
-                        
-                        return departmentTurnover.map((dept: { department: string; total_buy: number; total_sell: number; turnover: number }, index: number) => {
-                          const sharePercent = totalTurnover > 0 ? (Number(dept.turnover) / totalTurnover) * 100 : 0;
-                          return (
-                            <div key={index} className="p-2 rounded-lg bg-muted/30 border border-border/50 flex items-center gap-2">
-                              <div 
-                                className="w-3 h-3 rounded-full shrink-0" 
-                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-xs font-medium truncate">{dept.department || 'Unknown'}</span>
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold ml-1">
-                                    {sharePercent.toFixed(1)}%
-                                  </span>
-                                </div>
-                                <span className="text-xs text-muted-foreground">{formatCurrency(Number(dept.turnover))}</span>
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
-                </>
-              )}
-
               {/* Margin Loan View */}
               {chartView === 'margin' && (
                 <>
@@ -1068,13 +951,6 @@ const AccountingTab = () => {
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
-
-              {/* Empty state for turnover */}
-              {chartView === 'turnover' && (!departmentTurnover || departmentTurnover.length === 0) && (
-                <div className="w-full text-center text-muted-foreground text-sm py-8">
-                  No turnover data available for this period
                 </div>
               )}
             </div>
