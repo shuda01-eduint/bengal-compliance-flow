@@ -1601,9 +1601,20 @@ export type Database = {
         }
         Returns: {
           margin_accounts: number
+          margin_buy: number
+          margin_payable: number
+          margin_percentage: number
+          margin_receivable: number
+          margin_sell: number
+          non_margin_accounts: number
+          non_margin_buy: number
+          non_margin_payable: number
+          non_margin_receivable: number
+          non_margin_sell: number
           total_accounts: number
           total_accrued_interest: number
           total_buy: number
+          total_commission: number
           total_margin_loan: number
           total_payable: number
           total_receivable: number
