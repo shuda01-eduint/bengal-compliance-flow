@@ -609,170 +609,359 @@ const AccountingTab = () => {
               {/* Turnover View */}
               {/* Margin Loan View */}
               {chartView === 'margin' && (
-                <>
-                  {/* Pie Chart - showing ending loan distribution */}
-                  <div className="flex-shrink-0">
-                    <h4 className="text-sm font-semibold mb-2">Margin Loan Distribution</h4>
-                    <div className="h-48 w-full lg:w-64">
-                      {balanceComparison && balanceComparison.length > 0 ? (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={(() => {
-                                const COLORS = ['hsl(var(--destructive))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                                return balanceComparison.map((dept: { department: string; ending_loan: number }, index: number) => ({
-                                  name: dept.department || 'Unknown',
-                                  value: Number(dept.ending_loan),
-                                  color: COLORS[index % COLORS.length]
-                                }));
-                              })()}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={40}
-                              outerRadius={70}
-                              paddingAngle={2}
-                              dataKey="value"
-                            >
-                              {(() => {
-                                const COLORS = ['hsl(var(--destructive))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                                return balanceComparison.map((_: any, index: number) => (
-                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ));
-                              })()}
-                            </Pie>
-                            <Tooltip 
-                              formatter={(value: number) => formatCurrency(value)}
-                              contentStyle={{ 
-                                backgroundColor: 'hsl(var(--popover))', 
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '6px',
-                                fontSize: '12px'
-                              }}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      ) : (
-                        <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                          No margin loan data available
+                <div className="w-full space-y-6">
+                  {/* Date Range Indicator */}
+                  {balanceComparison && balanceComparison.length > 0 && (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
+                        <CalendarIcon className="h-3.5 w-3.5" />
+                        <span className="font-medium">Comparing:</span>
+                        <span className="text-foreground">{balanceComparison[0]?.actual_from_date ? format(new Date(balanceComparison[0].actual_from_date), 'MMM dd, yyyy') : 'N/A'}</span>
+                        <ArrowRight className="h-3 w-3" />
+                        <span className="text-foreground">{balanceComparison[0]?.actual_to_date ? format(new Date(balanceComparison[0].actual_to_date), 'MMM dd, yyyy') : 'N/A'}</span>
+                      </div>
+                      {/* Warning if same date */}
+                      {balanceComparison[0]?.actual_from_date === balanceComparison[0]?.actual_to_date && (
+                        <div className="flex items-center gap-2 text-xs bg-amber-500/10 text-amber-400 rounded-lg px-3 py-1.5 border border-amber-500/20">
+                          <FileText className="h-3.5 w-3.5" />
+                          <span>Same date - no comparison available</span>
                         </div>
                       )}
                     </div>
-                  </div>
+                  )}
 
-                  {/* Margin Loan Summary */}
-                  <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
-                    <h4 className="text-sm font-semibold mb-2">Margin Loan Summary</h4>
-                    {/* Display actual dates being used */}
-                    {balanceComparison && balanceComparison.length > 0 && (
-                      <div className="mb-2 text-[10px] text-muted-foreground bg-muted/30 rounded px-2 py-1">
-                        <span>Data: {balanceComparison[0]?.actual_from_date ? format(new Date(balanceComparison[0].actual_from_date), 'MMM dd') : 'N/A'}</span>
-                        <ArrowRight className="inline h-3 w-3 mx-1" />
-                        <span>{balanceComparison[0]?.actual_to_date ? format(new Date(balanceComparison[0].actual_to_date), 'MMM dd, yyyy') : 'N/A'}</span>
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <div className="p-2 rounded-lg bg-muted/30 border border-border/50">
-                        <span className="text-xs text-muted-foreground">Beginning Loan</span>
-                        <p className="text-lg font-bold">
+                  {/* KPI Metrics Row */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* Beginning Loan Card */}
+                    <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-slate-500/20 via-slate-500/10 to-transparent border border-slate-500/30 p-4 group hover:border-slate-500/50 transition-all duration-300">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-slate-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
+                      <div className="relative">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="p-2 rounded-lg bg-slate-500/20">
+                            <Wallet className="h-4 w-4 text-slate-400" />
+                          </div>
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-400 border border-slate-500/30">
+                            OPENING
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-1">Beginning Loan</p>
+                        <p className="text-2xl font-bold text-slate-300">
                           {formatCurrency(balanceComparison?.reduce((sum: number, d: { beginning_loan: number }) => sum + Number(d.beginning_loan), 0) || 0)}
                         </p>
+                        <div className="mt-2 flex items-center gap-1 text-xs text-slate-400/80">
+                          <span>{balanceComparison?.length || 0} departments</span>
+                        </div>
                       </div>
-                      <div className="p-2 rounded-lg bg-destructive/10 border border-destructive/20">
-                        <span className="text-xs text-muted-foreground">Ending Loan</span>
-                        <p className="text-lg font-bold text-destructive">
+                    </div>
+
+                    {/* Ending Loan Card */}
+                    <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-rose-500/20 via-rose-500/10 to-transparent border border-rose-500/30 p-4 group hover:border-rose-500/50 transition-all duration-300">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-rose-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
+                      <div className="relative">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="p-2 rounded-lg bg-rose-500/20">
+                            <TrendingUp className="h-4 w-4 text-rose-400" />
+                          </div>
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                            CLOSING
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-1">Ending Loan</p>
+                        <p className="text-2xl font-bold text-rose-400">
                           {formatCurrency(balanceComparison?.reduce((sum: number, d: { ending_loan: number }) => sum + Number(d.ending_loan), 0) || 0)}
                         </p>
+                        <div className="mt-2 flex items-center gap-1 text-xs text-rose-400/80">
+                          <span>Current outstanding</span>
+                        </div>
                       </div>
-                      <div className={cn(
-                        "p-2 rounded-lg border",
-                        (balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) <= 0
-                          ? "bg-green-500/10 border-green-500/20"
-                          : "bg-red-500/10 border-red-500/20"
-                      )}>
-                        <span className="text-xs text-muted-foreground">Loan Change</span>
-                        <p className={cn(
-                          "text-lg font-bold flex items-center gap-1",
-                          (balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) <= 0
-                            ? "text-green-400"
-                            : "text-red-400"
+                    </div>
+
+                    {/* Loan Change Card */}
+                    {(() => {
+                      const totalChange = balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0;
+                      const isPositiveChange = totalChange <= 0; // Decrease in loan is positive
+                      return (
+                        <div className={cn(
+                          "relative overflow-hidden rounded-xl p-4 group transition-all duration-300",
+                          isPositiveChange 
+                            ? "bg-gradient-to-br from-emerald-500/20 via-emerald-500/10 to-transparent border border-emerald-500/30 hover:border-emerald-500/50"
+                            : "bg-gradient-to-br from-red-500/20 via-red-500/10 to-transparent border border-red-500/30 hover:border-red-500/50"
                         )}>
-                          {(balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) <= 0 ? (
-                            <TrendingDown className="h-4 w-4" />
-                          ) : (
-                            <TrendingUp className="h-4 w-4" />
-                          )}
-                          {formatCurrency(Math.abs(balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0))}
-                        </p>
+                          <div className={cn(
+                            "absolute top-0 right-0 w-24 h-24 rounded-full blur-2xl transform translate-x-8 -translate-y-8",
+                            isPositiveChange ? "bg-emerald-500/10" : "bg-red-500/10"
+                          )} />
+                          <div className="relative">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className={cn(
+                                "p-2 rounded-lg",
+                                isPositiveChange ? "bg-emerald-500/20" : "bg-red-500/20"
+                              )}>
+                                {isPositiveChange ? (
+                                  <TrendingDown className="h-4 w-4 text-emerald-400" />
+                                ) : (
+                                  <TrendingUp className="h-4 w-4 text-red-400" />
+                                )}
+                              </div>
+                              <span className={cn(
+                                "text-[10px] font-medium px-2 py-0.5 rounded-full border",
+                                isPositiveChange 
+                                  ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                                  : "bg-red-500/20 text-red-400 border-red-500/30"
+                              )}>
+                                {isPositiveChange ? 'DECREASED' : 'INCREASED'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-1">Net Change</p>
+                            <p className={cn(
+                              "text-2xl font-bold flex items-center gap-1",
+                              isPositiveChange ? "text-emerald-400" : "text-red-400"
+                            )}>
+                              {isPositiveChange ? '-' : '+'}{formatCurrency(Math.abs(totalChange))}
+                            </p>
+                            <div className={cn(
+                              "mt-2 flex items-center gap-1 text-xs",
+                              isPositiveChange ? "text-emerald-400/80" : "text-red-400/80"
+                            )}>
+                              <span>{isPositiveChange ? 'Liability reduced' : 'Liability increased'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Change Percentage Card */}
+                    {(() => {
+                      const beginningTotal = balanceComparison?.reduce((sum: number, d: { beginning_loan: number }) => sum + Number(d.beginning_loan), 0) || 0;
+                      const totalChange = balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0;
+                      const changePercent = beginningTotal > 0 ? (totalChange / beginningTotal) * 100 : 0;
+                      const isPositive = changePercent <= 0;
+                      return (
+                        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-violet-500/20 via-violet-500/10 to-transparent border border-violet-500/30 p-4 group hover:border-violet-500/50 transition-all duration-300">
+                          <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
+                          <div className="relative">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="p-2 rounded-lg bg-violet-500/20">
+                                <Percent className="h-4 w-4 text-violet-400" />
+                              </div>
+                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-400 border border-violet-500/30">
+                                RATE
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-1">Change Rate</p>
+                            <p className={cn(
+                              "text-2xl font-bold",
+                              isPositive ? "text-emerald-400" : "text-red-400"
+                            )}>
+                              {isPositive && changePercent !== 0 ? '' : ''}{changePercent.toFixed(2)}%
+                            </p>
+                            <div className="mt-2 flex items-center gap-1 text-xs text-violet-400/80">
+                              <span>Period-over-period</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Charts and Table Row */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Enhanced Pie Chart */}
+                    <div className="lg:col-span-1 p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-semibold">Distribution</h4>
+                        <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-full bg-muted/50">
+                          By Department
+                        </span>
                       </div>
-                      {/* Show note when beginning and ending values are identical */}
-                      {balanceComparison && balanceComparison.length > 0 && 
-                        balanceComparison[0]?.actual_from_date === balanceComparison[0]?.actual_to_date && (
-                        <div className="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                          <p className="text-[10px] text-amber-400 flex items-center gap-1">
-                            <FileText className="h-3 w-3" />
-                            Same date used for both periods - no change data available
-                          </p>
-                        </div>
-                      )}
-                      {/* Show note when values are identical but dates are different */}
-                      {balanceComparison && balanceComparison.length > 0 && 
-                        balanceComparison[0]?.actual_from_date !== balanceComparison[0]?.actual_to_date &&
-                        (balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) === 0 && (
-                        <div className="mt-2 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                          <p className="text-[10px] text-blue-400 flex items-center gap-1">
-                            <FileText className="h-3 w-3" />
-                            No change in margin loan between dates
-                          </p>
-                        </div>
-                      )}
+                      <div className="h-56 w-full">
+                        {balanceComparison && balanceComparison.length > 0 ? (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <defs>
+                                <linearGradient id="loanGrad1" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(350, 89%, 60%)" />
+                                  <stop offset="100%" stopColor="hsl(350, 89%, 45%)" />
+                                </linearGradient>
+                                <linearGradient id="loanGrad2" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(217, 91%, 60%)" />
+                                  <stop offset="100%" stopColor="hsl(217, 91%, 45%)" />
+                                </linearGradient>
+                                <linearGradient id="loanGrad3" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(43, 96%, 56%)" />
+                                  <stop offset="100%" stopColor="hsl(43, 96%, 40%)" />
+                                </linearGradient>
+                                <linearGradient id="loanGrad4" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(280, 87%, 65%)" />
+                                  <stop offset="100%" stopColor="hsl(280, 87%, 50%)" />
+                                </linearGradient>
+                                <linearGradient id="loanGrad5" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(160, 84%, 39%)" />
+                                  <stop offset="100%" stopColor="hsl(160, 84%, 29%)" />
+                                </linearGradient>
+                              </defs>
+                              <Pie
+                                data={balanceComparison.map((dept: { department: string; ending_loan: number }, index: number) => ({
+                                  name: dept.department || 'Unknown',
+                                  value: Number(dept.ending_loan),
+                                }))}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={50}
+                                outerRadius={85}
+                                paddingAngle={3}
+                                dataKey="value"
+                                stroke="none"
+                              >
+                                {balanceComparison.map((_: any, index: number) => (
+                                  <Cell 
+                                    key={`cell-${index}`} 
+                                    fill={`url(#loanGrad${(index % 5) + 1})`}
+                                    className="drop-shadow-lg"
+                                  />
+                                ))}
+                              </Pie>
+                              <Tooltip 
+                                formatter={(value: number) => formatCurrency(value)}
+                                contentStyle={{ 
+                                  backgroundColor: 'hsl(var(--popover))', 
+                                  border: '1px solid hsl(var(--border))',
+                                  borderRadius: '12px',
+                                  fontSize: '12px',
+                                  boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+                                }}
+                              />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                            No margin loan data available
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Department Breakdown Table - Enhanced */}
+                    <div className="lg:col-span-2 p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-semibold">Department Breakdown</h4>
+                        <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-full bg-muted/50">
+                          {balanceComparison?.length || 0} Departments
+                        </span>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto">
+                        {balanceComparison && balanceComparison.length > 0 ? (
+                          <div className="space-y-2">
+                            {balanceComparison
+                              .sort((a: { ending_loan: number }, b: { ending_loan: number }) => Number(b.ending_loan) - Number(a.ending_loan))
+                              .map((dept: { department: string; beginning_loan: number; ending_loan: number; loan_change: number; change_percent: number; client_count: number }, index: number) => {
+                                const maxLoan = Math.max(...balanceComparison.map((d: { ending_loan: number }) => Number(d.ending_loan)));
+                                const barWidth = maxLoan > 0 ? (Number(dept.ending_loan) / maxLoan) * 100 : 0;
+                                const isDecrease = Number(dept.loan_change) <= 0;
+                                
+                                return (
+                                  <div 
+                                    key={index}
+                                    className={cn(
+                                      "relative p-3 rounded-lg border transition-all duration-200 hover:border-border group",
+                                      index % 2 === 0 ? "bg-muted/20" : "bg-transparent",
+                                      "border-border/30"
+                                    )}
+                                  >
+                                    {/* Background bar showing distribution */}
+                                    <div 
+                                      className="absolute left-0 top-0 h-full rounded-lg bg-gradient-to-r from-rose-500/10 to-transparent transition-all duration-500"
+                                      style={{ width: `${barWidth}%` }}
+                                    />
+                                    
+                                    <div className="relative flex items-center gap-3">
+                                      {/* Rank Badge */}
+                                      <div className={cn(
+                                        "flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                                        index === 0 ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30" :
+                                        index === 1 ? "bg-slate-400/20 text-slate-400 ring-1 ring-slate-400/30" :
+                                        index === 2 ? "bg-orange-600/20 text-orange-400 ring-1 ring-orange-600/30" :
+                                        "bg-muted/50 text-muted-foreground"
+                                      )}>
+                                        {index + 1}
+                                      </div>
+
+                                      {/* Department Info */}
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium truncate">{dept.department || 'Unknown'}</p>
+                                        <p className="text-[10px] text-muted-foreground">
+                                          {dept.client_count || 0} clients
+                                        </p>
+                                      </div>
+
+                                      {/* Loan Values */}
+                                      <div className="flex items-center gap-4 text-right">
+                                        <div className="hidden sm:block">
+                                          <p className="text-[10px] text-muted-foreground">Beginning</p>
+                                          <p className="text-xs font-medium text-slate-400">
+                                            {formatCurrency(Number(dept.beginning_loan))}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] text-muted-foreground">Ending</p>
+                                          <p className="text-sm font-bold text-rose-400">
+                                            {formatCurrency(Number(dept.ending_loan))}
+                                          </p>
+                                        </div>
+                                        <div className={cn(
+                                          "flex flex-col items-end px-2 py-1 rounded-lg",
+                                          isDecrease ? "bg-emerald-500/10" : "bg-red-500/10"
+                                        )}>
+                                          <div className={cn(
+                                            "flex items-center gap-1 text-xs font-semibold",
+                                            isDecrease ? "text-emerald-400" : "text-red-400"
+                                          )}>
+                                            {isDecrease ? (
+                                              <ArrowDownToLine className="h-3 w-3" />
+                                            ) : (
+                                              <ArrowUpFromLine className="h-3 w-3" />
+                                            )}
+                                            {formatCurrency(Math.abs(Number(dept.loan_change)))}
+                                          </div>
+                                          <p className={cn(
+                                            "text-[10px]",
+                                            isDecrease ? "text-emerald-400/70" : "text-red-400/70"
+                                          )}>
+                                            {Number(dept.change_percent).toFixed(1)}%
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        ) : (
+                          <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
+                            No margin loan data available for this period
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Department Loan Table */}
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-semibold mb-2">Margin Loan by Department</h4>
-                    <div className="max-h-56 overflow-y-auto border border-border rounded-lg">
-                      <Table>
-                        <TableHeader className="sticky top-0 bg-background">
-                          <TableRow>
-                            <TableHead className="text-xs">Department</TableHead>
-                            <TableHead className="text-xs text-right">Beg. Loan</TableHead>
-                            <TableHead className="text-xs text-right">End Loan</TableHead>
-                            <TableHead className="text-xs text-right">Change</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {balanceComparison && balanceComparison.length > 0 ? (
-                            balanceComparison.map((dept: { department: string; beginning_loan: number; ending_loan: number; loan_change: number; change_percent: number; client_count: number }, index: number) => (
-                              <TableRow key={index}>
-                                <TableCell className="text-xs font-medium py-1.5">{dept.department || 'Unknown'}</TableCell>
-                                <TableCell className="text-xs text-right py-1.5">{formatCurrency(Number(dept.beginning_loan))}</TableCell>
-                                <TableCell className="text-xs text-right py-1.5">{formatCurrency(Number(dept.ending_loan))}</TableCell>
-                                <TableCell className={cn(
-                                  "text-xs text-right py-1.5 font-medium flex items-center justify-end gap-1",
-                                  Number(dept.loan_change) <= 0 ? "text-green-400" : "text-red-400"
-                                )}>
-                                  {Number(dept.loan_change) <= 0 ? (
-                                    <TrendingDown className="h-3 w-3" />
-                                  ) : (
-                                    <TrendingUp className="h-3 w-3" />
-                                  )}
-                                  {formatCurrency(Math.abs(Number(dept.loan_change)))}
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          ) : (
-                            <TableRow>
-                              <TableCell colSpan={4} className="text-center text-muted-foreground text-sm py-4">
-                                No margin loan data available for this period
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
+                  {/* Info/Warning Messages */}
+                  {balanceComparison && balanceComparison.length > 0 && 
+                    balanceComparison[0]?.actual_from_date !== balanceComparison[0]?.actual_to_date &&
+                    (balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) === 0 && (
+                    <div className="flex items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-blue-500/10 via-blue-500/5 to-transparent border border-blue-500/20">
+                      <div className="p-2 rounded-lg bg-blue-500/20">
+                        <FileText className="h-4 w-4 text-blue-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-blue-400">No Changes Detected</p>
+                        <p className="text-xs text-blue-400/70">
+                          The margin loan balance remained unchanged between the comparison dates. This may indicate identical data snapshots.
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                </>
+                  )}
+                </div>
               )}
 
               {/* Commission View - Premium Design */}
