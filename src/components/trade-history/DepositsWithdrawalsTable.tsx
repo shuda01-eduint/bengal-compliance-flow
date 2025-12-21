@@ -462,6 +462,33 @@ export const DepositsWithdrawalsTable = () => {
         return;
       }
 
+      // Get trade file stats for today
+      const { data: tradeStats } = await supabase.rpc('get_trade_file_stats');
+      const tradeFilesCount = tradeStats?.length || 0;
+
+      // Get deposit/withdrawal stats 
+      const { data: depositStats, error: depositError } = await supabase
+        .from("deposits_withdrawals")
+        .select("amount, transaction_type");
+      
+      let depositRecordsCount = 0;
+      let totalDeposits = 0;
+      let totalWithdrawals = 0;
+      
+      if (!depositError && depositStats) {
+        depositRecordsCount = depositStats.length;
+        depositStats.forEach((d) => {
+          if (d.transaction_type.toLowerCase().includes("deposit")) {
+            totalDeposits += d.amount || 0;
+          } else {
+            totalWithdrawals += d.amount || 0;
+          }
+        });
+      }
+
+      // Calculate total ledger balance
+      const totalLedgerBalance = clients.reduce((sum, c) => sum + (c.ledger_balance || 0), 0);
+
       // Prepare EOD snapshot records
       const eodRecords = clients.map((client) => ({
         eod_date: today,
@@ -486,7 +513,29 @@ export const DepositsWithdrawalsTable = () => {
         upsertedCount += batch.length;
       }
 
-      toast.success(`EOD snapshot saved: ${upsertedCount} ledger balances for ${today}`);
+      // Record EOD run history
+      const { error: historyError } = await supabase
+        .from("eod_run_history")
+        .insert({
+          run_date: today,
+          run_by: user?.id,
+          run_by_email: user?.email,
+          clients_captured: upsertedCount,
+          total_ledger_balance: totalLedgerBalance,
+          trade_files_count: tradeFilesCount,
+          deposit_records_count: depositRecordsCount,
+          total_deposits: totalDeposits,
+          total_withdrawals: totalWithdrawals,
+          status: 'completed',
+        });
+
+      if (historyError) {
+        console.error("Failed to record EOD history:", historyError);
+      }
+
+      toast.success(`EOD snapshot saved: ${upsertedCount} ledger balances for ${today}`, {
+        description: `Trade files: ${tradeFilesCount}, Deposits/Withdrawals: ${depositRecordsCount}`,
+      });
     } catch (error: any) {
       console.error("EOD error:", error);
       toast.error("Failed to run EOD", { description: error.message });
