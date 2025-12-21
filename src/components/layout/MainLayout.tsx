@@ -19,7 +19,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
       {/* Main Content Area */}
       <div className="lg:ml-64 transition-all duration-300">
         <Header title={title} subtitle={subtitle} />
-        <main className="p-4 lg:p-6">
+        <main className="p-4 lg:p-6 pb-24 lg:pb-6">
           {children}
         </main>
       </div>
