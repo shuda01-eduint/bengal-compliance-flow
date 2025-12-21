@@ -172,13 +172,13 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
       // Create initial balance map (from day before start, or from clients.ledger_balance)
       let runningBalances = new Map<string, number>();
       clients.forEach((client) => {
-        // Default to client's ledger_balance from the clients table
-        runningBalances.set(client.inv_code, client.ledger_balance || 0);
+        // Default to client's ledger_balance from the clients table - normalize to uppercase
+        runningBalances.set(client.inv_code.toUpperCase(), client.ledger_balance || 0);
       });
 
       // Override with previous day EOD if exists
       prevDayEod?.forEach((row) => {
-        runningBalances.set(row.investor_code, row.ledger_balance || 0);
+        runningBalances.set(row.investor_code.toUpperCase(), row.ledger_balance || 0);
       });
 
       // 5. Process each day sequentially
@@ -204,7 +204,8 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         if (dateTx) {
           depositRecordsCount = dateTx.length;
           dateTx.forEach((tx) => {
-            const current = txMap.get(tx.investor_code) || { deposits: 0, withdrawals: 0 };
+            const investorCode = tx.investor_code.toUpperCase(); // Normalize to uppercase
+            const current = txMap.get(investorCode) || { deposits: 0, withdrawals: 0 };
             if (tx.transaction_type.toLowerCase().includes("deposit")) {
               current.deposits += tx.amount || 0;
               totalDeposits += tx.amount || 0;
@@ -212,7 +213,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
               current.withdrawals += tx.amount || 0;
               totalWithdrawals += tx.amount || 0;
             }
-            txMap.set(tx.investor_code, current);
+            txMap.set(investorCode, current);
           });
         }
 
@@ -233,9 +234,9 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
             const fillType = (trade.fill_type || trade.status || "").toUpperCase();
             if (!["FILL", "PF"].includes(fillType)) return;
 
-            const clientCode = trade.client_code.toUpperCase();
+            const clientCode = trade.client_code.toUpperCase(); // Normalize to uppercase
             const commissionRate = commissionMap.get(clientCode) || 0;
-            const current = tradeMap.get(trade.client_code) || { grossBuys: 0, netSells: 0 };
+            const current = tradeMap.get(clientCode) || { grossBuys: 0, netSells: 0 };
             const side = (trade.side || "").toUpperCase();
 
             if (side === "BUY" || side === "B") {
@@ -243,16 +244,16 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
             } else if (side === "SELL" || side === "S") {
               current.netSells += trade.value * (1 - commissionRate);
             }
-            tradeMap.set(trade.client_code, current);
+            tradeMap.set(clientCode, current); // Store with normalized key
           });
         }
 
         // Calculate EOD for each client using running balances
         const eodRecords = clients.map((client) => {
-          const invCode = client.inv_code;
-          const openingBalance = runningBalances.get(invCode) || 0;
-          const tx = txMap.get(invCode) || { deposits: 0, withdrawals: 0 };
-          const trades = tradeMap.get(invCode) || { grossBuys: 0, netSells: 0 };
+          const invCodeUpper = client.inv_code.toUpperCase(); // Normalize to uppercase for lookups
+          const openingBalance = runningBalances.get(invCodeUpper) || 0;
+          const tx = txMap.get(invCodeUpper) || { deposits: 0, withdrawals: 0 };
+          const trades = tradeMap.get(invCodeUpper) || { grossBuys: 0, netSells: 0 };
 
           const calculatedBalance =
             openingBalance +
@@ -261,12 +262,12 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
             trades.netSells -
             trades.grossBuys;
 
-          // Update running balance for next day
-          runningBalances.set(invCode, calculatedBalance);
+          // Update running balance for next day (use uppercase key)
+          runningBalances.set(invCodeUpper, calculatedBalance);
 
           return {
             eod_date: dateStr,
-            investor_code: invCode,
+            investor_code: client.inv_code, // Store original case in DB
             investor_name: client.investor_name,
             ledger_balance: calculatedBalance,
             rm_email: client.rm_email,
