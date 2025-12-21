@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   LayoutDashboard, 
   FileText, 
@@ -15,14 +15,14 @@ import {
   Calculator,
   PieChart,
   Menu,
-  X
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { useSwipeable } from "react-swipeable";
+import { BottomNav } from "./BottomNav";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -54,62 +54,104 @@ export function MobileNav() {
     setOpen(false);
   };
 
+  // Swipe handlers for edge detection
+  const swipeHandlers = useSwipeable({
+    onSwipedRight: (eventData) => {
+      // Only open if swipe started from left edge (within 30px)
+      if (eventData.initial[0] < 30) {
+        setOpen(true);
+      }
+    },
+    trackMouse: false,
+    trackTouch: true,
+    delta: 50,
+  });
+
+  // Swipe handler to close the drawer
+  const drawerSwipeHandlers = useSwipeable({
+    onSwipedLeft: () => {
+      setOpen(false);
+    },
+    trackMouse: false,
+    trackTouch: true,
+    delta: 50,
+  });
+
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" className="lg:hidden">
-          <Menu className="h-6 w-6" />
-          <span className="sr-only">Toggle menu</span>
-        </Button>
-      </SheetTrigger>
-      <SheetContent side="left" className="w-72 p-0 bg-sidebar border-sidebar-border">
-        <div className="flex h-full flex-col">
-          {/* Logo */}
-          <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg btn-gradient-gold">
-                <span className="text-base font-bold text-primary-foreground">U</span>
-              </div>
-              <div>
-                <h1 className="text-base font-semibold text-foreground">UCB Stock</h1>
-                <p className="text-xs text-muted-foreground">Compliance ERP</p>
+    <>
+      {/* Swipe detection zone - only on mobile */}
+      <div
+        {...swipeHandlers}
+        className="fixed inset-y-0 left-0 w-8 z-40 lg:hidden"
+        aria-hidden="true"
+      />
+
+      {/* Swipe edge indicator */}
+      <div className="fixed left-0 top-1/2 -translate-y-1/2 w-1 h-16 bg-primary/20 rounded-r-full lg:hidden pointer-events-none" />
+
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetTrigger asChild>
+          <Button variant="ghost" size="icon" className="lg:hidden">
+            <Menu className="h-6 w-6" />
+            <span className="sr-only">Toggle menu</span>
+          </Button>
+        </SheetTrigger>
+        <SheetContent 
+          side="left" 
+          className="w-72 p-0 bg-sidebar border-sidebar-border"
+          {...drawerSwipeHandlers}
+        >
+          <div className="flex h-full flex-col">
+            {/* Logo */}
+            <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg btn-gradient-gold">
+                  <span className="text-base font-bold text-primary-foreground">U</span>
+                </div>
+                <div>
+                  <h1 className="text-base font-semibold text-foreground">UCB Stock</h1>
+                  <p className="text-xs text-muted-foreground">Compliance ERP</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto space-y-1 px-3 py-4">
-            {navigation.map((item) => (
-              <NavLink
-                key={item.name}
-                to={item.href}
-                onClick={handleNavClick}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                activeClassName="bg-sidebar-accent text-primary"
+            {/* Navigation */}
+            <nav className="flex-1 overflow-y-auto space-y-1 px-3 py-4">
+              {navigation.map((item) => (
+                <NavLink
+                  key={item.name}
+                  to={item.href}
+                  onClick={handleNavClick}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  activeClassName="bg-sidebar-accent text-primary"
+                >
+                  <item.icon className="h-5 w-5 flex-shrink-0" />
+                  <span>{item.name}</span>
+                </NavLink>
+              ))}
+            </nav>
+
+            {/* User & Logout */}
+            <div className="border-t border-sidebar-border p-3 space-y-2 mb-16">
+              {user && (
+                <div className="px-3 py-2 text-xs text-muted-foreground truncate">
+                  {user.email}
+                </div>
+              )}
+              <button
+                onClick={handleSignOut}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/20"
               >
-                <item.icon className="h-5 w-5 flex-shrink-0" />
-                <span>{item.name}</span>
-              </NavLink>
-            ))}
-          </nav>
-
-          {/* User & Logout */}
-          <div className="border-t border-sidebar-border p-3 space-y-2">
-            {user && (
-              <div className="px-3 py-2 text-xs text-muted-foreground truncate">
-                {user.email}
-              </div>
-            )}
-            <button
-              onClick={handleSignOut}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/20"
-            >
-              <LogOut className="h-4 w-4" />
-              <span>Sign Out</span>
-            </button>
+                <LogOut className="h-4 w-4" />
+                <span>Sign Out</span>
+              </button>
+            </div>
           </div>
-        </div>
-      </SheetContent>
-    </Sheet>
+        </SheetContent>
+      </Sheet>
+
+      {/* Bottom Navigation */}
+      <BottomNav onMenuClick={() => setOpen(true)} />
+    </>
   );
 }
