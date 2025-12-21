@@ -463,10 +463,10 @@ const AccountingTab = () => {
   };
 
   return (
-    <div className="space-y-6 w-full overflow-x-hidden">
+    <div className="space-y-4 lg:space-y-6 w-full overflow-x-hidden">
       {/* Summary Cards - Sticky */}
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-4 -mx-4 px-4 pt-2">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-3">
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-3 lg:pb-4 -mx-4 px-4 pt-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2 lg:gap-3">
           <Card className="glass-card">
             <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-1">
@@ -560,14 +560,14 @@ const AccountingTab = () => {
       </div>
 
       {/* Controls */}
-      <div className="space-y-4">
+      <div className="space-y-3 lg:space-y-4">
         {/* Search Row */}
-        <div className="relative w-full max-w-lg group">
+        <div className="relative w-full lg:max-w-lg group">
           <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/5 rounded-lg blur-sm opacity-0 group-focus-within:opacity-100 transition-opacity" />
           <div className="relative flex items-center">
             <Search className="absolute left-3 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
             <Input
-              placeholder="Search investor by code (exact) or name..."
+              placeholder="Search by code or name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 pr-9 h-10 bg-muted/30 border-muted-foreground/20 focus:border-primary/50 focus:bg-background transition-all"
@@ -589,7 +589,7 @@ const AccountingTab = () => {
         </div>
 
         {/* Actions Row */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-2 lg:gap-3">
           {/* Date Range Selection */}
           <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
             <Popover>
@@ -629,8 +629,8 @@ const AccountingTab = () => {
 
           {/* Account Type Filter */}
           <Select value={accountTypeFilter} onValueChange={setAccountTypeFilter}>
-            <SelectTrigger className="w-[140px] h-9 bg-muted/30 border-border/50">
-              <SelectValue placeholder="Account Type" />
+            <SelectTrigger className="w-[120px] lg:w-[140px] h-9 bg-muted/30 border-border/50 text-sm">
+              <SelectValue placeholder="Type" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>
@@ -641,8 +641,8 @@ const AccountingTab = () => {
 
           {/* Has Trades Filter */}
           <Select value={hasTradesFilter} onValueChange={setHasTradesFilter}>
-            <SelectTrigger className="w-[140px] h-9 bg-muted/30 border-border/50">
-              <SelectValue placeholder="Trade Activity" />
+            <SelectTrigger className="w-[120px] lg:w-[140px] h-9 bg-muted/30 border-border/50 text-sm">
+              <SelectValue placeholder="Activity" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Activity</SelectItem>
@@ -651,16 +651,16 @@ const AccountingTab = () => {
             </SelectContent>
           </Select>
 
-          <span className="text-sm text-muted-foreground hidden sm:inline">
+          <span className="text-xs lg:text-sm text-muted-foreground hidden md:inline">
             Period: {format(fromDate, 'dd MMM')} - {format(toDate, 'dd MMM yyyy')}
           </span>
 
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto flex-wrap">
             <Dialog open={isFieldDialogOpen} onOpenChange={setIsFieldDialogOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Settings className="h-4 w-4 mr-2" />
-                  Custom Fields
+                <Button variant="outline" size="sm" className="flex-1 sm:flex-none text-xs lg:text-sm">
+                  <Settings className="h-4 w-4 mr-1 lg:mr-2" />
+                  <span className="hidden sm:inline">Custom </span>Fields
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-lg">
@@ -729,8 +729,8 @@ const AccountingTab = () => {
             {/* Column Settings Dialog */}
             <Dialog open={isColumnDialogOpen} onOpenChange={setIsColumnDialogOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Eye className="h-4 w-4 mr-2" />
+                <Button variant="outline" size="sm" className="flex-1 sm:flex-none text-xs lg:text-sm">
+                  <Eye className="h-4 w-4 mr-1 lg:mr-2" />
                   Columns
                 </Button>
               </DialogTrigger>
@@ -780,8 +780,8 @@ const AccountingTab = () => {
             </Dialog>
 
             {isAdmin && (
-              <Button variant="outline" size="sm" onClick={handleExport}>
-                <Download className="h-4 w-4 mr-2" />
+              <Button variant="outline" size="sm" onClick={handleExport} className="flex-1 sm:flex-none text-xs lg:text-sm">
+                <Download className="h-4 w-4 mr-1 lg:mr-2" />
                 Export
               </Button>
             )}

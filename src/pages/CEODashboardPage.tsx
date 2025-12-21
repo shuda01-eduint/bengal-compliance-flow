@@ -564,13 +564,13 @@ const CEODashboardPage = () => {
       subtitle={`Executive overview as of ${latestDate ? format(parseISO(latestDate), "PPP") : "—"}`}
     >
       {/* Mode Toggle & Actions */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 lg:mb-8">
         <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
-          <TabsList className="bg-secondary/50 p-1 h-10">
-            <TabsTrigger value="ceo" className="text-sm px-4 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+          <TabsList className="bg-secondary/50 p-1 h-9 lg:h-10">
+            <TabsTrigger value="ceo" className="text-xs lg:text-sm px-3 lg:px-4 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
               CEO View
             </TabsTrigger>
-            <TabsTrigger value="rm" className="text-sm px-4 data-[state=active]:bg-secondary">
+            <TabsTrigger value="rm" className="text-xs lg:text-sm px-3 lg:px-4 data-[state=active]:bg-secondary">
               RM View
             </TabsTrigger>
           </TabsList>
@@ -581,19 +581,19 @@ const CEODashboardPage = () => {
             variant="outline"
             size="sm"
             onClick={() => setThresholdDialogOpen(true)}
-            className="h-9 text-xs border-border/50 hover:bg-secondary/80"
+            className="h-8 lg:h-9 text-xs border-border/50 hover:bg-secondary/80"
           >
-            <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+            <Settings2 className="mr-1 lg:mr-1.5 h-3 lg:h-3.5 w-3 lg:w-3.5" />
             Alerts
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => navigate("/admin/balances")}
-            className="h-9 text-xs border-border/50 hover:bg-secondary/80"
+            className="h-8 lg:h-9 text-xs border-border/50 hover:bg-secondary/80"
           >
             Details
-            <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
+            <ExternalLink className="ml-1 lg:ml-1.5 h-3 lg:h-3.5 w-3 lg:w-3.5" />
           </Button>
         </div>
       </div>
@@ -604,7 +604,7 @@ const CEODashboardPage = () => {
       />
 
       {/* Executive Health Tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 lg:gap-3 mb-6 lg:mb-8">
         <ExecutiveHealthTile
           title="Active Investors"
           value={Object.keys(investorAdjustments).length.toLocaleString()}

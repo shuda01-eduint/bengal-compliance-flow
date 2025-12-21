@@ -13,20 +13,22 @@ const ReportsPage = () => {
       subtitle="Manage and track all regulatory and internal compliance reports"
     >
       <Tabs defaultValue="overbuy" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overbuy" className="gap-2">
-            <AlertTriangle className="h-4 w-4" />
-            OverBuy Monitor
-          </TabsTrigger>
-          <TabsTrigger value="merchant" className="gap-2">
-            <Building2 className="h-4 w-4" />
-            Merchant Banks
-          </TabsTrigger>
-          <TabsTrigger value="general" className="gap-2">
-            <FileText className="h-4 w-4" />
-            General Reports
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto -mx-4 px-4 lg:mx-0 lg:px-0">
+          <TabsList className="inline-flex w-auto min-w-full sm:min-w-0">
+            <TabsTrigger value="overbuy" className="gap-1 lg:gap-2 text-xs lg:text-sm px-2 lg:px-3">
+              <AlertTriangle className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+              <span className="hidden sm:inline">OverBuy </span>Monitor
+            </TabsTrigger>
+            <TabsTrigger value="merchant" className="gap-1 lg:gap-2 text-xs lg:text-sm px-2 lg:px-3">
+              <Building2 className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+              <span className="hidden sm:inline">Merchant </span>Banks
+            </TabsTrigger>
+            <TabsTrigger value="general" className="gap-1 lg:gap-2 text-xs lg:text-sm px-2 lg:px-3">
+              <FileText className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+              <span className="hidden sm:inline">General </span>Reports
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="overbuy">
           <OverBuyReport />
