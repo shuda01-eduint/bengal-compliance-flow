@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -19,12 +19,21 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { CalendarIcon, Loader2, Play, AlertTriangle } from "lucide-react";
-import { format, addDays, differenceInDays } from "date-fns";
+import { CalendarIcon, Loader2, Play, AlertTriangle, ShieldCheck, RefreshCw } from "lucide-react";
+import { format, addDays, differenceInDays, parse } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface BatchEodRunnerProps {
   onComplete?: () => void;
+}
+
+interface StaleWarning {
+  date: string;
+  mismatchCount: number;
+  sampleClient: string;
+  storedValue: number;
+  expectedValue: number;
+  suggestedStartDate: Date | null;
 }
 
 // Helper function to fetch all rows with pagination (Supabase limits to 1000)
@@ -61,6 +70,205 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const [currentDateProcessing, setCurrentDateProcessing] = useState<string>("");
   const [processedDays, setProcessedDays] = useState(0);
   const [totalDays, setTotalDays] = useState(0);
+  const [verifying, setVerifying] = useState(false);
+  const [staleWarning, setStaleWarning] = useState<StaleWarning | null>(null);
+
+  // Verify previous day EOD when start date changes
+  const verifyPreviousDayEod = useCallback(async (selectedStartDate: Date) => {
+    setVerifying(true);
+    setStaleWarning(null);
+
+    try {
+      const prevDay = format(addDays(selectedStartDate, -1), "yyyy-MM-dd");
+      const twoDaysBefore = format(addDays(selectedStartDate, -2), "yyyy-MM-dd");
+      const prevDayTradeFormat = format(addDays(selectedStartDate, -1), "yyyyMMdd");
+
+      // Fetch stored EOD for previous day
+      const storedEod = await fetchAllRows<{
+        investor_code: string;
+        ledger_balance: number;
+      }>((from, to) =>
+        supabase
+          .from("eod_ledger_snapshots")
+          .select("investor_code, ledger_balance")
+          .eq("eod_date", prevDay)
+          .range(from, to)
+      );
+
+      // If no stored EOD for previous day, can't verify (first run scenario)
+      if (!storedEod || storedEod.length === 0) {
+        setVerifying(false);
+        return;
+      }
+
+      // Fetch base balances (from 2 days before)
+      const baseEod = await fetchAllRows<{
+        investor_code: string;
+        ledger_balance: number;
+      }>((from, to) =>
+        supabase
+          .from("eod_ledger_snapshots")
+          .select("investor_code, ledger_balance")
+          .eq("eod_date", twoDaysBefore)
+          .range(from, to)
+      );
+
+      // If no base EOD, use clients.ledger_balance
+      const clients = await fetchAllRows<{
+        inv_code: string;
+        ledger_balance: number;
+      }>((from, to) =>
+        supabase
+          .from("clients")
+          .select("inv_code, ledger_balance")
+          .range(from, to)
+      );
+
+      // Fetch commission rates
+      const investorData = await fetchAllRows<{
+        investor_code: string;
+        brokerage_commission: number | null;
+      }>((from, to) =>
+        supabase
+          .from("investors")
+          .select("investor_code, brokerage_commission")
+          .range(from, to)
+      );
+
+      const commissionMap = new Map<string, number>();
+      investorData?.forEach((inv) => {
+        commissionMap.set(inv.investor_code.toUpperCase(), inv.brokerage_commission || 0);
+      });
+
+      // Build base balance map
+      const baseBalances = new Map<string, number>();
+      clients?.forEach((c) => {
+        baseBalances.set(c.inv_code.toUpperCase(), c.ledger_balance || 0);
+      });
+      baseEod?.forEach((row) => {
+        baseBalances.set(row.investor_code.toUpperCase(), row.ledger_balance || 0);
+      });
+
+      // Fetch previous day's trades
+      const { data: prevDayTrades } = await supabase
+        .from("trade_history")
+        .select("client_code, side, value, fill_type, status")
+        .eq("trade_date", prevDayTradeFormat);
+
+      // Fetch previous day's transactions
+      const { data: prevDayTx } = await supabase
+        .from("deposits_withdrawals")
+        .select("investor_code, amount, transaction_type")
+        .eq("transaction_date", prevDay);
+
+      // Calculate expected EOD for each client
+      const expectedBalances = new Map<string, number>();
+
+      // Process transactions
+      const txMap = new Map<string, { deposits: number; withdrawals: number }>();
+      prevDayTx?.forEach((tx) => {
+        const code = tx.investor_code.toUpperCase();
+        const current = txMap.get(code) || { deposits: 0, withdrawals: 0 };
+        if (tx.transaction_type.toLowerCase().includes("deposit")) {
+          current.deposits += tx.amount || 0;
+        } else {
+          current.withdrawals += tx.amount || 0;
+        }
+        txMap.set(code, current);
+      });
+
+      // Process trades
+      const tradeMap = new Map<string, { grossBuys: number; netSells: number }>();
+      prevDayTrades?.forEach((trade) => {
+        if (!trade.client_code || !trade.value) return;
+        const fillType = (trade.fill_type || trade.status || "").toUpperCase();
+        if (!["FILL", "PF"].includes(fillType)) return;
+
+        const clientCode = trade.client_code.toUpperCase();
+        const commissionRate = commissionMap.get(clientCode) || 0;
+        const current = tradeMap.get(clientCode) || { grossBuys: 0, netSells: 0 };
+        const side = (trade.side || "").toUpperCase();
+
+        if (side === "BUY" || side === "B") {
+          current.grossBuys += trade.value * (1 + commissionRate);
+        } else if (side === "SELL" || side === "S") {
+          current.netSells += trade.value * (1 - commissionRate);
+        }
+        tradeMap.set(clientCode, current);
+      });
+
+      // Calculate expected balance for each client
+      baseBalances.forEach((baseBalance, invCode) => {
+        const tx = txMap.get(invCode) || { deposits: 0, withdrawals: 0 };
+        const trades = tradeMap.get(invCode) || { grossBuys: 0, netSells: 0 };
+        const expectedBalance = baseBalance + tx.deposits - tx.withdrawals + trades.netSells - trades.grossBuys;
+        expectedBalances.set(invCode, expectedBalance);
+      });
+
+      // Compare stored vs expected
+      const mismatches: { code: string; stored: number; expected: number }[] = [];
+      const TOLERANCE = 0.01; // Allow 1 paisa difference
+
+      storedEod.forEach((row) => {
+        const code = row.investor_code.toUpperCase();
+        const expected = expectedBalances.get(code);
+        if (expected !== undefined) {
+          const diff = Math.abs(row.ledger_balance - expected);
+          if (diff > TOLERANCE) {
+            mismatches.push({
+              code: row.investor_code,
+              stored: row.ledger_balance,
+              expected: expected,
+            });
+          }
+        }
+      });
+
+      if (mismatches.length > 0) {
+        // Find safe start date (day before earliest trade)
+        const { data: earliestTrade } = await supabase
+          .from("trade_history")
+          .select("trade_date")
+          .order("trade_date", { ascending: true })
+          .limit(1);
+
+        let suggestedStartDate: Date | null = null;
+        if (earliestTrade?.[0]?.trade_date) {
+          const earliestDate = parse(earliestTrade[0].trade_date, "yyyyMMdd", new Date());
+          suggestedStartDate = addDays(earliestDate, -1);
+        }
+
+        const sample = mismatches[0];
+        setStaleWarning({
+          date: prevDay,
+          mismatchCount: mismatches.length,
+          sampleClient: sample.code,
+          storedValue: sample.stored,
+          expectedValue: sample.expected,
+          suggestedStartDate,
+        });
+      }
+    } catch (error) {
+      console.error("Error verifying previous day EOD:", error);
+    } finally {
+      setVerifying(false);
+    }
+  }, []);
+
+  // Trigger verification when start date changes
+  useEffect(() => {
+    if (startDate && open) {
+      verifyPreviousDayEod(startDate);
+    } else {
+      setStaleWarning(null);
+    }
+  }, [startDate, open, verifyPreviousDayEod]);
+
+  const handleUseSafeStartDate = () => {
+    if (staleWarning?.suggestedStartDate) {
+      setStartDate(staleWarning.suggestedStartDate);
+    }
+  };
 
   const runBatchEod = async () => {
     if (!startDate || !endDate) {
@@ -355,6 +563,55 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
               commission-adjusted trades.
             </p>
           </div>
+
+          {/* Stale Data Warning */}
+          {staleWarning && (
+            <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+              <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+              <div className="text-sm space-y-2">
+                <p className="font-medium text-destructive">Stale EOD Data Detected!</p>
+                <p className="text-destructive/80">
+                  Previous day ({staleWarning.date}) has <strong>{staleWarning.mismatchCount}</strong> clients 
+                  with mismatched balances.
+                </p>
+                <div className="text-xs text-muted-foreground bg-muted/50 p-2 rounded font-mono">
+                  Example: {staleWarning.sampleClient}<br />
+                  Stored: {staleWarning.storedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}<br />
+                  Expected: {staleWarning.expectedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </div>
+                <p className="text-amber-600 font-medium">
+                  Run from an earlier date to recalculate properly.
+                </p>
+                {staleWarning.suggestedStartDate && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleUseSafeStartDate}
+                    className="gap-2 mt-1"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Use Safe Start: {format(staleWarning.suggestedStartDate, "dd MMM yyyy")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Verification Status */}
+          {verifying && (
+            <div className="flex items-center gap-2 p-3 bg-muted/50 border rounded-md">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Verifying previous day EOD data...</p>
+            </div>
+          )}
+
+          {/* Verified OK Status */}
+          {!verifying && !staleWarning && startDate && (
+            <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-md">
+              <ShieldCheck className="h-4 w-4 text-green-600" />
+              <p className="text-sm text-green-700">Previous day EOD data verified OK</p>
+            </div>
+          )}
 
           {/* Date Pickers */}
           <div className="grid grid-cols-2 gap-4">
