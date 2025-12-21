@@ -12,7 +12,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format, subDays } from "date-fns";
-import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator } from "lucide-react";
+import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -798,113 +798,277 @@ const AccountingTab = () => {
                 </>
               )}
 
-              {/* Commission View */}
+              {/* Commission View - Premium Design */}
               {chartView === 'commission' && (
-                <>
-                  {/* Pie Chart */}
-                  <div className="flex-shrink-0">
-                    <h4 className="text-sm font-semibold mb-2">Commission by Department</h4>
-                    <div className="h-48 w-full lg:w-64">
-                      {commissionByDept && commissionByDept.length > 0 ? (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={(() => {
-                                const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                                return commissionByDept.map((dept: { department: string; total_commission: number }, index: number) => ({
-                                  name: dept.department || 'Unknown',
-                                  value: Number(dept.total_commission),
-                                  color: COLORS[index % COLORS.length]
-                                }));
-                              })()}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={40}
-                              outerRadius={70}
-                              paddingAngle={2}
-                              dataKey="value"
-                            >
-                              {(() => {
-                                const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                                return commissionByDept.map((_: any, index: number) => (
-                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ));
-                              })()}
-                            </Pie>
-                            <Tooltip 
-                              formatter={(value: number) => formatCurrency(value)}
-                              contentStyle={{ 
-                                backgroundColor: 'hsl(var(--popover))', 
-                                border: '1px solid hsl(var(--border))',
-                                borderRadius: '6px',
-                                fontSize: '12px'
-                              }}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      ) : (
-                        <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                          No commission data available
+                <div className="w-full space-y-6">
+                  {/* KPI Metrics Row */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Total Commission Card */}
+                    <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500/20 via-emerald-500/10 to-transparent border border-emerald-500/30 p-4 group hover:border-emerald-500/50 transition-all duration-300">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
+                      <div className="relative">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="p-2 rounded-lg bg-emerald-500/20">
+                            <TrendingUp className="h-4 w-4 text-emerald-400" />
+                          </div>
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            REVENUE
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Commission Summary */}
-                  <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
-                    <h4 className="text-sm font-semibold mb-2">Commission Summary</h4>
-                    <div className="space-y-2">
-                      <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-                        <span className="text-xs text-muted-foreground">Total Commission</span>
-                        <p className="text-xl font-bold text-green-400">
+                        <p className="text-xs text-muted-foreground mb-1">Total Commission</p>
+                        <p className="text-2xl font-bold text-emerald-400">
                           {formatCurrency(commissionByDept?.reduce((sum: number, d: { total_commission: number }) => sum + Number(d.total_commission), 0) || 0)}
                         </p>
+                        <div className="mt-2 flex items-center gap-1 text-xs text-emerald-400/80">
+                          <span className="inline-flex items-center gap-0.5">
+                            <DollarSign className="h-3 w-3" />
+                            {commissionByDept?.length || 0} departments
+                          </span>
+                        </div>
                       </div>
-                      <div className="p-2 rounded-lg bg-muted/30 border border-border/50">
-                        <span className="text-xs text-muted-foreground">Total Turnover</span>
-                        <p className="text-sm font-semibold">
-                          {formatCurrency(commissionByDept?.reduce((sum: number, d: { total_turnover: number }) => sum + Number(d.total_turnover), 0) || 0)}
+                    </div>
+
+                    {/* Total Turnover Card */}
+                    <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-blue-500/20 via-blue-500/10 to-transparent border border-blue-500/30 p-4 group hover:border-blue-500/50 transition-all duration-300">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
+                      <div className="relative">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="p-2 rounded-lg bg-blue-500/20">
+                            <ArrowDownRight className="h-4 w-4 text-blue-400" />
+                          </div>
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                            VOLUME
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-1">Total Turnover</p>
+                        <p className="text-2xl font-bold text-blue-400">
+                          {formatCurrency(commissionByDept?.reduce((sum: number, d: { total_turnover: number }) => sum + Number(d.total_turnover || 0), 0) || 0)}
                         </p>
+                        <div className="mt-2 flex items-center gap-1 text-xs text-blue-400/80">
+                          <span>Across all departments</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Trade Count Card */}
+                    <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-amber-500/20 via-amber-500/10 to-transparent border border-amber-500/30 p-4 group hover:border-amber-500/50 transition-all duration-300">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
+                      <div className="relative">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="p-2 rounded-lg bg-amber-500/20">
+                            <ArrowUpRight className="h-4 w-4 text-amber-400" />
+                          </div>
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                            ACTIVITY
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-1">Total Trades</p>
+                        <p className="text-2xl font-bold text-amber-400">
+                          {(commissionByDept?.reduce((sum: number, d: { trade_count: number }) => sum + Number(d.trade_count || 0), 0) || 0).toLocaleString()}
+                        </p>
+                        <div className="mt-2 flex items-center gap-1 text-xs text-amber-400/80">
+                          <span>Executed transactions</span>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Department List */}
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-semibold mb-2">Department Breakdown</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-                      {commissionByDept && commissionByDept.length > 0 ? (() => {
-                        const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                        const totalCommission = commissionByDept.reduce((sum: number, d: { total_commission: number }) => sum + Number(d.total_commission), 0);
-                        
-                        return commissionByDept.map((dept: { department: string; total_commission: number; total_turnover: number }, index: number) => {
-                          const sharePercent = totalCommission > 0 ? (Number(dept.total_commission) / totalCommission) * 100 : 0;
-                          return (
-                            <div key={index} className="p-2 rounded-lg bg-muted/30 border border-border/50 flex items-center gap-2">
-                              <div 
-                                className="w-3 h-3 rounded-full shrink-0" 
-                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                  {/* Charts and Table Row */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Enhanced Pie Chart */}
+                    <div className="lg:col-span-1 p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-semibold">Distribution</h4>
+                        <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-full bg-muted/50">
+                          By Department
+                        </span>
+                      </div>
+                      <div className="h-56 w-full">
+                        {commissionByDept && commissionByDept.length > 0 ? (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <defs>
+                                <linearGradient id="commGrad1" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(160, 84%, 39%)" />
+                                  <stop offset="100%" stopColor="hsl(160, 84%, 29%)" />
+                                </linearGradient>
+                                <linearGradient id="commGrad2" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(217, 91%, 60%)" />
+                                  <stop offset="100%" stopColor="hsl(217, 91%, 45%)" />
+                                </linearGradient>
+                                <linearGradient id="commGrad3" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(43, 96%, 56%)" />
+                                  <stop offset="100%" stopColor="hsl(43, 96%, 40%)" />
+                                </linearGradient>
+                                <linearGradient id="commGrad4" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(280, 87%, 65%)" />
+                                  <stop offset="100%" stopColor="hsl(280, 87%, 50%)" />
+                                </linearGradient>
+                                <linearGradient id="commGrad5" x1="0" y1="0" x2="1" y2="1">
+                                  <stop offset="0%" stopColor="hsl(350, 89%, 60%)" />
+                                  <stop offset="100%" stopColor="hsl(350, 89%, 45%)" />
+                                </linearGradient>
+                              </defs>
+                              <Pie
+                                data={commissionByDept.map((dept: { department: string; total_commission: number }, index: number) => ({
+                                  name: dept.department || 'Unknown',
+                                  value: Number(dept.total_commission),
+                                }))}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={50}
+                                outerRadius={85}
+                                paddingAngle={3}
+                                dataKey="value"
+                                stroke="none"
+                              >
+                                {commissionByDept.map((_: any, index: number) => (
+                                  <Cell 
+                                    key={`cell-${index}`} 
+                                    fill={`url(#commGrad${(index % 5) + 1})`}
+                                    className="drop-shadow-lg"
+                                  />
+                                ))}
+                              </Pie>
+                              <Tooltip 
+                                formatter={(value: number) => formatCurrency(value)}
+                                contentStyle={{ 
+                                  backgroundColor: 'hsl(var(--popover))', 
+                                  border: '1px solid hsl(var(--border))',
+                                  borderRadius: '12px',
+                                  fontSize: '12px',
+                                  boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+                                }}
                               />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-xs font-medium truncate">{dept.department || 'Unknown'}</span>
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 font-semibold ml-1">
-                                    {sharePercent.toFixed(1)}%
-                                  </span>
-                                </div>
-                                <span className="text-xs text-muted-foreground">{formatCurrency(Number(dept.total_commission))}</span>
-                              </div>
-                            </div>
-                          );
-                        });
-                      })() : (
-                        <div className="col-span-3 text-center text-muted-foreground text-sm py-4">
-                          No commission data available for this period
-                        </div>
-                      )}
+                            </PieChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                            No commission data available
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Department Breakdown Table */}
+                    <div className="lg:col-span-2 p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-semibold">Department Performance</h4>
+                        {commissionByDept && commissionByDept.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              <Award className="h-3 w-3" />
+                              Top: {commissionByDept[0]?.department || 'N/A'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="max-h-64 overflow-y-auto rounded-lg border border-border/30">
+                        <Table>
+                          <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm z-10">
+                            <TableRow className="border-border/30">
+                              <TableHead className="text-xs font-semibold text-muted-foreground">#</TableHead>
+                              <TableHead className="text-xs font-semibold text-muted-foreground">Department</TableHead>
+                              <TableHead className="text-xs text-right font-semibold text-muted-foreground">Commission</TableHead>
+                              <TableHead className="text-xs text-right font-semibold text-muted-foreground">Turnover</TableHead>
+                              <TableHead className="text-xs text-right font-semibold text-muted-foreground">Share</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {commissionByDept && commissionByDept.length > 0 ? (() => {
+                              const totalCommission = commissionByDept.reduce((sum: number, d: { total_commission: number }) => sum + Number(d.total_commission), 0);
+                              const GRADIENT_COLORS = [
+                                'from-emerald-500/20 to-emerald-500/5',
+                                'from-blue-500/20 to-blue-500/5',
+                                'from-amber-500/20 to-amber-500/5',
+                                'from-purple-500/20 to-purple-500/5',
+                                'from-rose-500/20 to-rose-500/5',
+                              ];
+                              const BADGE_COLORS = [
+                                'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+                                'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                                'bg-amber-500/20 text-amber-400 border-amber-500/30',
+                                'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                                'bg-rose-500/20 text-rose-400 border-rose-500/30',
+                              ];
+                              
+                              return commissionByDept.map((dept: { department: string; total_commission: number; total_turnover: number }, index: number) => {
+                                const sharePercent = totalCommission > 0 ? (Number(dept.total_commission) / totalCommission) * 100 : 0;
+                                const isTop3 = index < 3;
+                                return (
+                                  <TableRow 
+                                    key={index} 
+                                    className={cn(
+                                      "border-border/20 transition-colors hover:bg-muted/30",
+                                      index % 2 === 0 ? "bg-muted/10" : "bg-transparent"
+                                    )}
+                                  >
+                                    <TableCell className="py-3">
+                                      {isTop3 ? (
+                                        <span className={cn(
+                                          "inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold",
+                                          index === 0 ? "bg-gradient-to-br from-yellow-400 to-amber-500 text-black" :
+                                          index === 1 ? "bg-gradient-to-br from-gray-300 to-gray-400 text-black" :
+                                          "bg-gradient-to-br from-amber-600 to-amber-700 text-white"
+                                        )}>
+                                          {index + 1}
+                                        </span>
+                                      ) : (
+                                        <span className="text-xs text-muted-foreground pl-2">{index + 1}</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="py-3">
+                                      <div className="flex items-center gap-2">
+                                        <div className={cn(
+                                          "w-2 h-8 rounded-full bg-gradient-to-b",
+                                          GRADIENT_COLORS[index % GRADIENT_COLORS.length]
+                                        )} />
+                                        <span className="text-sm font-medium">{dept.department || 'Unknown'}</span>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="py-3 text-right">
+                                      <span className={cn(
+                                        "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold border",
+                                        BADGE_COLORS[index % BADGE_COLORS.length]
+                                      )}>
+                                        <DollarSign className="h-3 w-3" />
+                                        {formatCurrency(Number(dept.total_commission))}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 text-right">
+                                      <span className="text-xs text-muted-foreground">
+                                        {formatCurrency(Number(dept.total_turnover))}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 text-right">
+                                      <div className="flex items-center justify-end gap-2">
+                                        <div className="w-16 h-2 bg-muted/30 rounded-full overflow-hidden">
+                                          <div 
+                                            className="h-full bg-gradient-to-r from-primary to-primary/60 rounded-full transition-all duration-500"
+                                            style={{ width: `${sharePercent}%` }}
+                                          />
+                                        </div>
+                                        <span className="text-xs font-medium w-12 text-right">
+                                          {sharePercent.toFixed(1)}%
+                                        </span>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              });
+                            })() : (
+                              <TableRow>
+                                <TableCell colSpan={5} className="text-center text-muted-foreground text-sm py-8">
+                                  No commission data available for this period
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </div>
                   </div>
-                </>
+                </div>
               )}
 
               {/* Empty state for turnover */}
