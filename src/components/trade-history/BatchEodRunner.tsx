@@ -102,6 +102,27 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         .select("investor_code, ledger_balance")
         .eq("eod_date", dayBeforeStart);
 
+      // Check if we need previous day EOD - find earliest trade date
+      const { data: earliestTrade } = await supabase
+        .from("trade_history")
+        .select("trade_date")
+        .order("trade_date", { ascending: true })
+        .limit(1);
+
+      const earliestTradeDate = earliestTrade?.[0]?.trade_date;
+      const startDateFormatted = format(startDate, "yyyyMMdd");
+
+      // If we're starting after the earliest trade date, we MUST have previous day EOD
+      if (earliestTradeDate && startDateFormatted > earliestTradeDate) {
+        if (!prevDayEod || prevDayEod.length === 0) {
+          toast.error(`No EOD data for ${dayBeforeStart}`, {
+            description: "Please run batch EOD from an earlier date first.",
+          });
+          setRunning(false);
+          return;
+        }
+      }
+
       // Create initial balance map (from day before start, or from clients.ledger_balance)
       let runningBalances = new Map<string, number>();
       clients.forEach((client) => {
