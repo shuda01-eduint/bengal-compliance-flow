@@ -29,8 +29,8 @@ interface SidebarProps {
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "CEO Dashboard", href: "/ceo-dashboard", icon: PieChart },
-  { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
   { name: "Trade History", href: "/trade-history", icon: History },
+  { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
   { name: "Securities", href: "/securities", icon: Landmark },
   { name: "Accounting", href: "/accounting", icon: Calculator },
   { name: "Investors", href: "/investors", icon: Contact },
