@@ -22,7 +22,7 @@ import { toast } from "sonner";
 import { Upload, Search, Trash2, Download, Loader2, Play } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import * as XLSX from "xlsx";
-import { format } from "date-fns";
+import { format, subDays } from "date-fns";
 import {
   DepositsWithdrawalsRecordSchema,
   validateRecords,
@@ -444,13 +444,15 @@ export const DepositsWithdrawalsTable = () => {
     toast.success("Export complete");
   };
 
-  // Run EOD - capture and store ledger balances for today
+  // Run EOD - calculate and store ledger balances for today
+  // Formula: Previous EOD Balance + Net Deposits - Net Withdrawals + Net Sells - Net Buys
   const handleRunEod = async () => {
     setRunningEod(true);
     try {
       const today = format(new Date(), "yyyy-MM-dd");
+      const yesterday = format(subDays(new Date(), 1), "yyyy-MM-dd");
       
-      // Fetch all clients with their current ledger balances
+      // 1. Fetch all clients (base list)
       const { data: clients, error: clientsError } = await supabase
         .from("clients")
         .select("inv_code, investor_name, ledger_balance, rm_email");
@@ -462,44 +464,105 @@ export const DepositsWithdrawalsTable = () => {
         return;
       }
 
-      // Get trade file stats for today
-      const { data: tradeStats } = await supabase.rpc('get_trade_file_stats');
-      const tradeFilesCount = tradeStats?.length || 0;
-
-      // Get deposit/withdrawal stats 
-      const { data: depositStats, error: depositError } = await supabase
-        .from("deposits_withdrawals")
-        .select("amount, transaction_type");
+      // 2. Get previous day's EOD snapshot (opening balances)
+      const { data: previousEod, error: prevEodError } = await supabase
+        .from("eod_ledger_snapshots")
+        .select("investor_code, ledger_balance")
+        .eq("eod_date", yesterday);
       
-      let depositRecordsCount = 0;
-      let totalDeposits = 0;
-      let totalWithdrawals = 0;
-      
-      if (!depositError && depositStats) {
-        depositRecordsCount = depositStats.length;
-        depositStats.forEach((d) => {
-          if (d.transaction_type.toLowerCase().includes("deposit")) {
-            totalDeposits += d.amount || 0;
-          } else {
-            totalWithdrawals += d.amount || 0;
-          }
+      // Create a map of previous EOD balances
+      const prevBalanceMap = new Map<string, number>();
+      if (!prevEodError && previousEod) {
+        previousEod.forEach((row) => {
+          prevBalanceMap.set(row.investor_code, row.ledger_balance || 0);
         });
       }
 
+      // 3. Get today's deposits/withdrawals per investor
+      const { data: todayTx, error: txError } = await supabase
+        .from("deposits_withdrawals")
+        .select("investor_code, amount, transaction_type")
+        .eq("transaction_date", today);
+      
+      const txMap = new Map<string, { deposits: number; withdrawals: number }>();
+      let totalDeposits = 0;
+      let totalWithdrawals = 0;
+      let depositRecordsCount = 0;
+      
+      if (!txError && todayTx) {
+        depositRecordsCount = todayTx.length;
+        todayTx.forEach((tx) => {
+          const current = txMap.get(tx.investor_code) || { deposits: 0, withdrawals: 0 };
+          if (tx.transaction_type.toLowerCase().includes("deposit")) {
+            current.deposits += tx.amount || 0;
+            totalDeposits += tx.amount || 0;
+          } else {
+            current.withdrawals += tx.amount || 0;
+            totalWithdrawals += tx.amount || 0;
+          }
+          txMap.set(tx.investor_code, current);
+        });
+      }
+
+      // 4. Get today's trades per investor (Buys and Sells)
+      const { data: todayTrades, error: tradesError } = await supabase
+        .from("trade_history")
+        .select("client_code, side, value")
+        .eq("trade_date", today);
+      
+      const tradeMap = new Map<string, { buys: number; sells: number }>();
+      let tradeFilesCount = 0;
+      
+      if (!tradesError && todayTrades) {
+        tradeFilesCount = todayTrades.length > 0 ? 1 : 0; // Simplified count
+        todayTrades.forEach((trade) => {
+          if (!trade.client_code || !trade.value) return;
+          const current = tradeMap.get(trade.client_code) || { buys: 0, sells: 0 };
+          const side = (trade.side || "").toUpperCase();
+          if (side === "BUY" || side === "B") {
+            current.buys += trade.value || 0;
+          } else if (side === "SELL" || side === "S") {
+            current.sells += trade.value || 0;
+          }
+          tradeMap.set(trade.client_code, current);
+        });
+      }
+
+      // 5. Calculate EOD balance for each client
+      // Formula: Opening Balance + Deposits - Withdrawals + Sells - Buys
+      const eodRecords = clients.map((client) => {
+        const invCode = client.inv_code;
+        
+        // Opening balance: previous EOD snapshot OR clients.ledger_balance (initial upload)
+        const openingBalance = prevBalanceMap.has(invCode) 
+          ? prevBalanceMap.get(invCode)! 
+          : (client.ledger_balance || 0);
+        
+        // Today's transactions
+        const tx = txMap.get(invCode) || { deposits: 0, withdrawals: 0 };
+        const trades = tradeMap.get(invCode) || { buys: 0, sells: 0 };
+        
+        // Calculated EOD balance
+        const calculatedBalance = openingBalance 
+          + tx.deposits 
+          - tx.withdrawals 
+          + trades.sells 
+          - trades.buys;
+        
+        return {
+          eod_date: today,
+          investor_code: invCode,
+          investor_name: client.investor_name,
+          ledger_balance: calculatedBalance,
+          rm_email: client.rm_email,
+          created_by: user?.id,
+        };
+      });
+
       // Calculate total ledger balance
-      const totalLedgerBalance = clients.reduce((sum, c) => sum + (c.ledger_balance || 0), 0);
+      const totalLedgerBalance = eodRecords.reduce((sum, r) => sum + r.ledger_balance, 0);
 
-      // Prepare EOD snapshot records
-      const eodRecords = clients.map((client) => ({
-        eod_date: today,
-        investor_code: client.inv_code,
-        investor_name: client.investor_name,
-        ledger_balance: client.ledger_balance || 0,
-        rm_email: client.rm_email,
-        created_by: user?.id,
-      }));
-
-      // Upsert in batches (to handle existing records for the same day)
+      // 6. Upsert in batches
       const BATCH_SIZE = 500;
       let upsertedCount = 0;
 
@@ -513,7 +576,7 @@ export const DepositsWithdrawalsTable = () => {
         upsertedCount += batch.length;
       }
 
-      // Record EOD run history
+      // 7. Record EOD run history
       const { error: historyError } = await supabase
         .from("eod_run_history")
         .insert({
@@ -533,8 +596,8 @@ export const DepositsWithdrawalsTable = () => {
         console.error("Failed to record EOD history:", historyError);
       }
 
-      toast.success(`EOD snapshot saved: ${upsertedCount} ledger balances for ${today}`, {
-        description: `Trade files: ${tradeFilesCount}, Deposits/Withdrawals: ${depositRecordsCount}`,
+      toast.success(`EOD snapshot calculated: ${upsertedCount} balances for ${today}`, {
+        description: `Deposits: ${depositRecordsCount}, Trades processed: ${todayTrades?.length || 0}`,
       });
     } catch (error: any) {
       console.error("EOD error:", error);
