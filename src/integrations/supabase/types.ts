@@ -811,6 +811,54 @@ export type Database = {
         }
         Relationships: []
       }
+      eod_run_history: {
+        Row: {
+          clients_captured: number
+          deposit_records_count: number | null
+          id: string
+          notes: string | null
+          run_at: string
+          run_by: string | null
+          run_by_email: string | null
+          run_date: string
+          status: string
+          total_deposits: number | null
+          total_ledger_balance: number
+          total_withdrawals: number | null
+          trade_files_count: number | null
+        }
+        Insert: {
+          clients_captured?: number
+          deposit_records_count?: number | null
+          id?: string
+          notes?: string | null
+          run_at?: string
+          run_by?: string | null
+          run_by_email?: string | null
+          run_date: string
+          status?: string
+          total_deposits?: number | null
+          total_ledger_balance?: number
+          total_withdrawals?: number | null
+          trade_files_count?: number | null
+        }
+        Update: {
+          clients_captured?: number
+          deposit_records_count?: number | null
+          id?: string
+          notes?: string | null
+          run_at?: string
+          run_by?: string | null
+          run_by_email?: string | null
+          run_date?: string
+          status?: string
+          total_deposits?: number | null
+          total_ledger_balance?: number
+          total_withdrawals?: number | null
+          trade_files_count?: number | null
+        }
+        Relationships: []
+      }
       holdings: {
         Row: {
           avg_cost: number | null
@@ -1725,6 +1773,18 @@ export type Database = {
           total_cost: number
           total_mv: number
           total_stock: number
+        }[]
+      }
+      get_deposit_import_stats: {
+        Args: never
+        Returns: {
+          deposit_count: number
+          first_upload: string
+          last_upload: string
+          total_deposits: number
+          total_withdrawals: number
+          transaction_date: string
+          withdrawal_count: number
         }[]
       }
       get_employee_id_for_user: { Args: never; Returns: string }
