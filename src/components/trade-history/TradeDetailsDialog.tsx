@@ -94,7 +94,8 @@ export function TradeDetailsDialog({
   const aggregatedList = Object.values(aggregatedTrades).map(t => ({
     ...t,
     avg_price: t.quantity > 0 ? t.value / t.quantity : 0,
-    brokerage_amount: t.value * t.brokerage_rate / 100,
+    // brokerage_rate is already a decimal multiplier (e.g., 0.004 for 0.4%)
+    brokerage_amount: t.value * t.brokerage_rate,
   })).sort((a, b) => b.value - a.value);
 
   const totalValue = aggregatedList.reduce((sum, t) => sum + t.value, 0);
