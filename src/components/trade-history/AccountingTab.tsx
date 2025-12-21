@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { format, subDays } from "date-fns";
 import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator } from "lucide-react";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/balance-utils";
@@ -573,50 +574,113 @@ const AccountingTab = () => {
                 </CardContent>
               </Card>
             </PopoverTrigger>
-            <PopoverContent className="w-80 p-0" align="end">
+            <PopoverContent className="w-96 p-0" align="end">
               <div className="p-3 border-b border-border">
                 <h4 className="font-semibold text-sm">Turnover by Department</h4>
                 <p className="text-xs text-muted-foreground">Click card to see breakdown</p>
               </div>
-              <div className="max-h-64 overflow-y-auto">
-                {departmentTurnover && departmentTurnover.length > 0 ? (
-                  <div className="divide-y divide-border">
-                    {(() => {
-                      const totalTurnover = departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0);
-                      return departmentTurnover.map((dept: { department: string; total_buy: number; total_sell: number; turnover: number }, index: number) => {
-                        const sharePercent = totalTurnover > 0 ? (Number(dept.turnover) / totalTurnover) * 100 : 0;
-                        return (
-                          <div key={index} className="p-3 hover:bg-muted/50">
-                            <div className="flex justify-between items-start mb-1">
-                              <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <span className="text-sm font-medium truncate">{dept.department || 'Unknown'}</span>
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium shrink-0">
-                                  {sharePercent.toFixed(1)}%
-                                </span>
-                              </div>
-                              <span className="text-sm font-semibold text-primary ml-2">{formatCurrency(Number(dept.turnover))}</span>
-                            </div>
-                            <div className="flex justify-between text-xs text-muted-foreground">
-                              <span className="text-red-400">Buy: {formatCurrency(Number(dept.total_buy))}</span>
-                              <span className="text-green-400">Sell: {formatCurrency(Number(dept.total_sell))}</span>
-                            </div>
-                            <div className="mt-1.5 h-1 bg-muted rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-primary/60 rounded-full transition-all"
-                                style={{ width: `${Math.min(sharePercent, 100)}%` }}
+              {departmentTurnover && departmentTurnover.length > 0 ? (
+                (() => {
+                  const totalTurnover = departmentTurnover.reduce((sum: number, d: { turnover: number }) => sum + Number(d.turnover), 0);
+                  const totalBuy = departmentTurnover.reduce((sum: number, d: { total_buy: number }) => sum + Number(d.total_buy), 0);
+                  const totalSell = departmentTurnover.reduce((sum: number, d: { total_sell: number }) => sum + Number(d.total_sell), 0);
+                  
+                  const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                  
+                  const pieData = departmentTurnover.map((dept: { department: string; turnover: number }, index: number) => ({
+                    name: dept.department || 'Unknown',
+                    value: Number(dept.turnover),
+                    color: COLORS[index % COLORS.length]
+                  }));
+
+                  return (
+                    <>
+                      {/* Pie Chart */}
+                      <div className="p-3 border-b border-border">
+                        <div className="h-40">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={pieData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={35}
+                                outerRadius={60}
+                                paddingAngle={2}
+                                dataKey="value"
+                              >
+                                {pieData.map((entry: { color: string }, index: number) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip 
+                                formatter={(value: number) => formatCurrency(value)}
+                                contentStyle={{ 
+                                  backgroundColor: 'hsl(var(--popover))', 
+                                  border: '1px solid hsl(var(--border))',
+                                  borderRadius: '6px',
+                                  fontSize: '12px'
+                                }}
                               />
-                            </div>
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        {/* Total Trade Summary */}
+                        <div className="mt-2 p-2 rounded-lg bg-muted/50 space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-muted-foreground">Total Turnover</span>
+                            <span className="text-sm font-bold text-primary">{formatCurrency(totalTurnover)}</span>
                           </div>
-                        );
-                      });
-                    })()}
-                  </div>
-                ) : (
-                  <div className="p-4 text-center text-sm text-muted-foreground">
-                    No department data available
-                  </div>
-                )}
-              </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-red-400">Total Buy</span>
+                            <span className="text-xs font-medium text-red-400">{formatCurrency(totalBuy)}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-green-400">Total Sell</span>
+                            <span className="text-xs font-medium text-green-400">{formatCurrency(totalSell)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Department List */}
+                      <div className="max-h-48 overflow-y-auto">
+                        <div className="divide-y divide-border">
+                          {departmentTurnover.map((dept: { department: string; total_buy: number; total_sell: number; turnover: number }, index: number) => {
+                            const sharePercent = totalTurnover > 0 ? (Number(dept.turnover) / totalTurnover) * 100 : 0;
+                            return (
+                              <div key={index} className="p-2.5 hover:bg-muted/50 flex items-center gap-2">
+                                <div 
+                                  className="w-3 h-3 rounded-full shrink-0" 
+                                  style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-xs font-medium truncate">{dept.department || 'Unknown'}</span>
+                                    <span className="text-xs font-semibold text-primary ml-2">{formatCurrency(Number(dept.turnover))}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center mt-0.5">
+                                    <span className="text-[10px] text-muted-foreground">
+                                      <span className="text-red-400">{formatCurrency(Number(dept.total_buy))}</span>
+                                      {' / '}
+                                      <span className="text-green-400">{formatCurrency(Number(dept.total_sell))}</span>
+                                    </span>
+                                    <span className="text-[10px] px-1 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                                      {sharePercent.toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()
+              ) : (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  No department data available
+                </div>
+              )}
             </PopoverContent>
           </Popover>
         </div>
