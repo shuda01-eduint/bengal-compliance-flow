@@ -128,6 +128,9 @@ const AdminBalancesPage = () => {
     }
   }, [availableDates, selectedDate]);
 
+  // Loading progress state
+  const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, total: 0, batchNumber: 0 });
+
   // Fetch enriched balance data using optimized RPC - single query does all the work!
   const { data: enrichedData, isLoading, error, refetch: refetchBalances } = useQuery({
     queryKey: ['balances-enriched', selectedDate ? format(selectedDate, 'yyyy-MM-dd') : undefined, previewAsRM],
@@ -138,11 +141,17 @@ const AdminBalancesPage = () => {
       const rmEmail = previewAsRM && previewAsRM !== 'all' ? previewAsRM : null;
       
       // Fetch all data in batches using keyset pagination
+      // Using smaller batch size (2000) to avoid response truncation
       let allData: EnrichedBalanceRPCRow[] = [];
       let lastId: string | null = null;
-      const batchSize = 5000;
+      const batchSize = 2000;
+      let batchNumber = 0;
+      
+      setLoadingProgress({ loaded: 0, total: 0, batchNumber: 0 });
       
       while (true) {
+        batchNumber++;
+        
         const { data, error } = await supabase.rpc('get_admin_balances_enriched', {
           p_date: dateStr,
           p_rm_email: rmEmail,
@@ -154,6 +163,7 @@ const AdminBalancesPage = () => {
         if (!data || data.length === 0) break;
         
         allData = [...allData, ...(data as EnrichedBalanceRPCRow[])];
+        setLoadingProgress({ loaded: allData.length, total: allData.length, batchNumber });
         
         if (data.length < batchSize) break;
         lastId = data[data.length - 1]?.id ?? null;
@@ -764,7 +774,14 @@ const AdminBalancesPage = () => {
             {isLoading ? (
               <div className="p-12 text-center">
                 <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-                <p className="text-muted-foreground">Loading balance data...</p>
+                <p className="text-muted-foreground">
+                  Loading balance data...
+                  {loadingProgress.batchNumber > 0 && (
+                    <span className="block text-sm mt-1">
+                      Batch {loadingProgress.batchNumber} • {loadingProgress.loaded.toLocaleString()} rows loaded
+                    </span>
+                  )}
+                </p>
               </div>
             ) : sortedData.length === 0 ? (
               <div className="p-12 text-center">
