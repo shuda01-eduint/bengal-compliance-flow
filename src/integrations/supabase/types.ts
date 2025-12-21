@@ -1828,12 +1828,12 @@ export type Database = {
       get_margin_composition_by_department: {
         Args: { p_from_date?: string; p_to_date?: string }
         Returns: {
-          beginning_balance: number
-          change_amount: number
+          beginning_loan: number
           change_percent: number
           client_count: number
           department: string
-          ending_balance: number
+          ending_loan: number
+          loan_change: number
         }[]
       }
       get_trade_file_stats: {

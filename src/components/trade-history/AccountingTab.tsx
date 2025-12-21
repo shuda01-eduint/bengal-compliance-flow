@@ -536,7 +536,7 @@ const AccountingTab = () => {
                     : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 )}
               >
-                Balance
+                Margin Loan
               </button>
               <button
                 onClick={() => setChartView('commission')}
@@ -659,22 +659,22 @@ const AccountingTab = () => {
                 </>
               )}
 
-              {/* Balance Comparison View */}
+              {/* Margin Loan View */}
               {chartView === 'margin' && (
                 <>
-                  {/* Pie Chart - showing ending balance distribution */}
+                  {/* Pie Chart - showing ending loan distribution */}
                   <div className="flex-shrink-0">
-                    <h4 className="text-sm font-semibold mb-2">Balance Distribution (End)</h4>
+                    <h4 className="text-sm font-semibold mb-2">Margin Loan Distribution</h4>
                     <div className="h-48 w-full lg:w-64">
                       {balanceComparison && balanceComparison.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
                               data={(() => {
-                                const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
-                                return balanceComparison.map((dept: { department: string; ending_balance: number }, index: number) => ({
+                                const COLORS = ['hsl(var(--destructive))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                                return balanceComparison.map((dept: { department: string; ending_loan: number }, index: number) => ({
                                   name: dept.department || 'Unknown',
-                                  value: Math.abs(Number(dept.ending_balance)),
+                                  value: Number(dept.ending_loan),
                                   color: COLORS[index % COLORS.length]
                                 }));
                               })()}
@@ -686,7 +686,7 @@ const AccountingTab = () => {
                               dataKey="value"
                             >
                               {(() => {
-                                const COLORS = ['hsl(var(--primary))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
+                                const COLORS = ['hsl(var(--destructive))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(220, 70%, 50%)', 'hsl(280, 70%, 50%)', 'hsl(340, 70%, 50%)'];
                                 return balanceComparison.map((_: any, index: number) => (
                                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                 ));
@@ -705,89 +705,89 @@ const AccountingTab = () => {
                         </ResponsiveContainer>
                       ) : (
                         <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                          No balance data available
+                          No margin loan data available
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Balance Summary */}
+                  {/* Margin Loan Summary */}
                   <div className="flex-shrink-0 lg:border-l lg:border-border lg:pl-4">
-                    <h4 className="text-sm font-semibold mb-2">Balance Summary</h4>
+                    <h4 className="text-sm font-semibold mb-2">Margin Loan Summary</h4>
                     <div className="space-y-2">
                       <div className="p-2 rounded-lg bg-muted/30 border border-border/50">
-                        <span className="text-xs text-muted-foreground">Beginning Balance</span>
+                        <span className="text-xs text-muted-foreground">Beginning Loan</span>
                         <p className="text-lg font-bold">
-                          {formatCurrency(balanceComparison?.reduce((sum: number, d: { beginning_balance: number }) => sum + Number(d.beginning_balance), 0) || 0)}
+                          {formatCurrency(balanceComparison?.reduce((sum: number, d: { beginning_loan: number }) => sum + Number(d.beginning_loan), 0) || 0)}
                         </p>
                       </div>
-                      <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
-                        <span className="text-xs text-muted-foreground">Ending Balance</span>
-                        <p className="text-lg font-bold text-primary">
-                          {formatCurrency(balanceComparison?.reduce((sum: number, d: { ending_balance: number }) => sum + Number(d.ending_balance), 0) || 0)}
+                      <div className="p-2 rounded-lg bg-destructive/10 border border-destructive/20">
+                        <span className="text-xs text-muted-foreground">Ending Loan</span>
+                        <p className="text-lg font-bold text-destructive">
+                          {formatCurrency(balanceComparison?.reduce((sum: number, d: { ending_loan: number }) => sum + Number(d.ending_loan), 0) || 0)}
                         </p>
                       </div>
                       <div className={cn(
                         "p-2 rounded-lg border",
-                        (balanceComparison?.reduce((sum: number, d: { change_amount: number }) => sum + Number(d.change_amount), 0) || 0) >= 0
+                        (balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) <= 0
                           ? "bg-green-500/10 border-green-500/20"
                           : "bg-red-500/10 border-red-500/20"
                       )}>
-                        <span className="text-xs text-muted-foreground">Net Change</span>
+                        <span className="text-xs text-muted-foreground">Loan Change</span>
                         <p className={cn(
                           "text-lg font-bold flex items-center gap-1",
-                          (balanceComparison?.reduce((sum: number, d: { change_amount: number }) => sum + Number(d.change_amount), 0) || 0) >= 0
+                          (balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) <= 0
                             ? "text-green-400"
                             : "text-red-400"
                         )}>
-                          {(balanceComparison?.reduce((sum: number, d: { change_amount: number }) => sum + Number(d.change_amount), 0) || 0) >= 0 ? (
-                            <TrendingUp className="h-4 w-4" />
-                          ) : (
+                          {(balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) <= 0 ? (
                             <TrendingDown className="h-4 w-4" />
+                          ) : (
+                            <TrendingUp className="h-4 w-4" />
                           )}
-                          {formatCurrency(balanceComparison?.reduce((sum: number, d: { change_amount: number }) => sum + Number(d.change_amount), 0) || 0)}
+                          {formatCurrency(Math.abs(balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0))}
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Department Comparison Table */}
+                  {/* Department Loan Table */}
                   <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-semibold mb-2">Department Comparison</h4>
+                    <h4 className="text-sm font-semibold mb-2">Margin Loan by Department</h4>
                     <div className="max-h-56 overflow-y-auto border border-border rounded-lg">
                       <Table>
                         <TableHeader className="sticky top-0 bg-background">
                           <TableRow>
                             <TableHead className="text-xs">Department</TableHead>
-                            <TableHead className="text-xs text-right">Beg. Balance</TableHead>
-                            <TableHead className="text-xs text-right">End Balance</TableHead>
+                            <TableHead className="text-xs text-right">Beg. Loan</TableHead>
+                            <TableHead className="text-xs text-right">End Loan</TableHead>
                             <TableHead className="text-xs text-right">Change</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {balanceComparison && balanceComparison.length > 0 ? (
-                            balanceComparison.map((dept: { department: string; beginning_balance: number; ending_balance: number; change_amount: number; change_percent: number; client_count: number }, index: number) => (
+                            balanceComparison.map((dept: { department: string; beginning_loan: number; ending_loan: number; loan_change: number; change_percent: number; client_count: number }, index: number) => (
                               <TableRow key={index}>
                                 <TableCell className="text-xs font-medium py-1.5">{dept.department || 'Unknown'}</TableCell>
-                                <TableCell className="text-xs text-right py-1.5">{formatCurrency(Number(dept.beginning_balance))}</TableCell>
-                                <TableCell className="text-xs text-right py-1.5">{formatCurrency(Number(dept.ending_balance))}</TableCell>
+                                <TableCell className="text-xs text-right py-1.5">{formatCurrency(Number(dept.beginning_loan))}</TableCell>
+                                <TableCell className="text-xs text-right py-1.5">{formatCurrency(Number(dept.ending_loan))}</TableCell>
                                 <TableCell className={cn(
                                   "text-xs text-right py-1.5 font-medium flex items-center justify-end gap-1",
-                                  Number(dept.change_amount) >= 0 ? "text-green-400" : "text-red-400"
+                                  Number(dept.loan_change) <= 0 ? "text-green-400" : "text-red-400"
                                 )}>
-                                  {Number(dept.change_amount) >= 0 ? (
-                                    <TrendingUp className="h-3 w-3" />
-                                  ) : (
+                                  {Number(dept.loan_change) <= 0 ? (
                                     <TrendingDown className="h-3 w-3" />
+                                  ) : (
+                                    <TrendingUp className="h-3 w-3" />
                                   )}
-                                  {formatCurrency(Number(dept.change_amount))}
+                                  {formatCurrency(Math.abs(Number(dept.loan_change)))}
                                 </TableCell>
                               </TableRow>
                             ))
                           ) : (
                             <TableRow>
                               <TableCell colSpan={4} className="text-center text-muted-foreground text-sm py-4">
-                                No balance data available for this period
+                                No margin loan data available for this period
                               </TableCell>
                             </TableRow>
                           )}
