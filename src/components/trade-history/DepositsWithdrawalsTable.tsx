@@ -19,7 +19,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Upload, Search, Trash2, Download, Loader2, Play } from "lucide-react";
+import { Upload, Search, Trash2, Download, Loader2, Play, CalendarIcon } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import * as XLSX from "xlsx";
 import { format, subDays } from "date-fns";
@@ -60,6 +67,7 @@ export const DepositsWithdrawalsTable = () => {
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [runningEod, setRunningEod] = useState(false);
+  const [eodDate, setEodDate] = useState<Date>(new Date());
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -444,13 +452,14 @@ export const DepositsWithdrawalsTable = () => {
     toast.success("Export complete");
   };
 
-  // Run EOD - calculate and store ledger balances for today
-  // Formula: Previous EOD Balance + Net Deposits - Net Withdrawals + Net Sells - Net Buys
+  // Run EOD - calculate and store ledger balances for selected date
+  // Formula: Previous EOD Balance + Deposits - Withdrawals + Net Sells - Gross Buys
+  // With Commission: Net Sells = Sell × (1 - rate), Gross Buys = Buy × (1 + rate)
   const handleRunEod = async () => {
     setRunningEod(true);
     try {
-      const today = format(new Date(), "yyyy-MM-dd");
-      const yesterday = format(subDays(new Date(), 1), "yyyy-MM-dd");
+      const selectedDate = format(eodDate, "yyyy-MM-dd");
+      const previousDate = format(subDays(eodDate, 1), "yyyy-MM-dd");
       
       // 1. Fetch all clients (base list)
       const { data: clients, error: clientsError } = await supabase
@@ -464,11 +473,24 @@ export const DepositsWithdrawalsTable = () => {
         return;
       }
 
-      // 2. Get previous day's EOD snapshot (opening balances)
+      // 2. Fetch investor commission rates
+      const { data: investorData, error: investorError } = await supabase
+        .from("investors")
+        .select("investor_code, brokerage_commission");
+      
+      // Create commission rate map (default 0.004 = 0.4%)
+      const commissionMap = new Map<string, number>();
+      if (!investorError && investorData) {
+        investorData.forEach((inv) => {
+          commissionMap.set(inv.investor_code.toUpperCase(), inv.brokerage_commission || 0);
+        });
+      }
+
+      // 3. Get previous day's EOD snapshot (opening balances)
       const { data: previousEod, error: prevEodError } = await supabase
         .from("eod_ledger_snapshots")
         .select("investor_code, ledger_balance")
-        .eq("eod_date", yesterday);
+        .eq("eod_date", previousDate);
       
       // Create a map of previous EOD balances
       const prevBalanceMap = new Map<string, number>();
@@ -478,20 +500,20 @@ export const DepositsWithdrawalsTable = () => {
         });
       }
 
-      // 3. Get today's deposits/withdrawals per investor
-      const { data: todayTx, error: txError } = await supabase
+      // 4. Get selected date's deposits/withdrawals per investor
+      const { data: dateTx, error: txError } = await supabase
         .from("deposits_withdrawals")
         .select("investor_code, amount, transaction_type")
-        .eq("transaction_date", today);
+        .eq("transaction_date", selectedDate);
       
       const txMap = new Map<string, { deposits: number; withdrawals: number }>();
       let totalDeposits = 0;
       let totalWithdrawals = 0;
       let depositRecordsCount = 0;
       
-      if (!txError && todayTx) {
-        depositRecordsCount = todayTx.length;
-        todayTx.forEach((tx) => {
+      if (!txError && dateTx) {
+        depositRecordsCount = dateTx.length;
+        dateTx.forEach((tx) => {
           const current = txMap.get(tx.investor_code) || { deposits: 0, withdrawals: 0 };
           if (tx.transaction_type.toLowerCase().includes("deposit")) {
             current.deposits += tx.amount || 0;
@@ -504,39 +526,46 @@ export const DepositsWithdrawalsTable = () => {
         });
       }
 
-      // 4. Get today's trades per investor (Buys and Sells)
+      // 5. Get selected date's trades per investor (Buys and Sells)
       // Trade dates are stored in YYYYMMDD format (e.g., "20251221")
-      const tradeDateFormatted = format(new Date(), "yyyyMMdd");
-      const { data: todayTrades, error: tradesError } = await supabase
+      const tradeDateFormatted = format(eodDate, "yyyyMMdd");
+      const { data: dateTrades, error: tradesError } = await supabase
         .from("trade_history")
         .select("client_code, side, value, fill_type, status")
         .eq("trade_date", tradeDateFormatted);
       
-      const tradeMap = new Map<string, { buys: number; sells: number }>();
+      // tradeMap stores: { grossBuys: raw buy value, netSells: raw sell value }
+      // Commission will be applied when calculating final balance
+      const tradeMap = new Map<string, { grossBuys: number; netSells: number }>();
       let tradeFilesCount = 0;
       
-      if (!tradesError && todayTrades) {
-        tradeFilesCount = todayTrades.length > 0 ? 1 : 0; // Simplified count
-        todayTrades.forEach((trade) => {
+      if (!tradesError && dateTrades) {
+        tradeFilesCount = dateTrades.length > 0 ? 1 : 0;
+        dateTrades.forEach((trade) => {
           if (!trade.client_code || !trade.value) return;
           
           // Only include filled trades (FILL or PF status)
           const fillType = (trade.fill_type || trade.status || "").toUpperCase();
           if (!["FILL", "PF"].includes(fillType)) return;
           
-          const current = tradeMap.get(trade.client_code) || { buys: 0, sells: 0 };
+          const clientCode = trade.client_code.toUpperCase();
+          const commissionRate = commissionMap.get(clientCode) || 0;
+          const current = tradeMap.get(trade.client_code) || { grossBuys: 0, netSells: 0 };
           const side = (trade.side || "").toUpperCase();
+          
           if (side === "BUY" || side === "B") {
-            current.buys += trade.value || 0;
+            // Gross Buy = value × (1 + commission) - client pays more
+            current.grossBuys += trade.value * (1 + commissionRate);
           } else if (side === "SELL" || side === "S") {
-            current.sells += trade.value || 0;
+            // Net Sell = value × (1 - commission) - client receives less
+            current.netSells += trade.value * (1 - commissionRate);
           }
           tradeMap.set(trade.client_code, current);
         });
       }
 
-      // 5. Calculate EOD balance for each client
-      // Formula: Opening Balance + Deposits - Withdrawals + Sells - Buys
+      // 6. Calculate EOD balance for each client
+      // Formula: Opening Balance + Deposits - Withdrawals + Net Sells - Gross Buys
       const eodRecords = clients.map((client) => {
         const invCode = client.inv_code;
         
@@ -545,19 +574,19 @@ export const DepositsWithdrawalsTable = () => {
           ? prevBalanceMap.get(invCode)! 
           : (client.ledger_balance || 0);
         
-        // Today's transactions
+        // Transactions and trades
         const tx = txMap.get(invCode) || { deposits: 0, withdrawals: 0 };
-        const trades = tradeMap.get(invCode) || { buys: 0, sells: 0 };
+        const trades = tradeMap.get(invCode) || { grossBuys: 0, netSells: 0 };
         
-        // Calculated EOD balance
+        // Calculated EOD balance with commission-adjusted trades
         const calculatedBalance = openingBalance 
           + tx.deposits 
           - tx.withdrawals 
-          + trades.sells 
-          - trades.buys;
+          + trades.netSells 
+          - trades.grossBuys;
         
         return {
-          eod_date: today,
+          eod_date: selectedDate,
           investor_code: invCode,
           investor_name: client.investor_name,
           ledger_balance: calculatedBalance,
@@ -569,7 +598,7 @@ export const DepositsWithdrawalsTable = () => {
       // Calculate total ledger balance
       const totalLedgerBalance = eodRecords.reduce((sum, r) => sum + r.ledger_balance, 0);
 
-      // 6. Upsert in batches
+      // 7. Upsert in batches
       const BATCH_SIZE = 500;
       let upsertedCount = 0;
 
@@ -583,11 +612,11 @@ export const DepositsWithdrawalsTable = () => {
         upsertedCount += batch.length;
       }
 
-      // 7. Record EOD run history
+      // 8. Record EOD run history
       const { error: historyError } = await supabase
         .from("eod_run_history")
         .insert({
-          run_date: today,
+          run_date: selectedDate,
           run_by: user?.id,
           run_by_email: user?.email,
           clients_captured: upsertedCount,
@@ -603,8 +632,8 @@ export const DepositsWithdrawalsTable = () => {
         console.error("Failed to record EOD history:", historyError);
       }
 
-      toast.success(`EOD snapshot calculated: ${upsertedCount} balances for ${today}`, {
-        description: `Deposits: ${depositRecordsCount}, Trades processed: ${todayTrades?.length || 0}`,
+      toast.success(`EOD snapshot calculated: ${upsertedCount} balances for ${selectedDate}`, {
+        description: `Deposits: ${depositRecordsCount}, Trades: ${dateTrades?.length || 0} (with commission)`,
       });
     } catch (error: any) {
       console.error("EOD error:", error);
@@ -688,19 +717,45 @@ export const DepositsWithdrawalsTable = () => {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-            <Button
-              onClick={handleRunEod}
-              disabled={runningEod}
-              size="sm"
-              className="bg-primary hover:bg-primary/90"
-            >
-              {runningEod ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4 mr-2" />
-              )}
-              Run EOD
-            </Button>
+            <div className="flex items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      "w-[140px] justify-start text-left font-normal",
+                      !eodDate && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {eodDate ? format(eodDate, "dd MMM yyyy") : <span>Pick date</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={eodDate}
+                    onSelect={(date) => date && setEodDate(date)}
+                    initialFocus
+                    className="pointer-events-auto"
+                  />
+                </PopoverContent>
+              </Popover>
+              <Button
+                onClick={handleRunEod}
+                disabled={runningEod}
+                size="sm"
+                className="bg-primary hover:bg-primary/90"
+              >
+                {runningEod ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4 mr-2" />
+                )}
+                Run EOD
+              </Button>
+            </div>
           </div>
         </div>
       </CardHeader>
