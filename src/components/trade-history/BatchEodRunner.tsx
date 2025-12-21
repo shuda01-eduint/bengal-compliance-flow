@@ -27,6 +27,30 @@ interface BatchEodRunnerProps {
   onComplete?: () => void;
 }
 
+// Helper function to fetch all rows with pagination (Supabase limits to 1000)
+async function fetchAllRows<T>(
+  queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>
+): Promise<T[]> {
+  const PAGE_SIZE = 1000;
+  let allData: T[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const result = await queryFn(from, to);
+    const { data, error } = result;
+
+    if (error) throw error;
+    if (data) allData = [...allData, ...data];
+    hasMore = data?.length === PAGE_SIZE;
+    page++;
+  }
+
+  return allData;
+}
+
 export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -73,34 +97,56 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         .delete()
         .gte("run_date", startDateStr);
 
-      // 2. Fetch all clients (base list with initial ledger balances)
-      const { data: clients, error: clientsError } = await supabase
-        .from("clients")
-        .select("inv_code, investor_name, ledger_balance, rm_email");
-
-      if (clientsError) throw clientsError;
+      // 2. Fetch ALL clients using pagination (Supabase limits to 1000)
+      toast.info("Fetching all clients...");
+      const clients = await fetchAllRows<{
+        inv_code: string;
+        investor_name: string;
+        ledger_balance: number;
+        rm_email: string | null;
+      }>((from, to) =>
+        supabase
+          .from("clients")
+          .select("inv_code, investor_name, ledger_balance, rm_email")
+          .range(from, to)
+      );
 
       if (!clients || clients.length === 0) {
         toast.warning("No client data found");
+        setRunning(false);
         return;
       }
 
-      // 3. Fetch investor commission rates
-      const { data: investorData } = await supabase
-        .from("investors")
-        .select("investor_code, brokerage_commission");
+      toast.info(`Loaded ${clients.length} clients`);
+
+      // 3. Fetch ALL investor commission rates using pagination
+      const investorData = await fetchAllRows<{
+        investor_code: string;
+        brokerage_commission: number | null;
+      }>((from, to) =>
+        supabase
+          .from("investors")
+          .select("investor_code, brokerage_commission")
+          .range(from, to)
+      );
 
       const commissionMap = new Map<string, number>();
       investorData?.forEach((inv) => {
         commissionMap.set(inv.investor_code.toUpperCase(), inv.brokerage_commission || 0);
       });
 
-      // 4. For the first date, get the previous day's EOD (day before start date)
+      // 4. For the first date, get the previous day's EOD (day before start date) with pagination
       const dayBeforeStart = format(addDays(startDate, -1), "yyyy-MM-dd");
-      const { data: prevDayEod } = await supabase
-        .from("eod_ledger_snapshots")
-        .select("investor_code, ledger_balance")
-        .eq("eod_date", dayBeforeStart);
+      const prevDayEod = await fetchAllRows<{
+        investor_code: string;
+        ledger_balance: number;
+      }>((from, to) =>
+        supabase
+          .from("eod_ledger_snapshots")
+          .select("investor_code, ledger_balance")
+          .eq("eod_date", dayBeforeStart)
+          .range(from, to)
+      );
 
       // Check if we need previous day EOD - find earliest trade date
       const { data: earliestTrade } = await supabase
