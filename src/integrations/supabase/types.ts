@@ -1500,6 +1500,7 @@ export type Database = {
           investor_code: string
           investor_name: string
           ledger_balance: number
+          net_buy: number
           net_sell: number
           payable: number
           receivable: number
