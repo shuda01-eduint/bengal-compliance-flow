@@ -30,6 +30,7 @@ export interface AccountingRow {
   ledger_balance: number;
   total_deposits: number;
   total_withdrawals: number;
+  net_buy: number;
   net_sell: number;
   adjusted_ledger: number;
   accrued_interest: number;
@@ -67,11 +68,12 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'interest_rate', label: 'Int %', visible: true, align: 'right' },
   { id: 'brokerage_commission', label: 'Comm %', visible: false, align: 'right' },
   { id: 'ledger_balance', label: 'Ledger Bal', visible: true, align: 'right' },
-  { id: 'total_deposits', label: 'Deposits', visible: false, align: 'right', colorClass: 'text-green-400' },
-  { id: 'total_withdrawals', label: 'Withdrawals', visible: false, align: 'right', colorClass: 'text-amber-400' },
-  { id: 'gross_buy', label: 'Buy', visible: true, align: 'right', colorClass: 'text-red-400' },
-  { id: 'gross_sell', label: 'Sell', visible: true, align: 'right', colorClass: 'text-green-400' },
-  { id: 'net_sell', label: 'Net Sell', visible: false, align: 'right' },
+  { id: 'total_deposits', label: 'Deposits', visible: true, align: 'right', colorClass: 'text-green-400' },
+  { id: 'total_withdrawals', label: 'Withdrawals', visible: true, align: 'right', colorClass: 'text-amber-400' },
+  { id: 'gross_buy', label: 'Gross Buy', visible: true, align: 'right', colorClass: 'text-red-400' },
+  { id: 'net_buy', label: 'Net Buy', visible: true, align: 'right', colorClass: 'text-red-400' },
+  { id: 'gross_sell', label: 'Gross Sell', visible: true, align: 'right', colorClass: 'text-green-400' },
+  { id: 'net_sell', label: 'Net Sell', visible: true, align: 'right', colorClass: 'text-green-400' },
   { id: 'adjusted_ledger', label: 'Adj. Ledger', visible: false, align: 'right' },
   { id: 'accrued_interest', label: 'Accrued Int.', visible: true, align: 'right', colorClass: 'text-orange-400' },
   { id: 'payable', label: 'Payable', visible: false, align: 'right', colorClass: 'text-red-400' },
@@ -91,6 +93,7 @@ const evaluateFormula = (formula: string, row: AccountingRow): number => {
       'total_deposits': row.total_deposits,
       'withdrawals': row.total_withdrawals,
       'total_withdrawals': row.total_withdrawals,
+      'net_buy': row.net_buy,
       'net_sell': row.net_sell,
       'adjusted_ledger': row.adjusted_ledger,
       'adjusted': row.adjusted_ledger,
@@ -292,6 +295,7 @@ const AccountingTab = () => {
         total_withdrawals: Number(row.total_withdrawals) || 0,
         gross_buy: Number(row.gross_buy) || 0,
         gross_sell: Number(row.gross_sell) || 0,
+        net_buy: Number(row.net_buy) || 0,
         net_sell: Number(row.net_sell) || 0,
         adjusted_ledger: Number(row.adjusted_ledger) || 0,
         accrued_interest: Number(row.accrued_interest) || 0,
