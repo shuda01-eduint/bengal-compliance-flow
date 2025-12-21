@@ -260,10 +260,17 @@ export const DepositsWithdrawalsTable = () => {
         if (rawDate !== null && rawDate !== undefined) {
           // Handle Excel date serial numbers
           if (typeof rawDate === "number") {
-            const excelDate = XLSX.SSF.parse_date_code(rawDate);
-            if (excelDate) {
-              transactionDate = `${excelDate.y}-${String(excelDate.m).padStart(2, '0')}-${String(excelDate.d).padStart(2, '0')}`;
-            }
+            // Excel dates are days since Dec 30, 1899
+            // Use UTC-based calculation to avoid timezone shifts
+            const excelEpoch = Date.UTC(1899, 11, 30); // Dec 30, 1899 in UTC
+            const jsTimestamp = excelEpoch + rawDate * 86400000; // 86400000ms = 1 day
+            const jsDate = new Date(jsTimestamp);
+            // Extract UTC components to avoid timezone shifts
+            const year = jsDate.getUTCFullYear();
+            const month = String(jsDate.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(jsDate.getUTCDate()).padStart(2, '0');
+            transactionDate = `${year}-${month}-${day}`;
+            console.log(`Excel date parsed: raw=${rawDate} -> ${transactionDate}`);
           } else if (typeof rawDate === "string") {
             // Try to parse string dates in various formats
             const dateStr = rawDate.trim();
