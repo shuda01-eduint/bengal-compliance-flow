@@ -82,29 +82,33 @@ const EmployeesPage = () => {
       title="Organization" 
       subtitle="Manage employees, departments, agents and users"
     >
-      <Tabs defaultValue="employees" className="space-y-6">
-        <TabsList className="grid w-full max-w-3xl grid-cols-5">
-          <TabsTrigger value="employees" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Employees
-          </TabsTrigger>
-          <TabsTrigger value="departments" className="flex items-center gap-2">
-            <Building2 className="h-4 w-4" />
-            Departments
-          </TabsTrigger>
-          <TabsTrigger value="agents" className="flex items-center gap-2">
-            <User className="h-4 w-4" />
-            Agents
-          </TabsTrigger>
-          <TabsTrigger value="agent-codes" className="flex items-center gap-2">
-            <Link className="h-4 w-4" />
-            Agent Codes
-          </TabsTrigger>
-          <TabsTrigger value="users" className="flex items-center gap-2">
-            <UserCog className="h-4 w-4" />
-            Users
-          </TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="employees" className="space-y-4 lg:space-y-6">
+        <div className="overflow-x-auto -mx-4 px-4 lg:mx-0 lg:px-0">
+          <TabsList className="inline-flex w-auto min-w-full sm:min-w-0">
+            <TabsTrigger value="employees" className="flex items-center gap-1 lg:gap-2 text-xs lg:text-sm px-2 lg:px-3">
+              <Users className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+              <span className="hidden sm:inline">Employees</span>
+              <span className="sm:hidden">Staff</span>
+            </TabsTrigger>
+            <TabsTrigger value="departments" className="flex items-center gap-1 lg:gap-2 text-xs lg:text-sm px-2 lg:px-3">
+              <Building2 className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+              <span className="hidden sm:inline">Departments</span>
+              <span className="sm:hidden">Depts</span>
+            </TabsTrigger>
+            <TabsTrigger value="agents" className="flex items-center gap-1 lg:gap-2 text-xs lg:text-sm px-2 lg:px-3">
+              <User className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+              Agents
+            </TabsTrigger>
+            <TabsTrigger value="agent-codes" className="flex items-center gap-1 lg:gap-2 text-xs lg:text-sm px-2 lg:px-3">
+              <Link className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+              <span className="hidden sm:inline">Agent </span>Codes
+            </TabsTrigger>
+            <TabsTrigger value="users" className="flex items-center gap-1 lg:gap-2 text-xs lg:text-sm px-2 lg:px-3">
+              <UserCog className="h-3.5 w-3.5 lg:h-4 lg:w-4" />
+              Users
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* Employees Tab */}
         <TabsContent value="employees" className="space-y-6">
