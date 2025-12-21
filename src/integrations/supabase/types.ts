@@ -1619,15 +1619,25 @@ export type Database = {
           sell_sum: number
         }[]
       }
-      get_accounting_turnover_by_department: {
-        Args: { _from_tx_date?: string; _to_tx_date?: string }
-        Returns: {
-          department: string
-          total_buy: number
-          total_sell: number
-          turnover: number
-        }[]
-      }
+      get_accounting_turnover_by_department:
+        | {
+            Args: { _from_tx_date?: string; _to_tx_date?: string }
+            Returns: {
+              department: string
+              total_buy: number
+              total_sell: number
+              turnover: number
+            }[]
+          }
+        | {
+            Args: { _from_tx_date?: string; _to_tx_date?: string }
+            Returns: {
+              department: string
+              total_buy: number
+              total_sell: number
+              turnover: number
+            }[]
+          }
       get_admin_balances_enriched: {
         Args: {
           p_cursor_id?: string
