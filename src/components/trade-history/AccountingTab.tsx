@@ -12,7 +12,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format, subDays } from "date-fns";
-import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award } from "lucide-react";
+import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award, ArrowUpDown, GripVertical } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -161,6 +161,9 @@ const AccountingTab = () => {
   const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
   const [hasTradesFilter, setHasTradesFilter] = useState<string>("all");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
 
   // Check if user is admin
   useEffect(() => {
@@ -474,6 +477,68 @@ const AccountingTab = () => {
   };
 
   const visibleColumns = columns.filter(c => c.visible);
+
+  // Sort handler
+  const handleSort = (columnId: string) => {
+    if (sortColumn === columnId) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(columnId);
+      setSortDirection('asc');
+    }
+  };
+
+  // Drag and drop handlers for column reordering
+  const handleDragStart = (columnId: string) => {
+    setDraggedColumn(columnId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetColumnId: string) => {
+    e.preventDefault();
+    if (!draggedColumn || draggedColumn === targetColumnId) return;
+  };
+
+  const handleDrop = (e: React.DragEvent, targetColumnId: string) => {
+    e.preventDefault();
+    if (!draggedColumn || draggedColumn === targetColumnId) return;
+
+    setColumns(cols => {
+      const draggedIndex = cols.findIndex(c => c.id === draggedColumn);
+      const targetIndex = cols.findIndex(c => c.id === targetColumnId);
+      if (draggedIndex === -1 || targetIndex === -1) return cols;
+
+      const newCols = [...cols];
+      const [removed] = newCols.splice(draggedIndex, 1);
+      newCols.splice(targetIndex, 0, removed);
+      return newCols;
+    });
+    setDraggedColumn(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedColumn(null);
+  };
+
+  // Sort data
+  const sortedData = useMemo(() => {
+    if (!sortColumn) return accountingData;
+    
+    return [...accountingData].sort((a, b) => {
+      const aVal = a[sortColumn];
+      const bVal = b[sortColumn];
+      
+      // Handle string comparison
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        const comparison = aVal.localeCompare(bVal);
+        return sortDirection === 'asc' ? comparison : -comparison;
+      }
+      
+      // Handle numeric comparison
+      const aNum = Number(aVal) || 0;
+      const bNum = Number(bVal) || 0;
+      return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
+    });
+  }, [accountingData, sortColumn, sortDirection]);
 
   const getCellValue = (row: AccountingRow, columnId: string) => {
     const value = row[columnId];
@@ -1216,17 +1281,54 @@ const AccountingTab = () => {
                         <TableHead 
                           key={column.id} 
                           className={cn(
-                            "min-w-[100px]",
+                            "min-w-[100px] cursor-pointer select-none transition-colors hover:bg-muted/80",
                             column.align === 'right' && "text-right",
-                            column.colorClass
+                            column.colorClass,
+                            draggedColumn === column.id && "opacity-50 bg-primary/20"
                           )}
+                          draggable
+                          onDragStart={() => handleDragStart(column.id)}
+                          onDragOver={(e) => handleDragOver(e, column.id)}
+                          onDrop={(e) => handleDrop(e, column.id)}
+                          onDragEnd={handleDragEnd}
+                          onClick={() => handleSort(column.id)}
                         >
-                          {column.label}
+                          <div className={cn(
+                            "flex items-center gap-1",
+                            column.align === 'right' && "justify-end"
+                          )}>
+                            <GripVertical className="h-3 w-3 text-muted-foreground/50 cursor-grab" />
+                            <span>{column.label}</span>
+                            {sortColumn === column.id ? (
+                              sortDirection === 'asc' ? (
+                                <ChevronUp className="h-3 w-3 text-primary" />
+                              ) : (
+                                <ChevronDown className="h-3 w-3 text-primary" />
+                              )
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-muted-foreground/30" />
+                            )}
+                          </div>
                         </TableHead>
                       ))}
                       {customFields.map(field => (
-                        <TableHead key={field.id} className="text-right min-w-[100px] text-primary">
-                          {field.name}
+                        <TableHead 
+                          key={field.id} 
+                          className="text-right min-w-[100px] text-primary cursor-pointer hover:bg-muted/80"
+                          onClick={() => handleSort(field.id)}
+                        >
+                          <div className="flex items-center gap-1 justify-end">
+                            <span>{field.name}</span>
+                            {sortColumn === field.id ? (
+                              sortDirection === 'asc' ? (
+                                <ChevronUp className="h-3 w-3 text-primary" />
+                              ) : (
+                                <ChevronDown className="h-3 w-3 text-primary" />
+                              )
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-muted-foreground/30" />
+                            )}
+                          </div>
                         </TableHead>
                       ))}
                       <TableHead className="w-[40px] min-w-[40px]">
@@ -1245,7 +1347,7 @@ const AccountingTab = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {accountingData.map((row) => (
+                    {sortedData.map((row) => (
                       <TableRow 
                         key={row.investor_code}
                         className="cursor-pointer hover:bg-muted/50"
@@ -1293,7 +1395,7 @@ const AccountingTab = () => {
                         <TableCell></TableCell>
                       </TableRow>
                     ))}
-                    {accountingData.length === 0 && (
+                    {sortedData.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={visibleColumns.length + customFields.length + 1} className="text-center py-8 text-muted-foreground">
                           {debouncedSearch ? 'No investors found matching your search' : 'No accounting data available'}
