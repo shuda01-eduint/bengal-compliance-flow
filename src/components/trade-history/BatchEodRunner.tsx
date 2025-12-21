@@ -19,7 +19,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { CalendarIcon, Loader2, Play, AlertTriangle, ShieldCheck, RefreshCw } from "lucide-react";
+import { CalendarIcon, Loader2, Play, AlertTriangle, ShieldCheck, RefreshCw, Trash2 } from "lucide-react";
 import { format, addDays, differenceInDays, parse } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -72,6 +72,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const [totalDays, setTotalDays] = useState(0);
   const [verifying, setVerifying] = useState(false);
   const [staleWarning, setStaleWarning] = useState<StaleWarning | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   // Verify previous day EOD when start date changes
   const verifyPreviousDayEod = useCallback(async (selectedStartDate: Date) => {
@@ -267,6 +268,40 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const handleUseSafeStartDate = () => {
     if (staleWarning?.suggestedStartDate) {
       setStartDate(staleWarning.suggestedStartDate);
+    }
+  };
+
+  const handleClearAllEodData = async () => {
+    if (!confirm("Are you sure you want to clear ALL EOD data? This cannot be undone.")) {
+      return;
+    }
+
+    setClearing(true);
+    try {
+      // Clear eod_ledger_snapshots
+      const { error: snapshotError } = await supabase
+        .from("eod_ledger_snapshots")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000"); // Delete all rows
+
+      if (snapshotError) throw snapshotError;
+
+      // Clear eod_run_history
+      const { error: historyError } = await supabase
+        .from("eod_run_history")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000"); // Delete all rows
+
+      if (historyError) throw historyError;
+
+      toast.success("All EOD data cleared successfully");
+      setStaleWarning(null);
+      onComplete?.();
+    } catch (error: any) {
+      console.error("Error clearing EOD data:", error);
+      toast.error("Failed to clear EOD data", { description: error.message });
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -685,11 +720,29 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           )}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={running}>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button 
+            variant="destructive" 
+            onClick={handleClearAllEodData} 
+            disabled={running || clearing}
+            className="sm:mr-auto"
+          >
+            {clearing ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Clearing...
+              </>
+            ) : (
+              <>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Clear All EOD Data
+              </>
+            )}
+          </Button>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={running || clearing}>
             Cancel
           </Button>
-          <Button onClick={runBatchEod} disabled={running || !startDate || !endDate}>
+          <Button onClick={runBatchEod} disabled={running || clearing || !startDate || !endDate}>
             {running ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
