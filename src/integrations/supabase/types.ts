@@ -1542,49 +1542,27 @@ export type Database = {
               total_withdrawals: number
             }[]
           }
-      get_accounting_summary:
-        | {
-            Args: {
-              _account_type_filter?: string
-              _from_trade_date?: string
-              _from_tx_date?: string
-              _has_trades_filter?: string
-              _to_trade_date?: string
-              _to_tx_date?: string
-            }
-            Returns: {
-              margin_accounts: number
-              total_accounts: number
-              total_accrued_interest: number
-              total_buy: number
-              total_margin_loan: number
-              total_payable: number
-              total_receivable: number
-              total_sell: number
-              total_trade_value: number
-            }[]
-          }
-        | {
-            Args: {
-              _account_type_filter?: string
-              _from_trade_date?: string
-              _from_tx_date?: string
-              _has_trades_filter?: string
-              _to_trade_date?: string
-              _to_tx_date?: string
-            }
-            Returns: {
-              margin_accounts: number
-              total_accounts: number
-              total_accrued_interest: number
-              total_buy: number
-              total_margin_loan: number
-              total_payable: number
-              total_receivable: number
-              total_sell: number
-              total_trade_value: number
-            }[]
-          }
+      get_accounting_summary: {
+        Args: {
+          _account_type_filter?: string
+          _from_trade_date?: string
+          _from_tx_date?: string
+          _has_trades_filter?: string
+          _to_trade_date?: string
+          _to_tx_date?: string
+        }
+        Returns: {
+          margin_accounts: number
+          total_accounts: number
+          total_accrued_interest: number
+          total_buy: number
+          total_margin_loan: number
+          total_payable: number
+          total_receivable: number
+          total_sell: number
+          total_trade_value: number
+        }[]
+      }
       get_accounting_trade_sums: {
         Args: { _from_trade_date: string; _to_trade_date: string }
         Returns: {
