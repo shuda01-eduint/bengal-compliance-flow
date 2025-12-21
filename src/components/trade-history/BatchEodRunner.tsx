@@ -469,6 +469,9 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         const tradeMap = new Map<string, { grossBuys: number; netSells: number }>();
         let tradeFilesCount = 0;
 
+        // DEBUG: Log trade count for this date
+        console.log(`[EOD ${dateStr}] Found ${dateTrades?.length || 0} trades`);
+
         if (dateTrades) {
           tradeFilesCount = dateTrades.length > 0 ? 1 : 0;
           dateTrades.forEach((trade) => {
@@ -481,6 +484,18 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
             const commissionRate = commissionMap.get(clientCode) || 0;
             const current = tradeMap.get(clientCode) || { grossBuys: 0, netSells: 0 };
             const side = (trade.side || "").toUpperCase();
+
+            // DEBUG: Log trade details for OBO4083
+            if (clientCode === "OBO4083") {
+              console.log(`[EOD ${dateStr}] OBO4083 Trade:`, {
+                side,
+                value: trade.value,
+                commissionRate,
+                fillType,
+                grossWithComm: side === "BUY" || side === "B" ? trade.value * (1 + commissionRate) : 0,
+                netWithComm: side === "SELL" || side === "S" ? trade.value * (1 - commissionRate) : 0,
+              });
+            }
 
             if (side === "BUY" || side === "B") {
               current.grossBuys += trade.value * (1 + commissionRate);
@@ -504,6 +519,19 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
             tx.withdrawals +
             trades.netSells -
             trades.grossBuys;
+
+          // DEBUG: Log calculation for OBO4083
+          if (invCodeUpper === "OBO4083") {
+            console.log(`[EOD ${dateStr}] OBO4083 Calculation:`, {
+              openingBalance,
+              deposits: tx.deposits,
+              withdrawals: tx.withdrawals,
+              grossBuys: trades.grossBuys,
+              netSells: trades.netSells,
+              calculatedBalance,
+              formula: `${openingBalance} + ${tx.deposits} - ${tx.withdrawals} + ${trades.netSells} - ${trades.grossBuys} = ${calculatedBalance}`,
+            });
+          }
 
           // Update running balance for next day (use uppercase key)
           runningBalances.set(invCodeUpper, calculatedBalance);
