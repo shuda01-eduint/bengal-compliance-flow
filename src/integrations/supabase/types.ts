@@ -1795,6 +1795,15 @@ export type Database = {
           total_stock: number
         }[]
       }
+      get_commission_by_department: {
+        Args: { _from_tx_date?: string; _to_tx_date?: string }
+        Returns: {
+          department: string
+          total_commission: number
+          total_turnover: number
+          trade_count: number
+        }[]
+      }
       get_deposit_import_stats: {
         Args: never
         Returns: {
@@ -1814,6 +1823,15 @@ export type Database = {
           account_types: string[]
           investor_types: string[]
           statuses: string[]
+        }[]
+      }
+      get_margin_composition_by_department: {
+        Args: { p_date?: string }
+        Returns: {
+          department: string
+          margin_accounts: number
+          margin_loan: number
+          total_accounts: number
         }[]
       }
       get_trade_file_stats: {
