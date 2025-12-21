@@ -1826,12 +1826,14 @@ export type Database = {
         }[]
       }
       get_margin_composition_by_department: {
-        Args: { p_date?: string }
+        Args: { p_from_date?: string; p_to_date?: string }
         Returns: {
+          beginning_balance: number
+          change_amount: number
+          change_percent: number
+          client_count: number
           department: string
-          margin_accounts: number
-          margin_loan: number
-          total_accounts: number
+          ending_balance: number
         }[]
       }
       get_trade_file_stats: {
