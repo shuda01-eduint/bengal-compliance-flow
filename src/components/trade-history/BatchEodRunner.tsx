@@ -490,8 +490,11 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           dateTrades.forEach((trade) => {
             if (!trade.client_code || !trade.value) return;
 
-            const fillType = (trade.fill_type || trade.status || "").toUpperCase();
-            if (!["FILL", "PF"].includes(fillType)) return;
+            const fillType = (trade.fill_type || "").toUpperCase();
+            const status = (trade.status || "").toUpperCase();
+            // Accept trade if EITHER fill_type or status is FILL/PF
+            const isValidFill = ["FILL", "PF"].includes(fillType) || ["FILL", "PF"].includes(status);
+            if (!isValidFill) return;
 
             const clientCode = trade.client_code.toUpperCase(); // Normalize to uppercase
             const commissionRate = commissionMap.get(clientCode) || 0;
