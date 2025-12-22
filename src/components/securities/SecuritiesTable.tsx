@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Plus, Search, Trash2, RefreshCw, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Upload, Plus, Search, Trash2, RefreshCw, ChevronLeft, ChevronRight, Download, CloudDownload, CheckCircle2, XCircle, AlertCircle, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import * as XLSX from "xlsx";
 import { SecurityRecordSchema, sanitizeString } from "@/lib/validation-schemas";
 
@@ -30,6 +31,18 @@ interface Security {
   sector: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface SyncStatus {
+  status: 'idle' | 'syncing' | 'success' | 'error';
+  message?: string;
+  configured?: boolean;
+  lastSynced?: string;
+  details?: {
+    ip?: string;
+    database?: string;
+    username?: string;
+  };
 }
 
 const SECTORS = [
@@ -70,6 +83,8 @@ export function SecuritiesTable() {
   const [totalCount, setTotalCount] = useState(0);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ status: 'idle' });
+  const [isSyncDialogOpen, setIsSyncDialogOpen] = useState(false);
   const { toast } = useToast();
 
   // Form state for adding new security
@@ -361,14 +376,210 @@ export function SecuritiesTable() {
     XLSX.writeFile(wb, `securities_export_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
+  const checkDSEStatus = async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke('dse-market-data', {
+        body: { action: 'check_status' }
+      });
+      
+      if (error) throw error;
+      
+      return data?.data || {};
+    } catch (error) {
+      console.error('Error checking DSE status:', error);
+      return { configured: false };
+    }
+  };
+
+  const handleDSESync = async () => {
+    setSyncStatus({ status: 'syncing', message: 'Checking DSE MDS configuration...' });
+    
+    try {
+      // First check status
+      const statusData = await checkDSEStatus();
+      
+      setSyncStatus({
+        status: 'syncing',
+        message: 'Attempting to sync market data...',
+        configured: statusData.configured,
+        details: statusData.connection
+      });
+
+      // Try to sync
+      const { data, error } = await supabase.functions.invoke('dse-market-data', {
+        body: { action: 'sync_all', sync_to_db: true }
+      });
+      
+      if (error) throw error;
+      
+      if (data?.success) {
+        setSyncStatus({
+          status: 'success',
+          message: data.data?.note || 'Sync completed',
+          configured: statusData.configured,
+          lastSynced: new Date().toISOString(),
+          details: statusData.connection
+        });
+        
+        toast({
+          title: "Sync Status",
+          description: data.data?.note || "DSE market data check completed",
+        });
+        
+        fetchSecurities();
+      } else {
+        throw new Error(data?.error || 'Sync failed');
+      }
+    } catch (error: any) {
+      console.error('DSE sync error:', error);
+      const errorMessage = error.message || 'Failed to sync with DSE MDS';
+      
+      setSyncStatus({
+        status: 'error',
+        message: errorMessage,
+        configured: false
+      });
+      
+      toast({
+        title: "Sync Info",
+        description: errorMessage.includes('SQL Server') 
+          ? "DSE MDS credentials configured. Direct SQL Server connection requires additional infrastructure."
+          : errorMessage,
+        variant: errorMessage.includes('SQL Server') ? "default" : "destructive",
+      });
+    }
+  };
+
+  const getSyncStatusIcon = () => {
+    switch (syncStatus.status) {
+      case 'syncing':
+        return <Loader2 className="h-4 w-4 animate-spin" />;
+      case 'success':
+        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+      case 'error':
+        return <AlertCircle className="h-4 w-4 text-amber-500" />;
+      default:
+        return <CloudDownload className="h-4 w-4" />;
+    }
+  };
+
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <CardTitle className="text-lg font-medium">Securities Master Data</CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* DSE Sync Button */}
+            <Dialog open={isSyncDialogOpen} onOpenChange={setIsSyncDialogOpen}>
+              <DialogTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    setIsSyncDialogOpen(true);
+                    if (syncStatus.status === 'idle') {
+                      checkDSEStatus().then(statusData => {
+                        setSyncStatus({
+                          status: 'idle',
+                          configured: statusData.configured,
+                          details: statusData.connection,
+                          message: statusData.message
+                        });
+                      });
+                    }
+                  }}
+                >
+                  {getSyncStatusIcon()}
+                  <span className="ml-2">DSE Sync</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>DSE Market Data Sync</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  {/* Connection Status */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">MDS Connection</span>
+                      <Badge variant={syncStatus.configured ? "default" : "secondary"}>
+                        {syncStatus.configured ? "Configured" : "Not Configured"}
+                      </Badge>
+                    </div>
+                    {syncStatus.details && (
+                      <div className="text-xs text-muted-foreground space-y-1 bg-muted/50 p-2 rounded">
+                        <div>IP: {syncStatus.details.ip}</div>
+                        <div>Database: {syncStatus.details.database}</div>
+                        <div>Username: {syncStatus.details.username}</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sync Status */}
+                  <div className="space-y-2">
+                    <span className="text-sm font-medium">Sync Status</span>
+                    <div className={`p-3 rounded-lg border ${
+                      syncStatus.status === 'success' ? 'bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800' :
+                      syncStatus.status === 'error' ? 'bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800' :
+                      syncStatus.status === 'syncing' ? 'bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800' :
+                      'bg-muted/50 border-border'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {getSyncStatusIcon()}
+                        <span className="text-sm">
+                          {syncStatus.status === 'idle' ? 'Ready to sync' :
+                           syncStatus.status === 'syncing' ? 'Syncing...' :
+                           syncStatus.status === 'success' ? 'Completed' : 'Attention Required'}
+                        </span>
+                      </div>
+                      {syncStatus.message && (
+                        <p className="text-xs text-muted-foreground mt-2">{syncStatus.message}</p>
+                      )}
+                      {syncStatus.lastSynced && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Last checked: {new Date(syncStatus.lastSynced).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Info Note */}
+                  <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded">
+                    <strong>Note:</strong> DSE MDS uses SQL Server which requires a proxy service or scheduled ETL job for data sync. Credentials are configured but direct connection is not available from Edge Functions.
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={handleDSESync} 
+                      disabled={syncStatus.status === 'syncing'}
+                      className="flex-1"
+                    >
+                      {syncStatus.status === 'syncing' ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Checking...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Check Connection
+                        </>
+                      )}
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setIsSyncDialogOpen(false)}
+                    >
+                      Close
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
             <Button variant="outline" size="sm" onClick={handleExport} disabled={securities.length === 0}>
               <Download className="h-4 w-4 mr-2" />
               Export
