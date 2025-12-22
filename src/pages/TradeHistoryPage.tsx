@@ -4,9 +4,9 @@ import { DepositsWithdrawalsTable } from "@/components/trade-history/DepositsWit
 import { UploadHistoryTable } from "@/components/trade-history/UploadHistoryTable";
 import { StockExchangeUpload } from "@/components/stock-exchange/StockExchangeUpload";
 import { ClientTradeSearch } from "@/components/stock-exchange/ClientTradeSearch";
+import { ImportOpeningBalancesDialog } from "@/components/trade-history/ImportOpeningBalancesDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { History, ArrowDownUp, FileUp, Upload } from "lucide-react";
-
 const TradeHistoryPage = () => {
   return (
     <MainLayout title="Trade History" subtitle="View historical trade uploads, stock exchange data, and audit trails">
@@ -33,6 +33,9 @@ const TradeHistoryPage = () => {
         </div>
         <TabsContent value="stock-exchange">
           <div className="space-y-6">
+            <div className="flex justify-end">
+              <ImportOpeningBalancesDialog />
+            </div>
             <ClientTradeSearch />
             <StockExchangeUpload />
           </div>
