@@ -355,10 +355,10 @@ export function OverBuyReport() {
 
       if (accountingError) throw accountingError;
 
-      // Filter for negative closing balance (final_balance) on client side
-      // This is the balance AFTER trades, not the raw ledger balance
+      // Filter for negative opening ledger balance (before trades)
+      // This shows clients who started the day with negative balance and then traded
       const negativeBalanceAccounts = (accountingData || []).filter(
-        (acc: any) => Number(acc.final_balance) < 0
+        (acc: any) => Number(acc.ledger_balance) < 0
       );
 
       // Get investor codes for additional data
