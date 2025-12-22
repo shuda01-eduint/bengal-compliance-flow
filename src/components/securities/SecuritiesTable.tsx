@@ -395,57 +395,48 @@ export function SecuritiesTable() {
     setSyncStatus({ status: 'syncing', message: 'Checking DSE MDS configuration...' });
     
     try {
-      // First check status
+      // Only check status - direct SQL Server sync is not possible from Edge Functions
       const statusData = await checkDSEStatus();
       
-      setSyncStatus({
-        status: 'syncing',
-        message: 'Attempting to sync market data...',
-        configured: statusData.configured,
-        details: statusData.connection
-      });
-
-      // Try to sync
-      const { data, error } = await supabase.functions.invoke('dse-market-data', {
-        body: { action: 'sync_all', sync_to_db: true }
-      });
-      
-      if (error) throw error;
-      
-      if (data?.success) {
+      if (statusData.configured) {
         setSyncStatus({
           status: 'success',
-          message: data.data?.note || 'Sync completed',
-          configured: statusData.configured,
+          message: statusData.note || 'DSE MDS credentials are configured. Use the manual import feature or set up a scheduled ETL job to sync data.',
+          configured: true,
           lastSynced: new Date().toISOString(),
           details: statusData.connection
         });
         
         toast({
-          title: "Sync Status",
-          description: data.data?.note || "DSE market data check completed",
+          title: "Connection Verified",
+          description: "DSE MDS credentials are configured correctly.",
+        });
+      } else {
+        setSyncStatus({
+          status: 'error',
+          message: 'DSE MDS credentials are not configured.',
+          configured: false
         });
         
-        fetchSecurities();
-      } else {
-        throw new Error(data?.error || 'Sync failed');
+        toast({
+          title: "Not Configured",
+          description: "DSE MDS credentials need to be configured.",
+          variant: "destructive",
+        });
       }
     } catch (error: any) {
-      console.error('DSE sync error:', error);
-      const errorMessage = error.message || 'Failed to sync with DSE MDS';
+      console.error('DSE status check error:', error);
       
       setSyncStatus({
         status: 'error',
-        message: errorMessage,
+        message: error.message || 'Failed to check DSE MDS status',
         configured: false
       });
       
       toast({
-        title: "Sync Info",
-        description: errorMessage.includes('SQL Server') 
-          ? "DSE MDS credentials configured. Direct SQL Server connection requires additional infrastructure."
-          : errorMessage,
-        variant: errorMessage.includes('SQL Server') ? "default" : "destructive",
+        title: "Error",
+        description: error.message || "Failed to check DSE MDS status",
+        variant: "destructive",
       });
     }
   };
