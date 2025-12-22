@@ -82,6 +82,9 @@ interface ClientOverBuyData {
   // Detailed data for formulas
   securities: SecurityTrade[];
   trade_files: TradeFileData[];
+  // New fields for template
+  event_date: string;
+  non_compliance_type: string;
 }
 
 interface CustomField {
@@ -101,27 +104,16 @@ interface ColumnConfig {
 const STORAGE_KEY = "overbuy_report_preferences";
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
+  { key: "event_date", label: "Event Date", visible: true },
   { key: "inv_code", label: "Code", visible: true },
-  { key: "investor_name", label: "Investor Name", visible: true },
+  { key: "investor_name", label: "Client Name", visible: true },
+  { key: "instruments", label: "Instruments", visible: true },
+  { key: "closing_balance", label: "Amount (Tk.)", visible: true },
+  { key: "last_day_loan_ratio", label: "Last day Loan Ratio", visible: true },
+  { key: "event_day_loan_ratio", label: "Event day loan Ratio", visible: true },
   { key: "rm_name", label: "RM", visible: true },
-  { key: "account_type", label: "Account Type", visible: false },
-  { key: "investor_type", label: "Investor Type", visible: false },
-  { key: "ledger_balance", label: "Ledger Balance", visible: true },
-  { key: "net_buy", label: "Buy", visible: true },
-  { key: "net_sell", label: "Sell", visible: true },
-  { key: "brokerage_amount", label: "Brokerage", visible: true },
-  { key: "closing_balance", label: "Closing Balance", visible: true },
-  { key: "market_value", label: "Market Value", visible: false },
-  { key: "equity", label: "Equity", visible: false },
-  { key: "total_deposits", label: "Deposits", visible: false },
-  { key: "total_withdrawals", label: "Withdrawals", visible: false },
-  { key: "net_deposit", label: "Net Deposit", visible: false },
-  { key: "adjusted_balance", label: "Adjusted Balance", visible: false },
-  { key: "net_position", label: "Net Position", visible: false },
-  { key: "trade_count", label: "Trade Count", visible: false },
-  { key: "unique_securities_traded", label: "Securities Traded", visible: false },
-  { key: "violation_amount", label: "Violation", visible: true },
-  { key: "is_violation", label: "Status", visible: true },
+  { key: "non_compliance_type", label: "Type of Non Compliance", visible: true },
+  { key: "remarks", label: "Remarks", visible: true },
 ];
 
 // Safe formula evaluator with rich data access
@@ -355,10 +347,9 @@ export function OverBuyReport() {
 
       if (accountingError) throw accountingError;
 
-      // Filter for negative opening ledger balance (before trades)
-      // This shows clients who started the day with negative balance and then traded
+      // Filter for negative closing balance (final_balance after trades)
       const negativeBalanceAccounts = (accountingData || []).filter(
-        (acc: any) => Number(acc.ledger_balance) < 0
+        (acc: any) => Number(acc.final_balance) < 0
       );
 
       // Get investor codes for additional data
@@ -588,6 +579,9 @@ export function OverBuyReport() {
           is_violation,
           securities,
           trade_files,
+          // New template fields
+          event_date: fetchedLatestTradeDate || '',
+          non_compliance_type: "Negative Balance",
         };
       });
 
@@ -701,6 +695,16 @@ export function OverBuyReport() {
     }).format(value);
   };
 
+  // Format date from "20251221" to "21-Dec-25"
+  const formatEventDate = (dateStr: string): string => {
+    if (!dateStr || dateStr.length !== 8) return dateStr || "-";
+    const year = dateStr.substring(0, 4);
+    const month = dateStr.substring(4, 6);
+    const day = dateStr.substring(6, 8);
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    return format(date, "dd-MMM-yy");
+  };
+
   const toggleColumnVisibility = (key: string) => {
     setColumns(prev => prev.map(col => 
       col.key === key ? { ...col, visible: !col.visible } : col
@@ -746,25 +750,16 @@ export function OverBuyReport() {
           }
         } else {
           switch (col.key) {
+            case "event_date": row[col.label] = formatEventDate(d.event_date); break;
             case "inv_code": row[col.label] = d.inv_code; break;
             case "investor_name": row[col.label] = d.investor_name; break;
+            case "instruments": row[col.label] = "NA"; break;
+            case "closing_balance": row[col.label] = Math.abs(d.closing_balance); break;
+            case "last_day_loan_ratio": row[col.label] = "-"; break;
+            case "event_day_loan_ratio": row[col.label] = "-"; break;
             case "rm_name": row[col.label] = d.rm_name; break;
-            case "account_type": row[col.label] = d.account_type; break;
-            case "investor_type": row[col.label] = d.investor_type; break;
-            case "ledger_balance": row[col.label] = d.ledger_balance; break;
-            case "market_value": row[col.label] = d.market_value; break;
-            case "equity": row[col.label] = d.equity; break;
-            case "total_deposits": row[col.label] = d.total_deposits; break;
-            case "total_withdrawals": row[col.label] = d.total_withdrawals; break;
-            case "net_deposit": row[col.label] = d.net_deposit; break;
-            case "adjusted_balance": row[col.label] = d.adjusted_balance; break;
-            case "net_buy": row[col.label] = d.net_buy; break;
-            case "net_sell": row[col.label] = d.net_sell; break;
-            case "net_position": row[col.label] = d.net_position; break;
-            case "trade_count": row[col.label] = d.trade_count; break;
-            case "unique_securities_traded": row[col.label] = d.unique_securities_traded; break;
-            case "violation_amount": row[col.label] = d.violation_amount; break;
-            case "is_violation": row[col.label] = d.is_violation ? "VIOLATION" : "OK"; break;
+            case "non_compliance_type": row[col.label] = d.non_compliance_type; break;
+            case "remarks": row[col.label] = "Negative Balance"; break;
           }
         }
       });
@@ -773,8 +768,8 @@ export function OverBuyReport() {
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "OverBuy Report");
-    XLSX.writeFile(wb, `overbuy_report_${new Date().toISOString().split("T")[0]}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Negative Balance Report");
+    XLSX.writeFile(wb, `negative_balance_report_${new Date().toISOString().split("T")[0]}.xlsx`);
     toast.success("Report exported successfully");
   };
 
@@ -799,54 +794,27 @@ export function OverBuyReport() {
     }
 
     switch (col.key) {
+      case "event_date":
+        return formatEventDate(row.event_date);
       case "inv_code":
         return <span className="font-mono text-sm">{row.inv_code}</span>;
       case "investor_name":
         return row.investor_name;
+      case "instruments":
+        return "NA";
+      case "closing_balance":
+        // Show absolute value of negative balance as positive amount
+        return <span className="font-mono">{formatCurrency(Math.abs(row.closing_balance))}</span>;
+      case "last_day_loan_ratio":
+        return "-";
+      case "event_day_loan_ratio":
+        return "-";
       case "rm_name":
         return row.rm_name;
-      case "account_type":
-        return row.account_type || "-";
-      case "investor_type":
-        return row.investor_type || "-";
-      case "ledger_balance":
-        return <span className="font-mono">{formatCurrency(row.ledger_balance)}</span>;
-      case "market_value":
-        return <span className="font-mono">{formatCurrency(row.market_value)}</span>;
-      case "equity":
-        return <span className="font-mono">{formatCurrency(row.equity)}</span>;
-      case "total_deposits":
-        return <span className="font-mono text-green-600">{formatCurrency(row.total_deposits)}</span>;
-      case "total_withdrawals":
-        return <span className="font-mono text-red-600">{formatCurrency(row.total_withdrawals)}</span>;
-      case "net_deposit":
-        return <span className={cn("font-mono font-medium", row.net_deposit >= 0 ? "text-green-600" : "text-red-600")}>{formatCurrency(row.net_deposit)}</span>;
-      case "adjusted_balance":
-        return <span className="font-mono font-medium">{formatCurrency(row.adjusted_balance)}</span>;
-      case "net_buy":
-        return <span className="font-mono">{formatCurrency(row.net_buy)}</span>;
-      case "net_sell":
-        return <span className="font-mono">{formatCurrency(row.net_sell)}</span>;
-      case "net_position":
-        return <span className="font-mono font-medium">{formatCurrency(row.net_position)}</span>;
-      case "trade_count":
-        return <span className="font-mono">{row.trade_count}</span>;
-      case "unique_securities_traded":
-        return <span className="font-mono">{row.unique_securities_traded}</span>;
-      case "violation_amount":
-        return <span className="font-mono text-destructive font-bold">{row.is_violation ? formatCurrency(row.violation_amount) : "-"}</span>;
-      case "is_violation":
-        return row.is_violation ? (
-          <Badge variant="destructive" className="gap-1">
-            <AlertTriangle className="h-3 w-3" />
-            Violation
-          </Badge>
-        ) : (
-          <Badge variant="outline" className="gap-1 text-green-600 border-green-600">
-            <CheckCircle className="h-3 w-3" />
-            OK
-          </Badge>
-        );
+      case "non_compliance_type":
+        return row.non_compliance_type;
+      case "remarks":
+        return "Negative Balance";
       default:
         return "-";
     }
@@ -860,10 +828,10 @@ export function OverBuyReport() {
         <div>
           <CardTitle className="text-xl flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-warning" />
-            OverBuy Compliance Report
+            Negative Balance Report
           </CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            Monitor accounts where net buy exceeds adjusted ledger balance
+            Clients with negative closing balance on latest trade date
           </p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
@@ -1046,7 +1014,7 @@ export function OverBuyReport() {
         {/* Filter Criteria Banner */}
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
           <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
-            Filtered: Cash accounts only • Negative ledger balance • Traded on {latestTradeDate || "N/A"}
+            Filtered: Cash accounts only • Negative closing balance • Traded on {latestTradeDate ? formatEventDate(latestTradeDate) : "N/A"}
           </p>
         </div>
 
@@ -1154,7 +1122,7 @@ export function OverBuyReport() {
             <TableHeader>
               <TableRow>
                 {visibleColumns.map((col) => {
-                  const isRightAlign = ["ledger_balance", "market_value", "equity", "total_deposits", "total_withdrawals", "net_deposit", "adjusted_balance", "net_buy", "net_sell", "net_position", "trade_count", "unique_securities_traded", "violation_amount"].includes(col.key) || col.isCustom;
+                  const isRightAlign = ["closing_balance"].includes(col.key) || col.isCustom;
                   const isCenterAlign = col.key === "is_violation";
                   const isSorted = sortColumn === col.key;
                   
@@ -1210,7 +1178,7 @@ export function OverBuyReport() {
                     {visibleColumns.map((col) => (
                       <TableCell 
                         key={col.key}
-                        className={["ledger_balance", "market_value", "equity", "total_deposits", "total_withdrawals", "adjusted_balance", "net_buy", "net_sell", "net_position", "trade_count", "unique_securities_traded", "violation_amount"].includes(col.key) || col.isCustom ? "text-right" : col.key === "is_violation" ? "text-center" : ""}
+                        className={["closing_balance"].includes(col.key) || col.isCustom ? "text-right" : ""}
                       >
                         {renderCellValue(row, col)}
                       </TableCell>
