@@ -52,6 +52,64 @@ export const ImportOpeningBalancesDialog = ({ onSuccess }: { onSuccess?: () => v
     setOpen(newOpen);
   };
 
+  // Normalize column names by removing whitespace, newlines, and special characters
+  const normalizeColumnName = (col: string): string => {
+    return col
+      .toLowerCase()
+      .replace(/[\r\n]+/g, ' ')  // Replace newlines with space
+      .replace(/\s+/g, '')       // Remove all whitespace
+      .replace(/[.]/g, '')       // Remove periods
+      .trim();
+  };
+
+  // Find value from row using flexible column matching
+  const findColumnValue = (row: Record<string, unknown>, patterns: string[]): unknown => {
+    // First try exact matches
+    for (const pattern of patterns) {
+      if (row[pattern] !== undefined) return row[pattern];
+    }
+    
+    // Then try normalized matching against all keys
+    for (const key of Object.keys(row)) {
+      const normalizedKey = normalizeColumnName(key);
+      for (const pattern of patterns) {
+        const normalizedPattern = normalizeColumnName(pattern);
+        if (normalizedKey === normalizedPattern) {
+          return row[key];
+        }
+      }
+    }
+    
+    return undefined;
+  };
+
+  // Parse number handling commas, parentheses for negatives, and quoted values
+  const parseNumber = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number') return value;
+    
+    let str = String(value).trim();
+    
+    // Remove quotes if present
+    str = str.replace(/^["']|["']$/g, '');
+    
+    // Handle parentheses for negative numbers: (1,234.56) -> -1234.56
+    const isNegativeParens = str.startsWith('(') && str.endsWith(')');
+    if (isNegativeParens) {
+      str = str.slice(1, -1);
+    }
+    
+    // Remove all commas
+    str = str.replace(/,/g, '');
+    
+    // Parse the number
+    const num = parseFloat(str);
+    
+    if (isNaN(num)) return null;
+    
+    return isNegativeParens ? -num : num;
+  };
+
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
@@ -75,37 +133,53 @@ export const ImportOpeningBalancesDialog = ({ onSuccess }: { onSuccess?: () => v
           return;
         }
 
+        // Log the first row's keys for debugging
+        if (jsonData.length > 0) {
+          console.log("CSV columns found:", Object.keys(jsonData[0]));
+        }
+
         const parsed: ParsedBalance[] = [];
         const errors: string[] = [];
 
+        // Possible column name patterns for investor code
+        const investorCodePatterns = [
+          'investor_code', 'Investor Code', 'inv_code', 'Inv. Code', 'Inv Code',
+          'Code', 'code', 'CLIENT CODE', 'client_code', 'InvCode', 'invcode'
+        ];
+
+        // Possible column name patterns for ledger balance (including multi-line headers)
+        const ledgerBalancePatterns = [
+          'ledger_balance', 'Ledger Balance', 'LedgerBalance', 'ledgerbalance',
+          'balance', 'Balance', 'LEDGER BALANCE', 'Ledger\nBalance',
+          'opening_balance', 'Opening Balance', 'Amount'
+        ];
+
+        // Possible column name patterns for investor name
+        const investorNamePatterns = [
+          'investor_name', 'Investor Name', 'name', 'Name', 'CLIENT NAME',
+          'InvestorName', 'client_name', 'Client Name'
+        ];
+
         jsonData.forEach((row, index) => {
-          // Try multiple possible column names for investor code
-          const investorCode = String(
-            row["investor_code"] || row["Investor Code"] || row["inv_code"] || 
-            row["Code"] || row["code"] || row["CLIENT CODE"] || row["client_code"] || ""
-          ).trim();
+          // Find investor code using flexible matching
+          const investorCodeRaw = findColumnValue(row, investorCodePatterns);
+          const investorCode = investorCodeRaw ? String(investorCodeRaw).trim() : '';
 
-          // Try multiple possible column names for ledger balance
-          const balanceRaw = row["ledger_balance"] || row["Ledger Balance"] || 
-            row["balance"] || row["Balance"] || row["LEDGER BALANCE"] || 
-            row["opening_balance"] || row["Opening Balance"] || 0;
+          // Find ledger balance using flexible matching
+          const balanceRaw = findColumnValue(row, ledgerBalancePatterns);
 
-          // Try to get investor name if available
-          const investorName = String(
-            row["investor_name"] || row["Investor Name"] || row["name"] || 
-            row["Name"] || row["CLIENT NAME"] || ""
-          ).trim() || undefined;
+          // Find investor name using flexible matching
+          const investorNameRaw = findColumnValue(row, investorNamePatterns);
+          const investorName = investorNameRaw ? String(investorNameRaw).trim() : undefined;
 
           if (!investorCode) {
             errors.push(`Row ${index + 2}: Missing investor code`);
             return;
           }
 
-          const balance = typeof balanceRaw === "number" 
-            ? balanceRaw 
-            : parseFloat(String(balanceRaw).replace(/,/g, ""));
+          const balance = parseNumber(balanceRaw);
 
-          if (isNaN(balance)) {
+          if (balance === null) {
             errors.push(`Row ${index + 2}: Invalid balance value for ${investorCode}`);
             return;
           }
@@ -288,12 +362,13 @@ export const ImportOpeningBalancesDialog = ({ onSuccess }: { onSuccess?: () => v
 
           {/* Expected Columns */}
           <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-md">
-            <p className="font-medium mb-1">Expected columns:</p>
+            <p className="font-medium mb-1">Supported column names:</p>
             <ul className="list-disc list-inside space-y-0.5">
-              <li><code>investor_code</code> or <code>Investor Code</code> (required)</li>
-              <li><code>ledger_balance</code> or <code>Ledger Balance</code> (required)</li>
-              <li><code>investor_name</code> or <code>Investor Name</code> (optional)</li>
+              <li><code>Inv. Code</code>, <code>investor_code</code>, <code>Code</code> (required)</li>
+              <li><code>Ledger Balance</code>, <code>ledger_balance</code>, <code>Balance</code> (required)</li>
+              <li><code>Investor Name</code>, <code>investor_name</code> (optional)</li>
             </ul>
+            <p className="mt-2 text-muted-foreground/80">Numbers with commas (e.g., "1,234.56") are supported.</p>
           </div>
 
           {/* Parse Error */}
