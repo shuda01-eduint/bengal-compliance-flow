@@ -21,31 +21,44 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface SidebarProps {
   className?: string;
 }
 
-const navigation = [
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  adminOnly?: boolean;
+}
+
+const navigation: NavItem[] = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "CEO Dashboard", href: "/ceo-dashboard", icon: PieChart },
-  { name: "Trade History", href: "/trade-history", icon: History },
+  { name: "CEO Dashboard", href: "/ceo-dashboard", icon: PieChart, adminOnly: true },
+  { name: "Trade History", href: "/trade-history", icon: History, adminOnly: true },
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
-  { name: "Securities", href: "/securities", icon: Landmark },
-  { name: "Accounting", href: "/accounting", icon: Calculator },
-  { name: "Investors", href: "/investors", icon: Contact },
-  { name: "Compliance Reports", href: "/reports", icon: FileText },
-  { name: "Post-Report Activity", href: "/activity", icon: Activity },
-  { name: "Organization", href: "/employees", icon: Users },
-  { name: "Compliance Rules", href: "/rules", icon: Shield },
-  { name: "Notifications", href: "/notifications", icon: Bell },
-  { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Securities", href: "/securities", icon: Landmark, adminOnly: true },
+  { name: "Accounting", href: "/accounting", icon: Calculator, adminOnly: true },
+  { name: "Investors", href: "/investors", icon: Contact, adminOnly: true },
+  { name: "Compliance Reports", href: "/reports", icon: FileText, adminOnly: true },
+  { name: "Post-Report Activity", href: "/activity", icon: Activity, adminOnly: true },
+  { name: "Organization", href: "/employees", icon: Users, adminOnly: true },
+  { name: "Compliance Rules", href: "/rules", icon: Shield, adminOnly: true },
+  { name: "Notifications", href: "/notifications", icon: Bell, adminOnly: true },
+  { name: "Settings", href: "/settings", icon: Settings, adminOnly: true },
 ];
 
 export function Sidebar({ className }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const { signOut, user } = useAuth();
+  const { isAdmin } = useUserRole();
   const navigate = useNavigate();
+
+  const filteredNavigation = navigation.filter(item => 
+    !item.adminOnly || isAdmin
+  );
 
   const handleSignOut = async () => {
     await signOut();
@@ -82,7 +95,7 @@ export function Sidebar({ className }: SidebarProps) {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 px-3 py-4">
-          {navigation.map((item) => (
+          {filteredNavigation.map((item) => (
             <NavLink
               key={item.name}
               to={item.href}

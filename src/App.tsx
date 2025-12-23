@@ -32,19 +32,23 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
+            {/* Public pages for all approved users */}
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
-            <Route path="/activity" element={<ProtectedRoute><ActivityPage /></ProtectedRoute>} />
-            <Route path="/employees" element={<ProtectedRoute><EmployeesPage /></ProtectedRoute>} />
-            <Route path="/rules" element={<ProtectedRoute><RulesPage /></ProtectedRoute>} />
-            <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
             <Route path="/admin/balances" element={<ProtectedRoute><AdminBalancesPage /></ProtectedRoute>} />
-            <Route path="/ceo-dashboard" element={<ProtectedRoute><CEODashboardPage /></ProtectedRoute>} />
-            <Route path="/trade-history" element={<ProtectedRoute><TradeHistoryPage /></ProtectedRoute>} />
-            <Route path="/securities" element={<ProtectedRoute><SecuritiesPage /></ProtectedRoute>} />
-            <Route path="/accounting" element={<ProtectedRoute><AccountingPage /></ProtectedRoute>} />
-            <Route path="/investors" element={<ProtectedRoute><InvestorsPage /></ProtectedRoute>} />
+            
+            {/* Admin-only pages */}
+            <Route path="/ceo-dashboard" element={<ProtectedRoute requireAdmin><CEODashboardPage /></ProtectedRoute>} />
+            <Route path="/trade-history" element={<ProtectedRoute requireAdmin><TradeHistoryPage /></ProtectedRoute>} />
+            <Route path="/securities" element={<ProtectedRoute requireAdmin><SecuritiesPage /></ProtectedRoute>} />
+            <Route path="/accounting" element={<ProtectedRoute requireAdmin><AccountingPage /></ProtectedRoute>} />
+            <Route path="/investors" element={<ProtectedRoute requireAdmin><InvestorsPage /></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute requireAdmin><ReportsPage /></ProtectedRoute>} />
+            <Route path="/activity" element={<ProtectedRoute requireAdmin><ActivityPage /></ProtectedRoute>} />
+            <Route path="/employees" element={<ProtectedRoute requireAdmin><EmployeesPage /></ProtectedRoute>} />
+            <Route path="/rules" element={<ProtectedRoute requireAdmin><RulesPage /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute requireAdmin><NotificationsPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute requireAdmin><SettingsPage /></ProtectedRoute>} />
+            
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
