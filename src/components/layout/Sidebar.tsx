@@ -14,7 +14,8 @@ import {
   LogOut,
   Contact,
   Calculator,
-  PieChart
+  PieChart,
+  UserCog
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ interface NavItem {
 
 const navigation: NavItem[] = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "Admin Panel", href: "/admin/panel", icon: UserCog, adminOnly: true },
   { name: "CEO Dashboard", href: "/ceo-dashboard", icon: PieChart, adminOnly: true },
   { name: "Trade History", href: "/trade-history", icon: History, adminOnly: true },
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },

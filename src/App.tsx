@@ -18,6 +18,7 @@ import TradeHistoryPage from "./pages/TradeHistoryPage";
 import SecuritiesPage from "./pages/SecuritiesPage";
 import InvestorsPage from "./pages/InvestorsPage";
 import AccountingPage from "./pages/AccountingPage";
+import AdminPanelPage from "./pages/AdminPanelPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/admin/balances" element={<ProtectedRoute><AdminBalancesPage /></ProtectedRoute>} />
             
             {/* Admin-only pages */}
+            <Route path="/admin/panel" element={<ProtectedRoute requireAdmin><AdminPanelPage /></ProtectedRoute>} />
             <Route path="/ceo-dashboard" element={<ProtectedRoute requireAdmin><CEODashboardPage /></ProtectedRoute>} />
             <Route path="/trade-history" element={<ProtectedRoute requireAdmin><TradeHistoryPage /></ProtectedRoute>} />
             <Route path="/securities" element={<ProtectedRoute requireAdmin><SecuritiesPage /></ProtectedRoute>} />
