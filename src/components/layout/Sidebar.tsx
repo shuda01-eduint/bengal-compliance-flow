@@ -40,14 +40,14 @@ const navigation: NavItem[] = [
   { name: "Trade History", href: "/trade-history", icon: History, adminOnly: true },
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
   { name: "Securities", href: "/securities", icon: Landmark, adminOnly: true },
-  { name: "Accounting", href: "/accounting", icon: Calculator, adminOnly: true },
+  { name: "Accounting", href: "/accounting", icon: Calculator },
   { name: "Investors", href: "/investors", icon: Contact, adminOnly: true },
   { name: "Compliance Reports", href: "/reports", icon: FileText, adminOnly: true },
   { name: "Post-Report Activity", href: "/activity", icon: Activity, adminOnly: true },
-  { name: "Organization", href: "/employees", icon: Users, adminOnly: true },
+  { name: "Organization", href: "/employees", icon: Users },
   { name: "Compliance Rules", href: "/rules", icon: Shield, adminOnly: true },
   { name: "Notifications", href: "/notifications", icon: Bell, adminOnly: true },
-  { name: "Settings", href: "/settings", icon: Settings, adminOnly: true },
+  { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar({ className }: SidebarProps) {

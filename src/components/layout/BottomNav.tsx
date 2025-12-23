@@ -18,7 +18,7 @@ const navItems: NavItem[] = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Balances", href: "/admin/balances", icon: Wallet },
   { name: "Trades", href: "/trade-history", icon: History, adminOnly: true },
-  { name: "Accounting", href: "/accounting", icon: Calculator, adminOnly: true },
+  { name: "Accounting", href: "/accounting", icon: Calculator },
   { name: "Securities", href: "/securities", icon: Landmark, adminOnly: true },
 ];
 

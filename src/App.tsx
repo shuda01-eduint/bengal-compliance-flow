@@ -40,14 +40,14 @@ const App = () => (
             <Route path="/ceo-dashboard" element={<ProtectedRoute requireAdmin><CEODashboardPage /></ProtectedRoute>} />
             <Route path="/trade-history" element={<ProtectedRoute requireAdmin><TradeHistoryPage /></ProtectedRoute>} />
             <Route path="/securities" element={<ProtectedRoute requireAdmin><SecuritiesPage /></ProtectedRoute>} />
-            <Route path="/accounting" element={<ProtectedRoute requireAdmin><AccountingPage /></ProtectedRoute>} />
+            <Route path="/accounting" element={<ProtectedRoute><AccountingPage /></ProtectedRoute>} />
             <Route path="/investors" element={<ProtectedRoute requireAdmin><InvestorsPage /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute requireAdmin><ReportsPage /></ProtectedRoute>} />
             <Route path="/activity" element={<ProtectedRoute requireAdmin><ActivityPage /></ProtectedRoute>} />
-            <Route path="/employees" element={<ProtectedRoute requireAdmin><EmployeesPage /></ProtectedRoute>} />
+            <Route path="/employees" element={<ProtectedRoute><EmployeesPage /></ProtectedRoute>} />
             <Route path="/rules" element={<ProtectedRoute requireAdmin><RulesPage /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute requireAdmin><NotificationsPage /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute requireAdmin><SettingsPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
             
             <Route path="*" element={<NotFound />} />
           </Routes>
