@@ -419,41 +419,76 @@ const AccountingTab = () => {
     toast.success('Custom field removed');
   };
 
-  const handleExport = () => {
-    const baseHeaders = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Buy', 'Sell', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Receivable (from Broker)', 'Payable (to Broker)', 'Brokerage Amt'];
-    const customHeaders = customFields.map(f => f.name);
-    const headers = [...baseHeaders, ...customHeaders];
+  const handleExport = async () => {
+    const toastId = toast.loading('Preparing export...');
     
-    const csvData = accountingData.map(row => {
-      const baseData = [
-        row.investor_code,
-        row.investor_name,
-        row.account_type,
-        row.interest_rate,
-        row.brokerage_commission,
-        row.ledger_balance,
-        row.total_deposits,
-        row.total_withdrawals,
-        row.gross_buy,
-        row.gross_sell,
-        row.net_sell,
-        row.adjusted_ledger,
-        row.accrued_interest,
-        row.receivable,
-        row.payable,
-        row.brokerage_amount,
-      ];
-      const customData = customFields.map(f => row[f.id] || 0);
-      return [...baseData, ...customData];
-    });
-    
-    const csv = [headers.join(','), ...csvData.map(row => row.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `accounting_${fromDateStr}_to_${toDateStr}.csv`;
-    a.click();
+    try {
+      // Fetch ALL data without pagination for export
+      const { data: allData, error } = await supabase.rpc('get_accounting_data', {
+        _search_term: debouncedSearch || null,
+        _from_trade_date: fromTradeDateStr,
+        _to_trade_date: toTradeDateStr,
+        _from_tx_date: fromDateStr,
+        _to_tx_date: toDateStr,
+        _page_size: 100000, // Large number to get all records
+        _page_offset: 0,
+        _account_type_filter: accountTypeFilter,
+        _has_trades_filter: hasTradesFilter,
+      });
+
+      if (error) throw error;
+
+      // Process data with custom fields
+      const processedData = (allData || []).map((row: AccountingRow) => {
+        const processed = { ...row } as AccountingRow;
+        customFields.forEach(field => {
+          processed[field.id] = evaluateFormula(field.formula, row);
+        });
+        return processed;
+      });
+
+      const baseHeaders = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Buy', 'Sell', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Receivable (from Broker)', 'Payable (to Broker)', 'Brokerage Amt'];
+      const customHeaders = customFields.map(f => f.name);
+      const headers = [...baseHeaders, ...customHeaders];
+      
+      const csvData = processedData.map(row => {
+        const baseData = [
+          row.investor_code,
+          row.investor_name,
+          row.account_type,
+          row.interest_rate,
+          row.brokerage_commission,
+          row.ledger_balance,
+          row.total_deposits,
+          row.total_withdrawals,
+          row.gross_buy,
+          row.gross_sell,
+          row.net_sell,
+          row.adjusted_ledger,
+          row.accrued_interest,
+          row.receivable,
+          row.payable,
+          row.brokerage_amount,
+        ];
+        const customData = customFields.map(f => row[f.id] || 0);
+        return [...baseData, ...customData];
+      });
+      
+      const csv = [headers.join(','), ...csvData.map(row => row.join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `accounting_${fromDateStr}_to_${toDateStr}.csv`;
+      a.click();
+      
+      toast.dismiss(toastId);
+      toast.success(`Exported ${processedData.length} records`);
+    } catch (err) {
+      console.error('Export error:', err);
+      toast.dismiss(toastId);
+      toast.error('Failed to export data');
+    }
   };
 
   const toggleColumnVisibility = (columnId: string) => {
