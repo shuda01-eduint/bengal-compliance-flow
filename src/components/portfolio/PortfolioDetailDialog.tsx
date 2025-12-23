@@ -7,7 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmationNote } from "./ConfirmationNote";
-import { format, subDays } from "date-fns";
+import { SettlementTimeline } from "./SettlementTimeline";
+import { format, subDays, addDays, parseISO } from "date-fns";
 
 interface PortfolioDetailDialogProps {
   portfolioId: string;
@@ -271,6 +272,49 @@ export function PortfolioDetailDialog({ portfolioId, onClose }: PortfolioDetailD
                     </div>
                   </CardContent>
                 </Card>
+              </>
+            )}
+
+            {/* Settlement Timeline */}
+            {recentTrades.length > 0 && (
+              <>
+                <Separator />
+                {(() => {
+                  // Build pending trades with settlement info for timeline
+                  const pendingTradesForTimeline = recentTrades
+                    .filter(trade => {
+                      const category = categoryMap.get(trade.security_code || '');
+                      const settlementDays = category === "Z" ? 3 : 2;
+                      const settlementDate = format(subDays(today, settlementDays), "yyyyMMdd");
+                      return trade.trade_date && trade.trade_date > settlementDate;
+                    })
+                    .map(trade => {
+                      const category = categoryMap.get(trade.security_code || '');
+                      const settlementDays = category === "Z" ? 3 : 2;
+                      // Parse trade date (format: YYYYMMDD)
+                      const tradeDateStr = trade.trade_date || '';
+                      const tradeDate = tradeDateStr ? 
+                        new Date(
+                          parseInt(tradeDateStr.substring(0, 4)),
+                          parseInt(tradeDateStr.substring(4, 6)) - 1,
+                          parseInt(tradeDateStr.substring(6, 8))
+                        ) : today;
+                      const settlementDate = addDays(tradeDate, settlementDays);
+                      const daysRemaining = Math.ceil((settlementDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                      
+                      return {
+                        security_code: trade.security_code || '',
+                        side: trade.side || '',
+                        quantity: trade.quantity || 0,
+                        trade_date: trade.trade_date || '',
+                        settlement_days: settlementDays,
+                        settlement_date: settlementDate,
+                        days_remaining: daysRemaining
+                      };
+                    });
+                  
+                  return <SettlementTimeline trades={pendingTradesForTimeline} />;
+                })()}
               </>
             )}
 
