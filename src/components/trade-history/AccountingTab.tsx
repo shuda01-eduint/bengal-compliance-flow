@@ -60,7 +60,8 @@ interface ColumnConfig {
 
 const STORAGE_KEY = 'accounting-custom-fields';
 const COLUMNS_STORAGE_KEY = 'accounting-columns-config-v2';
-const PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [50, 100, 500, -1]; // -1 means "All"
+const DEFAULT_PAGE_SIZE = 50;
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'investor_code', label: 'Code', visible: true, align: 'left' },
@@ -158,10 +159,11 @@ const AccountingTab = () => {
   const [selectedTradeType, setSelectedTradeType] = useState<'BUY' | 'SELL'>('BUY');
   const [selectedTradeInvestor, setSelectedTradeInvestor] = useState<AccountingRow | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
   const [hasTradesFilter, setHasTradesFilter] = useState<string>("all");
   const [isAdmin, setIsAdmin] = useState(false);
-  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortColumn, setSortColumn] = useState<string>("investor_code");
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
 
@@ -249,9 +251,10 @@ const AccountingTab = () => {
   const fromTradeDateStr = format(fromDate, 'yyyyMMdd');
   const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
-  // Fetch accounting data using RPC function (server-side search + pagination + filters)
+  // Fetch accounting data using RPC function (server-side search + pagination + filters + sorting)
+  const effectivePageSize = pageSize === -1 ? 100000 : pageSize;
   const { data: accountingResult, isLoading: loadingData } = useQuery({
-    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, currentPage, accountTypeFilter, hasTradesFilter],
+    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, currentPage, pageSize, accountTypeFilter, hasTradesFilter, sortColumn, sortDirection],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_data', {
         _search_term: debouncedSearch || null,
@@ -259,10 +262,12 @@ const AccountingTab = () => {
         _to_trade_date: toTradeDateStr,
         _from_tx_date: fromDateStr,
         _to_tx_date: toDateStr,
-        _page_size: PAGE_SIZE,
-        _page_offset: currentPage * PAGE_SIZE,
+        _page_size: effectivePageSize,
+        _page_offset: pageSize === -1 ? 0 : currentPage * pageSize,
         _account_type_filter: accountTypeFilter,
         _has_trades_filter: hasTradesFilter,
+        _sort_column: sortColumn,
+        _sort_direction: sortDirection,
       });
       if (error) throw error;
       return data || [];
@@ -364,7 +369,7 @@ const AccountingTab = () => {
 
   // Get total count from first row (all rows have the same total_count)
   const totalCount = accountingResult?.[0]?.total_count || 0;
-  const totalPages = Math.ceil(Number(totalCount) / PAGE_SIZE);
+  const totalPages = pageSize === -1 ? 1 : Math.ceil(Number(totalCount) / pageSize);
 
   // Summary data
   const summary = useMemo(() => {
@@ -513,7 +518,7 @@ const AccountingTab = () => {
 
   const visibleColumns = columns.filter(c => c.visible);
 
-  // Sort handler
+  // Sort handler - triggers server-side sort
   const handleSort = (columnId: string) => {
     if (sortColumn === columnId) {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -521,6 +526,7 @@ const AccountingTab = () => {
       setSortColumn(columnId);
       setSortDirection('asc');
     }
+    setCurrentPage(0); // Reset to first page when sorting
   };
 
   // Drag and drop handlers for column reordering
@@ -554,26 +560,21 @@ const AccountingTab = () => {
     setDraggedColumn(null);
   };
 
-  // Sort data
+  // Data is already sorted server-side, only apply client-side sort for custom fields
   const sortedData = useMemo(() => {
-    if (!sortColumn) return accountingData;
+    // If sorting by a custom field, do client-side sorting
+    const isCustomField = customFields.some(f => f.id === sortColumn);
+    if (!isCustomField) return accountingData;
     
     return [...accountingData].sort((a, b) => {
       const aVal = a[sortColumn];
       const bVal = b[sortColumn];
       
-      // Handle string comparison
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        const comparison = aVal.localeCompare(bVal);
-        return sortDirection === 'asc' ? comparison : -comparison;
-      }
-      
-      // Handle numeric comparison
       const aNum = Number(aVal) || 0;
       const bNum = Number(bVal) || 0;
       return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
     });
-  }, [accountingData, sortColumn, sortDirection]);
+  }, [accountingData, sortColumn, sortDirection, customFields]);
 
   const getCellValue = (row: AccountingRow, columnId: string) => {
     const value = row[columnId];
@@ -1660,11 +1661,28 @@ const AccountingTab = () => {
               </div>
 
               {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between px-6 py-4 border-t">
+              <div className="flex items-center justify-between px-6 py-4 border-t flex-wrap gap-3">
+                <div className="flex items-center gap-3">
                   <span className="text-sm text-muted-foreground">
-                    Showing {currentPage * PAGE_SIZE + 1} - {Math.min((currentPage + 1) * PAGE_SIZE, Number(totalCount))} of {Number(totalCount).toLocaleString()} records
+                    {pageSize === -1 
+                      ? `Showing all ${Number(totalCount).toLocaleString()} records`
+                      : `Showing ${currentPage * pageSize + 1} - ${Math.min((currentPage + 1) * pageSize, Number(totalCount))} of ${Number(totalCount).toLocaleString()} records`
+                    }
                   </span>
+                  <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(0); }}>
+                    <SelectTrigger className="w-[100px] h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZE_OPTIONS.map(size => (
+                        <SelectItem key={size} value={String(size)}>
+                          {size === -1 ? 'All' : `${size} / page`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {pageSize !== -1 && totalPages > 1 && (
                   <div className="flex items-center gap-2">
                     <Button
                       variant="outline"
@@ -1688,8 +1706,8 @@ const AccountingTab = () => {
                       <ChevronRight className="h-4 w-4 ml-1" />
                     </Button>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
         </CardContent>
