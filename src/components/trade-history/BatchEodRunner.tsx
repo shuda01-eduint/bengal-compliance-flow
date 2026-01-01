@@ -36,6 +36,15 @@ interface StaleWarning {
   suggestedStartDate: Date | null;
 }
 
+interface BatchEodResult {
+  success: boolean;
+  days_processed?: number;
+  clients_processed?: number;
+  start_date?: string;
+  end_date?: string;
+  error?: string;
+}
+
 // Helper function to fetch all rows with pagination (Supabase limits to 1000)
 async function fetchAllRows<T>(
   queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>
@@ -321,291 +330,37 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
     setProcessedDays(0);
     setProgress(0);
     setRunning(true);
+    setCurrentDateProcessing("Processing server-side...");
 
     try {
-      // 1. Delete existing EOD snapshots from start date onwards
       const startDateStr = format(startDate, "yyyy-MM-dd");
-      toast.info(`Clearing EOD snapshots from ${startDateStr} onwards...`);
-      
-      const { error: deleteError } = await supabase
-        .from("eod_ledger_snapshots")
-        .delete()
-        .gte("eod_date", startDateStr);
+      const endDateStr = format(endDate, "yyyy-MM-dd");
 
-      if (deleteError) throw deleteError;
+      toast.info(`Starting batch EOD from ${startDateStr} to ${endDateStr}...`);
 
-      // Also delete EOD run history from start date onwards
-      await supabase
-        .from("eod_run_history")
-        .delete()
-        .gte("run_date", startDateStr);
-
-      // 2. Fetch ALL clients using pagination (Supabase limits to 1000)
-      toast.info("Fetching all clients...");
-      const clients = await fetchAllRows<{
-        inv_code: string;
-        investor_name: string;
-        ledger_balance: number;
-        rm_email: string | null;
-      }>((from, to) =>
-        supabase
-          .from("clients")
-          .select("inv_code, investor_name, ledger_balance, rm_email")
-          .range(from, to)
-      );
-
-      if (!clients || clients.length === 0) {
-        toast.warning("No client data found");
-        setRunning(false);
-        return;
-      }
-
-      toast.info(`Loaded ${clients.length} clients`);
-
-      // 3. Fetch ALL investor commission rates using pagination
-      const investorData = await fetchAllRows<{
-        investor_code: string;
-        brokerage_commission: number | null;
-      }>((from, to) =>
-        supabase
-          .from("investors")
-          .select("investor_code, brokerage_commission")
-          .range(from, to)
-      );
-
-      const commissionMap = new Map<string, number>();
-      investorData?.forEach((inv) => {
-        commissionMap.set(inv.investor_code.toUpperCase(), inv.brokerage_commission || 0);
+      // Call the SECURITY DEFINER function that bypasses RLS
+      const { data, error } = await supabase.rpc("run_batch_eod", {
+        p_start_date: startDateStr,
+        p_end_date: endDateStr,
       });
 
-      // 4. For the first date, get the previous day's EOD (day before start date) with pagination
-      const dayBeforeStart = format(addDays(startDate, -1), "yyyy-MM-dd");
-      const prevDayEod = await fetchAllRows<{
-        investor_code: string;
-        ledger_balance: number;
-      }>((from, to) =>
-        supabase
-          .from("eod_ledger_snapshots")
-          .select("investor_code, ledger_balance")
-          .eq("eod_date", dayBeforeStart)
-          .range(from, to)
-      );
+      if (error) throw error;
 
-      // Check if we need previous day EOD - find earliest trade date
-      const { data: earliestTrade } = await supabase
-        .from("trade_history")
-        .select("trade_date")
-        .order("trade_date", { ascending: true })
-        .limit(1);
+      const result = data as unknown as BatchEodResult;
 
-      const earliestTradeDate = earliestTrade?.[0]?.trade_date;
-      const startDateFormatted = format(startDate, "yyyyMMdd");
+      if (result.success) {
+        setProcessedDays(result.days_processed || dayCount);
+        setProgress(100);
 
-      // If we're starting after the earliest trade date, we MUST have previous day EOD
-      if (earliestTradeDate && startDateFormatted > earliestTradeDate) {
-        if (!prevDayEod || prevDayEod.length === 0) {
-          toast.error(`No EOD data for ${dayBeforeStart}`, {
-            description: "Please run batch EOD from an earlier date first.",
-          });
-          setRunning(false);
-          return;
-        }
-      }
-
-      // Create initial balance map (from day before start, or from clients.ledger_balance)
-      let runningBalances = new Map<string, number>();
-      clients.forEach((client) => {
-        // Default to client's ledger_balance from the clients table - normalize to uppercase
-        runningBalances.set(client.inv_code.toUpperCase(), client.ledger_balance || 0);
-      });
-
-      // Override with previous day EOD if exists
-      prevDayEod?.forEach((row) => {
-        runningBalances.set(row.investor_code.toUpperCase(), row.ledger_balance || 0);
-      });
-
-      // 5. Process each day sequentially
-      let currentDate = new Date(startDate);
-      let daysProcessed = 0;
-
-      while (currentDate <= endDate) {
-        const dateStr = format(currentDate, "yyyy-MM-dd");
-        const tradeDateFormatted = format(currentDate, "yyyyMMdd");
-        setCurrentDateProcessing(dateStr);
-
-        // Get day's deposits/withdrawals
-        const { data: dateTx } = await supabase
-          .from("deposits_withdrawals")
-          .select("investor_code, amount, transaction_type")
-          .eq("transaction_date", dateStr);
-
-        const txMap = new Map<string, { deposits: number; withdrawals: number }>();
-        let totalDeposits = 0;
-        let totalWithdrawals = 0;
-        let depositRecordsCount = 0;
-
-        if (dateTx) {
-          depositRecordsCount = dateTx.length;
-          dateTx.forEach((tx) => {
-            const investorCode = tx.investor_code.toUpperCase(); // Normalize to uppercase
-            const current = txMap.get(investorCode) || { deposits: 0, withdrawals: 0 };
-            if (tx.transaction_type.toLowerCase().includes("deposit")) {
-              current.deposits += tx.amount || 0;
-              totalDeposits += tx.amount || 0;
-            } else {
-              current.withdrawals += tx.amount || 0;
-              totalWithdrawals += tx.amount || 0;
-            }
-            txMap.set(investorCode, current);
-          });
-        }
-
-        // Get day's trades - paginated to fetch ALL (Supabase default limit is 1000)
-        const tradeMap = new Map<string, { grossBuys: number; netSells: number }>();
-        let tradeFilesCount = 0;
-        let allTrades: { client_code: string | null; side: string | null; value: number | null; fill_type: string | null; status: string | null }[] = [];
-        let tradeOffset = 0;
-        const tradeBatchSize = 1000;
-        
-        while (true) {
-          const { data: tradeBatch } = await supabase
-            .from("trade_history")
-            .select("client_code, side, value, fill_type, status")
-            .eq("trade_date", tradeDateFormatted)
-            .range(tradeOffset, tradeOffset + tradeBatchSize - 1);
-          
-          if (!tradeBatch || tradeBatch.length === 0) break;
-          allTrades = [...allTrades, ...tradeBatch];
-          if (tradeBatch.length < tradeBatchSize) break;
-          tradeOffset += tradeBatchSize;
-        }
-        
-        const dateTrades = allTrades;
-
-        // DEBUG: Log trade count for this date
-        console.log(`[EOD ${dateStr}] Found ${dateTrades?.length || 0} trades`);
-
-        if (dateTrades) {
-          tradeFilesCount = dateTrades.length > 0 ? 1 : 0;
-          dateTrades.forEach((trade) => {
-            if (!trade.client_code || !trade.value) return;
-
-            const fillType = (trade.fill_type || "").toUpperCase();
-            const status = (trade.status || "").toUpperCase();
-            // Accept trade if EITHER fill_type or status is FILL/PF
-            const isValidFill = ["FILL", "PF"].includes(fillType) || ["FILL", "PF"].includes(status);
-            if (!isValidFill) return;
-
-            const clientCode = trade.client_code.toUpperCase(); // Normalize to uppercase
-            const commissionRate = commissionMap.get(clientCode) || 0;
-            const current = tradeMap.get(clientCode) || { grossBuys: 0, netSells: 0 };
-            const side = (trade.side || "").toUpperCase();
-
-            // DEBUG: Log trade details for OBO4083
-            if (clientCode === "OBO4083") {
-              console.log(`[EOD ${dateStr}] OBO4083 Trade:`, {
-                side,
-                value: trade.value,
-                commissionRate,
-                fillType,
-                grossWithComm: side === "BUY" || side === "B" ? trade.value * (1 + commissionRate) : 0,
-                netWithComm: side === "SELL" || side === "S" ? trade.value * (1 - commissionRate) : 0,
-              });
-            }
-
-            if (side === "BUY" || side === "B") {
-              current.grossBuys += trade.value * (1 + commissionRate);
-            } else if (side === "SELL" || side === "S") {
-              current.netSells += trade.value * (1 - commissionRate);
-            }
-            tradeMap.set(clientCode, current); // Store with normalized key
-          });
-        }
-
-        // Calculate EOD for each client using running balances
-        const eodRecords = clients.map((client) => {
-          const invCodeUpper = client.inv_code.toUpperCase(); // Normalize to uppercase for lookups
-          const openingBalance = runningBalances.get(invCodeUpper) || 0;
-          const tx = txMap.get(invCodeUpper) || { deposits: 0, withdrawals: 0 };
-          const trades = tradeMap.get(invCodeUpper) || { grossBuys: 0, netSells: 0 };
-
-          const calculatedBalance =
-            openingBalance +
-            tx.deposits -
-            tx.withdrawals +
-            trades.netSells -
-            trades.grossBuys;
-
-          // DEBUG: Log calculation for OBO4083
-          if (invCodeUpper === "OBO4083") {
-            console.log(`[EOD ${dateStr}] OBO4083 Calculation:`, {
-              openingBalance,
-              deposits: tx.deposits,
-              withdrawals: tx.withdrawals,
-              grossBuys: trades.grossBuys,
-              netSells: trades.netSells,
-              calculatedBalance,
-              formula: `${openingBalance} + ${tx.deposits} - ${tx.withdrawals} + ${trades.netSells} - ${trades.grossBuys} = ${calculatedBalance}`,
-            });
-          }
-
-          // Update running balance for next day (use uppercase key)
-          runningBalances.set(invCodeUpper, calculatedBalance);
-
-          return {
-            eod_date: dateStr,
-            investor_code: client.inv_code, // Store original case in DB
-            investor_name: client.investor_name,
-            ledger_balance: calculatedBalance,
-            rm_email: client.rm_email,
-            created_by: user?.id,
-          };
+        toast.success(`Batch EOD complete: ${result.days_processed} days processed`, {
+          description: `${result.clients_processed?.toLocaleString()} clients from ${format(startDate, "dd MMM")} to ${format(endDate, "dd MMM yyyy")}`,
         });
 
-        // Upsert EOD records
-        const BATCH_SIZE = 500;
-        for (let i = 0; i < eodRecords.length; i += BATCH_SIZE) {
-          const batch = eodRecords.slice(i, i + BATCH_SIZE);
-          const { error } = await supabase
-            .from("eod_ledger_snapshots")
-            .upsert(batch, { onConflict: "eod_date,investor_code" });
-
-          if (error) throw error;
-        }
-
-        // Record EOD run history
-        const totalLedgerBalance = eodRecords.reduce((sum, r) => sum + r.ledger_balance, 0);
-        await supabase.from("eod_run_history").insert({
-          run_date: dateStr,
-          run_by: user?.id,
-          run_by_email: user?.email,
-          clients_captured: eodRecords.length,
-          total_ledger_balance: totalLedgerBalance,
-          trade_files_count: tradeFilesCount,
-          deposit_records_count: depositRecordsCount,
-          total_deposits: totalDeposits,
-          total_withdrawals: totalWithdrawals,
-          status: "completed",
-        });
-
-        // Update progress
-        daysProcessed++;
-        setProcessedDays(daysProcessed);
-        setProgress((daysProcessed / dayCount) * 100);
-
-        // Move to next day
-        currentDate = addDays(currentDate, 1);
-
-        // Yield to UI
-        await new Promise((resolve) => requestAnimationFrame(resolve));
+        setOpen(false);
+        onComplete?.();
+      } else {
+        throw new Error(result.error || "Unknown error occurred");
       }
-
-      toast.success(`Batch EOD complete: ${daysProcessed} days processed`, {
-        description: `From ${format(startDate, "dd MMM")} to ${format(endDate, "dd MMM yyyy")}`,
-      });
-
-      setOpen(false);
-      onComplete?.();
     } catch (error: any) {
       console.error("Batch EOD error:", error);
       toast.error("Batch EOD failed", { description: error.message });
@@ -756,7 +511,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           {running && (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Processing: {currentDateProcessing}</span>
+                <span className="text-muted-foreground">{currentDateProcessing}</span>
                 <span className="font-medium">{processedDays} / {totalDays} days</span>
               </div>
               <Progress value={progress} className="h-2" />
