@@ -82,6 +82,8 @@ export const UploadHistoryTable = () => {
       if (error) throw error;
       return (data || []) as EodRunHistory[];
     },
+    refetchOnWindowFocus: true,
+    staleTime: 30000,
   });
 
   const formatCurrency = (value: number) => {
