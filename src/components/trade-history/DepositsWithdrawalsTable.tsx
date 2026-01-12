@@ -293,19 +293,88 @@ export const DepositsWithdrawalsTable = () => {
       const workbook = XLSX.read(data);
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+      
+      // First, parse as raw array to detect special formats
+      const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+      
+      console.log("Raw rows sample:", rawData.slice(0, 5));
+      
+      // Look for embedded date in format "Date : DD-MMM-YYYY" or "Date: DD-MMM-YYYY"
+      let fileDate: string | null = null;
+      const monthMap: { [key: string]: string } = {
+        'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+        'may': '05', 'jun': '06', 'jul': '07', 'aug': '08',
+        'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
+      };
+      
+      for (let i = 0; i < Math.min(10, rawData.length); i++) {
+        const row = rawData[i];
+        if (!row) continue;
+        for (let j = 0; j < row.length; j++) {
+          const cellValue = String(row[j] || '');
+          const dateMatch = cellValue.match(/Date\s*:\s*(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{4})/i);
+          if (dateMatch) {
+            const day = dateMatch[1].padStart(2, '0');
+            const monthStr = dateMatch[2].toLowerCase();
+            const year = dateMatch[3];
+            const month = monthMap[monthStr];
+            if (month) {
+              fileDate = `${year}-${month}-${day}`;
+              console.log(`Extracted file date from header: ${cellValue} -> ${fileDate}`);
+            }
+            break;
+          }
+        }
+        if (fileDate) break;
+      }
+      
+      // Find the actual header row with column names (look for "Inv. Code" or similar)
+      let headerRowIndex = 0;
+      for (let i = 0; i < Math.min(15, rawData.length); i++) {
+        const row = rawData[i];
+        if (!row) continue;
+        const rowStr = row.join(' ').toLowerCase();
+        if (
+          rowStr.includes('inv. code') || 
+          rowStr.includes('inv.code') || 
+          rowStr.includes('investor code') ||
+          rowStr.includes('client code')
+        ) {
+          headerRowIndex = i;
+          console.log(`Found header row at index ${i}:`, row);
+          break;
+        }
+      }
+      
+      // Re-parse with the correct header row
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+        range: headerRowIndex,
+        defval: null 
+      });
+      
+      // Filter out rows that are date headers or empty
+      const filteredData = jsonData.filter((row: any) => {
+        const firstCol = String(row["SL"] || row["Sl"] || row["sl"] || row["S.L"] || row["S.L."] || Object.values(row)[0] || '').trim();
+        // Skip if first column contains "Date" or is empty/non-numeric SL
+        if (firstCol.toLowerCase().includes('date')) return false;
+        if (!firstCol) return false;
+        // If SL column exists, it should be numeric for valid data rows
+        if (row["SL"] !== undefined && isNaN(Number(firstCol))) return false;
+        return true;
+      });
 
-      if (jsonData.length === 0) {
+      if (filteredData.length === 0) {
         toast.error("No data found in file");
         return;
       }
 
       // Log first row to help debug column names
-      console.log("Excel columns found:", Object.keys(jsonData[0] as object));
-      console.log("First row sample:", jsonData[0]);
+      console.log("Excel columns found:", Object.keys(filteredData[0] as object));
+      console.log("First data row sample:", filteredData[0]);
+      console.log(`Using file date: ${fileDate || 'not found, will use row dates'}`);
 
       // Map Excel columns to database fields with flexible column name matching
-      const mappedRecords = jsonData.map((row: any) => {
+      const mappedRecords = filteredData.map((row: any) => {
         // Find investor code - check various possible column names
         const investorCode = String(
           row["Inv. Code"] ||
@@ -360,8 +429,10 @@ export const DepositsWithdrawalsTable = () => {
           row["Client Name"] || 
           null;
 
-        // Find date - check many possible column names
-        let transactionDate: string | null = null;
+        // Find date - check many possible column names OR use file date extracted from header
+        let transactionDate: string | null = fileDate; // Default to file date if found
+        
+        // Try row-level date if no file date or if row has explicit date
         const rawDate = 
           row["Transaction Date"] ||
           row["transaction_date"] ||
@@ -404,12 +475,14 @@ export const DepositsWithdrawalsTable = () => {
             else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
               transactionDate = dateStr;
             }
-            // Try MM/DD/YYYY format
+            // Try DD-MMM-YYYY format (like "12-Jan-2026")
             else {
-              const mmddyyyy = dateStr.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
-              if (mmddyyyy) {
-                // Assume DD/MM/YYYY for non-US locales
-                transactionDate = `${mmddyyyy[3]}-${mmddyyyy[2].padStart(2, '0')}-${mmddyyyy[1].padStart(2, '0')}`;
+              const dmmyyyy = dateStr.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[-\s](\d{4})$/i);
+              if (dmmyyyy) {
+                const d = dmmyyyy[1].padStart(2, '0');
+                const m = monthMap[dmmyyyy[2].toLowerCase()];
+                const y = dmmyyyy[3];
+                if (m) transactionDate = `${y}-${m}-${d}`;
               }
             }
           } else if (rawDate instanceof Date) {
