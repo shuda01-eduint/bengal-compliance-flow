@@ -1562,9 +1562,9 @@ export type Database = {
           _from_trade_date?: string
           _from_tx_date?: string
           _has_trades_filter?: string
-          _page_offset?: number
-          _page_size?: number
-          _search_term?: string
+          _limit_val?: number
+          _offset_val?: number
+          _search?: string
           _sort_column?: string
           _sort_direction?: string
           _to_trade_date?: string
@@ -1572,21 +1572,17 @@ export type Database = {
         }
         Returns: {
           account_type: string
-          accrued_interest: number
-          adjusted_ledger: number
           brokerage_amount: number
           brokerage_commission: number
+          department: string
           final_balance: number
           gross_buy: number
           gross_sell: number
-          interest_rate: number
           investor_code: string
           investor_name: string
-          ledger_balance: number
           net_buy: number
           net_sell: number
-          payable: number
-          receivable: number
+          opening_balance: number
           total_count: number
           total_deposits: number
           total_withdrawals: number
