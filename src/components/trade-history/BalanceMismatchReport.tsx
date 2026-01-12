@@ -72,11 +72,13 @@ export const BalanceMismatchReport = () => {
         supabase
           .from("eod_ledger_snapshots")
           .select("investor_code, investor_name, ledger_balance")
-          .eq("eod_date", date1Str),
+          .eq("eod_date", date1Str)
+          .limit(50000),
         supabase
           .from("eod_ledger_snapshots")
           .select("investor_code, investor_name, ledger_balance")
-          .eq("eod_date", date2Str),
+          .eq("eod_date", date2Str)
+          .limit(50000),
       ]);
 
       if (res1.error) throw res1.error;
