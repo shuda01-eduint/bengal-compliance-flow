@@ -73,6 +73,10 @@ export const DepositsWithdrawalsTable = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [dateFilter, setDateFilter] = useState<string>("all");
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [grandTotals, setGrandTotals] = useState({ deposits: 0, withdrawals: 0 });
+  const [loadingGrandTotals, setLoadingGrandTotals] = useState(false);
   const [pageSize, setPageSize] = useState(50);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
@@ -87,7 +91,29 @@ export const DepositsWithdrawalsTable = () => {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(0);
-  }, [debouncedSearch, typeFilter, pageSize]);
+  }, [debouncedSearch, typeFilter, dateFilter, pageSize]);
+
+  // Fetch available dates for filter dropdown
+  const fetchAvailableDates = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("deposits_withdrawals")
+        .select("transaction_date")
+        .order("transaction_date", { ascending: false });
+      
+      if (error) throw error;
+      
+      // Get unique dates
+      const uniqueDates = [...new Set((data || []).map(r => r.transaction_date))];
+      setAvailableDates(uniqueDates);
+    } catch (error) {
+      console.error("Error fetching dates:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchAvailableDates();
+  }, []);
 
   // Fetch total count
   const fetchTotalCount = async () => {
@@ -105,8 +131,67 @@ export const DepositsWithdrawalsTable = () => {
       query = query.eq("transaction_type", typeFilter);
     }
 
+    if (dateFilter !== "all") {
+      query = query.eq("transaction_date", dateFilter);
+    }
+
     const { count } = await query;
     setTotalCount(count || 0);
+  };
+
+  // Fetch grand totals for all filtered records
+  const fetchGrandTotals = async () => {
+    setLoadingGrandTotals(true);
+    try {
+      const allRecords = await fetchAllRows<{ transaction_type: string; amount: number }>((from, to) => {
+        let query = supabase
+          .from("deposits_withdrawals")
+          .select("transaction_type, amount")
+          .range(from, to);
+
+        if (debouncedSearch) {
+          query = query.or(
+            `investor_code.eq.${debouncedSearch},investor_name.ilike.%${debouncedSearch}%`
+          );
+        }
+
+        if (typeFilter !== "all") {
+          query = query.eq("transaction_type", typeFilter);
+        }
+
+        if (dateFilter !== "all") {
+          query = query.eq("transaction_date", dateFilter);
+        }
+
+        return query;
+      });
+
+      const totals = allRecords.reduce(
+        (acc, t) => {
+          const lower = t.transaction_type.toLowerCase();
+          if (
+            lower === "deposit" ||
+            lower === "receipt" ||
+            lower === "receive" ||
+            lower === "credit" ||
+            lower.includes("deposit") ||
+            lower.includes("receipt")
+          ) {
+            acc.deposits += t.amount;
+          } else {
+            acc.withdrawals += t.amount;
+          }
+          return acc;
+        },
+        { deposits: 0, withdrawals: 0 }
+      );
+
+      setGrandTotals(totals);
+    } catch (error) {
+      console.error("Error fetching grand totals:", error);
+    } finally {
+      setLoadingGrandTotals(false);
+    }
   };
 
   // Fetch transactions
@@ -129,6 +214,10 @@ export const DepositsWithdrawalsTable = () => {
         query = query.eq("transaction_type", typeFilter);
       }
 
+      if (dateFilter !== "all") {
+        query = query.eq("transaction_date", dateFilter);
+      }
+
       const { data, error } = await query;
 
       if (error) throw error;
@@ -144,7 +233,8 @@ export const DepositsWithdrawalsTable = () => {
   useEffect(() => {
     fetchTotalCount();
     fetchTransactions();
-  }, [debouncedSearch, typeFilter, currentPage, pageSize]);
+    fetchGrandTotals();
+  }, [debouncedSearch, typeFilter, dateFilter, currentPage, pageSize]);
 
   const parseNumber = (value: unknown): number => {
     if (typeof value === "number") return value;
@@ -827,6 +917,19 @@ export const DepositsWithdrawalsTable = () => {
               className="pl-10"
             />
           </div>
+          <Select value={dateFilter} onValueChange={setDateFilter}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Date" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Dates</SelectItem>
+              {availableDates.map((date) => (
+                <SelectItem key={date} value={date}>
+                  {date}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={typeFilter} onValueChange={setTypeFilter}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Type" />
@@ -839,29 +942,45 @@ export const DepositsWithdrawalsTable = () => {
           </Select>
         </div>
 
-        {/* Summary */}
+        {/* Grand Totals - All filtered records */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-muted/50 rounded-lg p-3">
             <p className="text-xs text-muted-foreground">Total Records</p>
             <p className="text-lg font-semibold">{totalCount.toLocaleString()}</p>
           </div>
           <div className="bg-green-500/10 rounded-lg p-3">
-            <p className="text-xs text-muted-foreground">Deposits (page)</p>
+            <p className="text-xs text-muted-foreground">Total Deposits</p>
             <p className="text-lg font-semibold text-green-600">
-              {formatCurrency(summary.deposits)}
+              {loadingGrandTotals ? "..." : formatCurrency(grandTotals.deposits)}
             </p>
           </div>
           <div className="bg-red-500/10 rounded-lg p-3">
-            <p className="text-xs text-muted-foreground">Withdrawals (page)</p>
+            <p className="text-xs text-muted-foreground">Total Withdrawals</p>
             <p className="text-lg font-semibold text-red-600">
-              {formatCurrency(summary.withdrawals)}
+              {loadingGrandTotals ? "..." : formatCurrency(grandTotals.withdrawals)}
             </p>
           </div>
-          <div className="bg-muted/50 rounded-lg p-3">
-            <p className="text-xs text-muted-foreground">Net (page)</p>
-            <p className="text-lg font-semibold">
-              {formatCurrency(summary.deposits - summary.withdrawals)}
+          <div className={`rounded-lg p-3 ${grandTotals.deposits - grandTotals.withdrawals >= 0 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            <p className="text-xs text-muted-foreground">Net Total</p>
+            <p className={`text-lg font-semibold ${grandTotals.deposits - grandTotals.withdrawals >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {loadingGrandTotals ? "..." : formatCurrency(grandTotals.deposits - grandTotals.withdrawals)}
             </p>
+          </div>
+        </div>
+
+        {/* Page Summary */}
+        <div className="grid grid-cols-3 gap-4 text-sm">
+          <div className="bg-muted/30 rounded-lg p-2 text-center">
+            <p className="text-xs text-muted-foreground">Page Deposits</p>
+            <p className="font-medium text-green-600">{formatCurrency(summary.deposits)}</p>
+          </div>
+          <div className="bg-muted/30 rounded-lg p-2 text-center">
+            <p className="text-xs text-muted-foreground">Page Withdrawals</p>
+            <p className="font-medium text-red-600">{formatCurrency(summary.withdrawals)}</p>
+          </div>
+          <div className="bg-muted/30 rounded-lg p-2 text-center">
+            <p className="text-xs text-muted-foreground">Page Net</p>
+            <p className="font-medium">{formatCurrency(summary.deposits - summary.withdrawals)}</p>
           </div>
         </div>
 
