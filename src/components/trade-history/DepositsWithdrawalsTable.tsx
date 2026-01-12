@@ -574,13 +574,12 @@ export const DepositsWithdrawalsTable = () => {
         const importCount = importCounts.get(key) || 0;
         const alreadyInsertingCount = insertCounts.get(key) || 0;
         
-        if (alreadyInsertingCount < (importCount - existingCount) || existingCount === 0) {
-          if (alreadyInsertingCount + existingCount < importCount) {
-            uniqueRecords.push(record);
-            insertCounts.set(key, alreadyInsertingCount + 1);
-          } else {
-            duplicateCount++;
-          }
+        // Calculate how many new records we need for this key
+        const neededCount = Math.max(0, importCount - existingCount);
+        
+        if (alreadyInsertingCount < neededCount) {
+          uniqueRecords.push(record);
+          insertCounts.set(key, alreadyInsertingCount + 1);
         } else {
           duplicateCount++;
         }
