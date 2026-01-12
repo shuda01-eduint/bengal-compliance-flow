@@ -1853,6 +1853,15 @@ export type Database = {
           withdrawal_count: number
         }[]
       }
+      get_deposit_withdrawal_counts: {
+        Args: { p_date: string }
+        Returns: {
+          amount: number
+          count: number
+          investor_code: string
+          transaction_type: string
+        }[]
+      }
       get_employee_id_for_user: { Args: never; Returns: string }
       get_investor_filter_options: {
         Args: never

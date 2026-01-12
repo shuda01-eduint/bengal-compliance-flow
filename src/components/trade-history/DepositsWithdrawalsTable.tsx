@@ -532,31 +532,67 @@ export const DepositsWithdrawalsTable = () => {
         return;
       }
 
-      // Fetch existing records to check for duplicates
+      // Count-based duplicate detection
+      // This allows legitimate duplicates (same investor, amount, type, date)
+      // while preventing re-importing the same file
       toast.info("Checking for duplicates...");
-      const { data: existingRecords, error: fetchError } = await supabase
-        .from("deposits_withdrawals")
-        .select("investor_code, amount, transaction_type, transaction_date");
       
-      if (fetchError) {
-        console.error("Error fetching existing records:", fetchError);
-        throw fetchError;
+      // Get unique dates from the import to query
+      const importDates = [...new Set(valid.map(r => r.transaction_date || format(new Date(), "yyyy-MM-dd")))];
+      
+      // Build count map from import file
+      const importCounts = new Map<string, number>();
+      valid.forEach(record => {
+        const key = `${record.investor_code}|${record.amount}|${record.transaction_type}|${record.transaction_date || format(new Date(), "yyyy-MM-dd")}`;
+        importCounts.set(key, (importCounts.get(key) || 0) + 1);
+      });
+      
+      // Fetch existing counts from database for the relevant dates
+      const existingCounts = new Map<string, number>();
+      for (const importDate of importDates) {
+        const { data: counts, error: countError } = await supabase
+          .rpc('get_deposit_withdrawal_counts', { p_date: importDate });
+        
+        if (countError) {
+          console.error("Error fetching counts:", countError);
+          // Continue without duplicate check if function fails
+        } else if (counts) {
+          counts.forEach((c: { investor_code: string; amount: number; transaction_type: string; count: number }) => {
+            const key = `${c.investor_code}|${c.amount}|${c.transaction_type}|${importDate}`;
+            existingCounts.set(key, Number(c.count));
+          });
+        }
+      }
+      
+      // Determine which records to insert based on count comparison
+      // Track how many of each key we've already decided to insert
+      const insertCounts = new Map<string, number>();
+      const uniqueRecords: typeof valid = [];
+      let duplicateCount = 0;
+      
+      for (const record of valid) {
+        const key = `${record.investor_code}|${record.amount}|${record.transaction_type}|${record.transaction_date || format(new Date(), "yyyy-MM-dd")}`;
+        const existingCount = existingCounts.get(key) || 0;
+        const importCount = importCounts.get(key) || 0;
+        const alreadyInsertingCount = insertCounts.get(key) || 0;
+        
+        // Total that would exist after this import = existing + already inserting + 1
+        // We should only insert if the file has MORE occurrences than DB already has
+        // Example: DB has 2, file has 3, we should insert 1 more (the 3rd occurrence)
+        if (alreadyInsertingCount < (importCount - existingCount) || existingCount === 0) {
+          // This is either a completely new record (existingCount === 0)
+          // or we haven't yet inserted enough to match the import file's count
+          if (alreadyInsertingCount + existingCount < importCount) {
+            uniqueRecords.push(record);
+            insertCounts.set(key, alreadyInsertingCount + 1);
+          } else {
+            duplicateCount++;
+          }
+        } else {
+          duplicateCount++;
+        }
       }
 
-      // Create a Set of existing record keys for fast lookup
-      const existingKeys = new Set(
-        (existingRecords || []).map(r => 
-          `${r.investor_code}|${r.amount}|${r.transaction_type}|${r.transaction_date}`
-        )
-      );
-
-      // Filter out duplicates
-      const uniqueRecords = valid.filter(record => {
-        const key = `${record.investor_code}|${record.amount}|${record.transaction_type}|${record.transaction_date || format(new Date(), "yyyy-MM-dd")}`;
-        return !existingKeys.has(key);
-      });
-
-      const duplicateCount = valid.length - uniqueRecords.length;
       if (duplicateCount > 0) {
         toast.warning(`${duplicateCount} duplicate records skipped`, {
           description: "Records with same investor, amount, type, and date already exist",
