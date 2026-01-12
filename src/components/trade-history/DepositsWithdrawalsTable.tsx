@@ -93,18 +93,19 @@ export const DepositsWithdrawalsTable = () => {
     setCurrentPage(0);
   }, [debouncedSearch, typeFilter, dateFilter, pageSize]);
 
-  // Fetch available dates for filter dropdown
+  // Fetch available dates for filter dropdown using fetchAllRows to handle large datasets
   const fetchAvailableDates = async () => {
     try {
-      const { data, error } = await supabase
-        .from("deposits_withdrawals")
-        .select("transaction_date")
-        .order("transaction_date", { ascending: false });
+      const allDates = await fetchAllRows<{ transaction_date: string }>((from, to) =>
+        supabase
+          .from("deposits_withdrawals")
+          .select("transaction_date")
+          .range(from, to)
+      );
       
-      if (error) throw error;
-      
-      // Get unique dates
-      const uniqueDates = [...new Set((data || []).map(r => r.transaction_date))];
+      // Get unique dates and sort descending
+      const uniqueDates = [...new Set(allDates.map(r => r.transaction_date))]
+        .sort((a, b) => b.localeCompare(a));
       setAvailableDates(uniqueDates);
     } catch (error) {
       console.error("Error fetching dates:", error);
@@ -630,6 +631,9 @@ export const DepositsWithdrawalsTable = () => {
       }
 
       toast.success(`Imported ${inserted} transactions`);
+      // Refresh all data after import
+      await fetchAvailableDates();
+      await fetchGrandTotals();
       fetchTotalCount();
       fetchTransactions();
     } catch (error: any) {
@@ -653,6 +657,9 @@ export const DepositsWithdrawalsTable = () => {
       if (error) throw error;
 
       toast.success("All transactions cleared");
+      // Refresh all data after clear
+      await fetchAvailableDates();
+      await fetchGrandTotals();
       fetchTotalCount();
       fetchTransactions();
     } catch (error: any) {
