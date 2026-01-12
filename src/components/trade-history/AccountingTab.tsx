@@ -367,7 +367,7 @@ const AccountingTab = () => {
   }, [accountingResult, customFields]);
 
   // Get total count from first row (all rows have the same total_count)
-  const totalCount = accountingResult?.[0]?.total_count || 0;
+  const totalCount = (accountingResult?.[0] as any)?.total_count || 0;
   const totalPages = pageSize === -1 ? 1 : Math.ceil(Number(totalCount) / pageSize);
 
   // Summary data
@@ -385,16 +385,17 @@ const AccountingTab = () => {
         totalTradeValue: 0,
       };
     }
+    const sr = summaryResult as any;
     return {
-      totalAccounts: Number(summaryResult.total_accounts) || 0,
-      marginAccounts: Number(summaryResult.margin_accounts) || 0,
-      totalMarginLoan: Number(summaryResult.total_margin_loan) || 0,
-      totalAccruedInterest: Number(summaryResult.total_accrued_interest) || 0,
-      totalReceivable: Number(summaryResult.total_receivable) || 0,
-      totalPayable: Number(summaryResult.total_payable) || 0,
-      totalBuy: Number(summaryResult.total_buy) || 0,
-      totalSell: Number(summaryResult.total_sell) || 0,
-      totalTradeValue: Number(summaryResult.total_trade_value) || 0,
+      totalAccounts: Number(sr.total_accounts) || 0,
+      marginAccounts: Number(sr.margin_accounts) || 0,
+      totalMarginLoan: Number(sr.total_margin_loan) || 0,
+      totalAccruedInterest: Number(sr.total_accrued_interest) || 0,
+      totalReceivable: Number(sr.total_receivable) || 0,
+      totalPayable: Number(sr.total_payable) || 0,
+      totalBuy: Number(sr.total_buy) || 0,
+      totalSell: Number(sr.total_sell) || 0,
+      totalTradeValue: Number(sr.total_trade_value) || 0,
     };
   }, [summaryResult]);
 
@@ -443,10 +444,10 @@ const AccountingTab = () => {
       if (error) throw error;
 
       // Process data with custom fields
-      const processedData = (allData || []).map((row: AccountingRow) => {
+      const processedData = (allData || []).map((row: any) => {
         const processed = { ...row } as AccountingRow;
         customFields.forEach(field => {
-          processed[field.id] = evaluateFormula(field.formula, row);
+          processed[field.id] = evaluateFormula(field.formula, processed);
         });
         return processed;
       });
