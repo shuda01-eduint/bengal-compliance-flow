@@ -5,6 +5,7 @@ import { UploadHistoryTable } from "@/components/trade-history/UploadHistoryTabl
 import { StockExchangeUpload } from "@/components/stock-exchange/StockExchangeUpload";
 import { ClientTradeSearch } from "@/components/stock-exchange/ClientTradeSearch";
 import { ImportOpeningBalancesDialog } from "@/components/trade-history/ImportOpeningBalancesDialog";
+import { BalanceMismatchReport } from "@/components/trade-history/BalanceMismatchReport";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { History, ArrowDownUp, FileUp, Upload } from "lucide-react";
 const TradeHistoryPage = () => {
@@ -33,7 +34,8 @@ const TradeHistoryPage = () => {
         </div>
         <TabsContent value="stock-exchange">
           <div className="space-y-6">
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <BalanceMismatchReport />
               <ImportOpeningBalancesDialog />
             </div>
             <ClientTradeSearch />
