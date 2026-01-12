@@ -210,15 +210,28 @@ export function PortfolioReports() {
         return;
       }
 
-      // Insert in batches
+      // Upsert in batches (skip duplicates)
       const batchSize = 500;
+      let importedCount = 0;
+      let skippedCount = 0;
       for (let i = 0; i < records.length; i += batchSize) {
         const batch = records.slice(i, i + batchSize);
-        const { error } = await supabase.from("deposits_withdrawals").insert(batch);
+        const { data, error } = await supabase
+          .from("deposits_withdrawals")
+          .upsert(batch, { 
+            onConflict: 'investor_code,transaction_date,transaction_type,amount',
+            ignoreDuplicates: true 
+          })
+          .select();
         if (error) throw error;
+        importedCount += data?.length || 0;
+        skippedCount += batch.length - (data?.length || 0);
       }
 
-      toast.success(`Imported ${records.length} transactions`);
+      const msg = skippedCount > 0 
+        ? `Imported ${importedCount} transactions (${skippedCount} duplicates skipped)`
+        : `Imported ${importedCount} transactions`;
+      toast.success(msg);
       queryClient.invalidateQueries({ queryKey: ["deposits-withdrawals"] });
     } catch (error: any) {
       console.error("Import error:", error);
