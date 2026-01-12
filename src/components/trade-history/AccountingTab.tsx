@@ -161,7 +161,7 @@ const AccountingTab = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
-  const [hasTradesFilter, setHasTradesFilter] = useState<string>("all");
+  const [hasTradesFilter, setHasTradesFilter] = useState<string>("with_activity");
   const [isAdmin, setIsAdmin] = useState(false);
   const [sortColumn, setSortColumn] = useState<string>("investor_code");
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -1363,9 +1363,9 @@ const AccountingTab = () => {
               <SelectValue placeholder="Activity" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Activity</SelectItem>
-              <SelectItem value="with_trades">With Trades</SelectItem>
-              <SelectItem value="no_trades">No Trades</SelectItem>
+              <SelectItem value="with_activity">With Activity</SelectItem>
+              <SelectItem value="with_trades">With Trades Only</SelectItem>
+              <SelectItem value="all">All Accounts</SelectItem>
             </SelectContent>
           </Select>
 
