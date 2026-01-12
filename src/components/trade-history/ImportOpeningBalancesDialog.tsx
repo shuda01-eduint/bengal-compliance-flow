@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,10 +9,21 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
-import { Upload, CalendarIcon, AlertTriangle } from "lucide-react";
+import { Upload, CalendarIcon, AlertTriangle, Trash2, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -34,6 +45,9 @@ export const ImportOpeningBalancesDialog = ({ onSuccess }: { onSuccess?: () => v
   const [isImporting, setIsImporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<{ imported: number; errors: number } | null>(null);
+  const [existingCount, setExistingCount] = useState<number | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isCheckingCount, setIsCheckingCount] = useState(false);
 
   const resetState = () => {
     setFile(null);
@@ -43,6 +57,8 @@ export const ImportOpeningBalancesDialog = ({ onSuccess }: { onSuccess?: () => v
     setIsImporting(false);
     setProgress(0);
     setResults(null);
+    setExistingCount(null);
+    setIsDeleting(false);
   };
 
   const handleOpenChange = (newOpen: boolean) => {
@@ -50,6 +66,54 @@ export const ImportOpeningBalancesDialog = ({ onSuccess }: { onSuccess?: () => v
       resetState();
     }
     setOpen(newOpen);
+  };
+
+  // Check existing record count when date changes
+  useEffect(() => {
+    const checkExistingCount = async () => {
+      if (!balanceDate) {
+        setExistingCount(null);
+        return;
+      }
+
+      setIsCheckingCount(true);
+      const dateStr = format(balanceDate, "yyyy-MM-dd");
+      
+      const { count, error } = await supabase
+        .from("eod_ledger_snapshots")
+        .select("*", { count: "exact", head: true })
+        .eq("eod_date", dateStr);
+
+      if (!error) {
+        setExistingCount(count || 0);
+      }
+      setIsCheckingCount(false);
+    };
+
+    checkExistingCount();
+  }, [balanceDate]);
+
+  // Handle clearing existing records for selected date
+  const handleClearDate = async () => {
+    if (!balanceDate) return;
+
+    setIsDeleting(true);
+    const dateStr = format(balanceDate, "yyyy-MM-dd");
+
+    const { error } = await supabase
+      .from("eod_ledger_snapshots")
+      .delete()
+      .eq("eod_date", dateStr);
+
+    if (error) {
+      console.error("Delete error:", error);
+      toast.error("Failed to clear records");
+    } else {
+      toast.success(`Cleared ${existingCount?.toLocaleString()} records for ${format(balanceDate, "MMM d, yyyy")}`);
+      setExistingCount(0);
+      onSuccess?.();
+    }
+    setIsDeleting(false);
   };
 
   // Normalize column names by removing whitespace, newlines, and special characters
@@ -329,6 +393,63 @@ export const ImportOpeningBalancesDialog = ({ onSuccess }: { onSuccess?: () => v
             <p className="text-xs text-muted-foreground">
               This is the closing date for these balances. They will be used as opening balances for the next day.
             </p>
+
+            {/* Existing Records Count & Clear Button */}
+            {balanceDate && (
+              <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                <span className="text-sm">
+                  {isCheckingCount ? (
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Checking...
+                    </span>
+                  ) : existingCount !== null && existingCount > 0 ? (
+                    <span className="text-amber-600 dark:text-amber-500">
+                      {existingCount.toLocaleString()} records exist for this date
+                    </span>
+                  ) : existingCount === 0 ? (
+                    <span className="text-muted-foreground">No records for this date</span>
+                  ) : null}
+                </span>
+                
+                {existingCount !== null && existingCount > 0 && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button 
+                        variant="destructive" 
+                        size="sm" 
+                        className="gap-1"
+                        disabled={isDeleting}
+                      >
+                        {isDeleting ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3 w-3" />
+                        )}
+                        Clear This Date
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Opening Balances?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently delete <strong>{existingCount.toLocaleString()}</strong> balance records for <strong>{format(balanceDate, "MMMM d, yyyy")}</strong>. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction 
+                          onClick={handleClearDate}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                          Delete Records
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+              </div>
+            )}
           </div>
 
           {/* File Upload */}
