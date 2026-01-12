@@ -48,6 +48,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ImportPreviewDialog, type ImportPreviewData } from "./ImportPreviewDialog";
 
 interface DepositWithdrawal {
   id: string;
@@ -81,6 +82,11 @@ export const DepositsWithdrawalsTable = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Import preview state
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<ImportPreviewData | null>(null);
+  const [pendingRecords, setPendingRecords] = useState<DepositsWithdrawalsRecord[]>([]);
 
   // Debounce search
   useEffect(() => {
@@ -366,6 +372,7 @@ export const DepositsWithdrawalsTable = () => {
 
       if (filteredData.length === 0) {
         toast.error("No data found in file");
+        setImporting(false);
         return;
       }
 
@@ -515,28 +522,20 @@ export const DepositsWithdrawalsTable = () => {
 
       console.log("Mapped records sample:", mappedRecords[0]);
 
-
       // Validate records
       const { valid, errors } = validateRecords(
         mappedRecords,
         DepositsWithdrawalsRecordSchema
       );
 
-      if (errors.length > 0) {
-        toast.warning(`${errors.length} rows had validation issues`, {
-          description: errors.slice(0, 3).join("\n"),
-        });
-      }
-
       if (valid.length === 0) {
         toast.error("No valid records to import");
+        setImporting(false);
         return;
       }
 
       // Count-based duplicate detection
-      // This allows legitimate duplicates (same investor, amount, type, date)
-      // while preventing re-importing the same file
-      toast.info("Checking for duplicates...");
+      toast.info("Analyzing file for duplicates...");
       
       // Get unique dates from the import to query
       const importDates = [...new Set(valid.map(r => r.transaction_date || format(new Date(), "yyyy-MM-dd")))];
@@ -556,7 +555,6 @@ export const DepositsWithdrawalsTable = () => {
         
         if (countError) {
           console.error("Error fetching counts:", countError);
-          // Continue without duplicate check if function fails
         } else if (counts) {
           counts.forEach((c: { investor_code: string; amount: number; transaction_type: string; count: number }) => {
             const key = `${c.investor_code}|${c.amount}|${c.transaction_type}|${importDate}`;
@@ -566,7 +564,6 @@ export const DepositsWithdrawalsTable = () => {
       }
       
       // Determine which records to insert based on count comparison
-      // Track how many of each key we've already decided to insert
       const insertCounts = new Map<string, number>();
       const uniqueRecords: typeof valid = [];
       let duplicateCount = 0;
@@ -577,12 +574,7 @@ export const DepositsWithdrawalsTable = () => {
         const importCount = importCounts.get(key) || 0;
         const alreadyInsertingCount = insertCounts.get(key) || 0;
         
-        // Total that would exist after this import = existing + already inserting + 1
-        // We should only insert if the file has MORE occurrences than DB already has
-        // Example: DB has 2, file has 3, we should insert 1 more (the 3rd occurrence)
         if (alreadyInsertingCount < (importCount - existingCount) || existingCount === 0) {
-          // This is either a completely new record (existingCount === 0)
-          // or we haven't yet inserted enough to match the import file's count
           if (alreadyInsertingCount + existingCount < importCount) {
             uniqueRecords.push(record);
             insertCounts.set(key, alreadyInsertingCount + 1);
@@ -594,23 +586,79 @@ export const DepositsWithdrawalsTable = () => {
         }
       }
 
-      if (duplicateCount > 0) {
-        toast.warning(`${duplicateCount} duplicate records skipped`, {
-          description: "Records with same investor, amount, type, and date already exist",
-        });
-      }
+      // Calculate preview totals from unique records
+      let totalDeposits = 0;
+      let totalWithdrawals = 0;
+      let depositCount = 0;
+      let withdrawalCount = 0;
+      
+      uniqueRecords.forEach(record => {
+        const lower = record.transaction_type.toLowerCase();
+        if (
+          lower === "deposit" ||
+          lower === "receipt" ||
+          lower === "receive" ||
+          lower === "credit" ||
+          lower.includes("deposit") ||
+          lower.includes("receipt")
+        ) {
+          totalDeposits += record.amount;
+          depositCount++;
+        } else {
+          totalWithdrawals += record.amount;
+          withdrawalCount++;
+        }
+      });
 
-      if (uniqueRecords.length === 0) {
-        toast.info("No new records to import - all were duplicates");
-        return;
-      }
+      // Build preview data
+      const preview: ImportPreviewData = {
+        fileDate: fileDate || (importDates.length === 1 ? importDates[0] : null),
+        totalRows: filteredData.length,
+        validRows: valid.length,
+        errorRows: errors.length,
+        duplicateRows: duplicateCount,
+        newRows: uniqueRecords.length,
+        totalDeposits,
+        totalWithdrawals,
+        depositCount,
+        withdrawalCount,
+      };
 
+      // Store pending records and show preview
+      setPendingRecords(uniqueRecords);
+      setPreviewData(preview);
+      setPreviewOpen(true);
+      setImporting(false);
+      
+    } catch (error: any) {
+      console.error("Import error:", error);
+      toast.error("Failed to analyze file", { description: error.message });
+      setImporting(false);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  // Handle confirmed import after preview
+  const handleConfirmImport = async () => {
+    if (pendingRecords.length === 0) {
+      toast.info("No records to import");
+      setPreviewOpen(false);
+      return;
+    }
+
+    setImporting(true);
+    setPreviewOpen(false);
+
+    try {
       // Insert in batches
       const BATCH_SIZE = 500;
       let inserted = 0;
 
-      for (let i = 0; i < uniqueRecords.length; i += BATCH_SIZE) {
-        const batch = uniqueRecords.slice(i, i + BATCH_SIZE).map((record) => ({
+      for (let i = 0; i < pendingRecords.length; i += BATCH_SIZE) {
+        const batch = pendingRecords.slice(i, i + BATCH_SIZE).map((record) => ({
           investor_code: record.investor_code,
           transaction_type: record.transaction_type,
           amount: record.amount,
@@ -631,20 +679,30 @@ export const DepositsWithdrawalsTable = () => {
       }
 
       toast.success(`Imported ${inserted} transactions`);
+      
       // Refresh all data after import
       await fetchAvailableDates();
       await fetchGrandTotals();
       fetchTotalCount();
       fetchTransactions();
+      
+      // Clear pending data
+      setPendingRecords([]);
+      setPreviewData(null);
+      
     } catch (error: any) {
       console.error("Import error:", error);
       toast.error("Import failed", { description: error.message });
     } finally {
       setImporting(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
     }
+  };
+
+  // Handle cancelled import
+  const handleCancelImport = () => {
+    setPreviewOpen(false);
+    setPendingRecords([]);
+    setPreviewData(null);
   };
 
   const handleClearAll = async () => {
@@ -1245,6 +1303,15 @@ export const DepositsWithdrawalsTable = () => {
           </p>
         </div>
       </CardContent>
+
+      {/* Import Preview Dialog */}
+      <ImportPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        previewData={previewData}
+        onConfirm={handleConfirmImport}
+        onCancel={handleCancelImport}
+      />
     </Card>
   );
 };
