@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -48,6 +49,7 @@ interface BatchEodResult {
 
 export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
@@ -332,6 +334,9 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         toast.success(`Batch EOD complete: ${result.days_processed} days processed`, {
           description: `${result.clients_processed?.toLocaleString()} clients from ${format(startDate, "dd MMM")} to ${format(endDate, "dd MMM yyyy")}`,
         });
+
+        // Invalidate EOD history cache so the table refreshes immediately
+        queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
 
         setOpen(false);
         onComplete?.();
