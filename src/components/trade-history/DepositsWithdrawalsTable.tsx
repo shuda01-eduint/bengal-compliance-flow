@@ -156,6 +156,40 @@ export const DepositsWithdrawalsTable = () => {
     return 0;
   };
 
+  // Normalize transaction types to "Deposit" or "Withdrawal"
+  const normalizeTransactionType = (rawType: string): string => {
+    const lower = rawType.toLowerCase().trim();
+    
+    // Map to Deposit
+    if (
+      lower === "receipt" ||
+      lower === "receive" ||
+      lower === "deposit" ||
+      lower === "credit" ||
+      lower.includes("receipt") ||
+      lower.includes("deposit")
+    ) {
+      return "Deposit";
+    }
+    
+    // Map to Withdrawal
+    if (
+      lower === "payment" ||
+      lower === "paid" ||
+      lower === "withdraw" ||
+      lower === "withdrawal" ||
+      lower === "debit" ||
+      lower.includes("payment") ||
+      lower.includes("withdraw") ||
+      lower.includes("paid")
+    ) {
+      return "Withdrawal";
+    }
+    
+    // Default: keep original
+    return rawType;
+  };
+
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -208,13 +242,8 @@ export const DepositsWithdrawalsTable = () => {
           ""
         ).trim();
         
-        // Normalize transaction type
-        let transactionType = rawType;
-        if (rawType.toLowerCase() === "receipt") {
-          transactionType = "Deposit";
-        } else if (rawType.toLowerCase() === "payment") {
-          transactionType = "Withdrawal";
-        }
+        // Normalize transaction type using helper
+        const transactionType = normalizeTransactionType(rawType);
 
         // Parse amount - handle Debit/Credit columns
         const debit = parseNumber(row["Debit"] || row["debit"] || 0);
@@ -665,12 +694,22 @@ export const DepositsWithdrawalsTable = () => {
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
-  // Calculate summary
+  // Calculate summary - use consistent normalization logic
   const summary = transactions.reduce(
     (acc, t) => {
-      if (t.transaction_type.toLowerCase().includes("deposit")) {
+      const lower = t.transaction_type.toLowerCase();
+      // Deposits: receipt, receive, deposit, credit
+      if (
+        lower === "deposit" ||
+        lower === "receipt" ||
+        lower === "receive" ||
+        lower === "credit" ||
+        lower.includes("deposit") ||
+        lower.includes("receipt")
+      ) {
         acc.deposits += t.amount;
       } else {
+        // Withdrawals: payment, paid, withdraw, withdrawal, debit
         acc.withdrawals += t.amount;
       }
       return acc;
