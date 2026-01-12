@@ -27,6 +27,7 @@ import { format, subDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { fetchAllRows } from "@/lib/supabase-utils";
 
 interface SnapshotRecord {
   investor_code: string;
@@ -67,25 +68,23 @@ export const BalanceMismatchReport = () => {
       const date1Str = format(date1, "yyyy-MM-dd");
       const date2Str = format(date2, "yyyy-MM-dd");
 
-      // Fetch both snapshots in parallel
-      const [res1, res2] = await Promise.all([
-        supabase
-          .from("eod_ledger_snapshots")
-          .select("investor_code, investor_name, ledger_balance")
-          .eq("eod_date", date1Str)
-          .limit(50000),
-        supabase
-          .from("eod_ledger_snapshots")
-          .select("investor_code, investor_name, ledger_balance")
-          .eq("eod_date", date2Str)
-          .limit(50000),
+      // Fetch both snapshots in parallel with proper pagination
+      const [snapshot1, snapshot2] = await Promise.all([
+        fetchAllRows<SnapshotRecord>((from, to) =>
+          supabase
+            .from("eod_ledger_snapshots")
+            .select("investor_code, investor_name, ledger_balance")
+            .eq("eod_date", date1Str)
+            .range(from, to)
+        ),
+        fetchAllRows<SnapshotRecord>((from, to) =>
+          supabase
+            .from("eod_ledger_snapshots")
+            .select("investor_code, investor_name, ledger_balance")
+            .eq("eod_date", date2Str)
+            .range(from, to)
+        ),
       ]);
-
-      if (res1.error) throw res1.error;
-      if (res2.error) throw res2.error;
-
-      const snapshot1 = res1.data as SnapshotRecord[];
-      const snapshot2 = res2.data as SnapshotRecord[];
 
       if (snapshot1.length === 0 && snapshot2.length === 0) {
         toast.error("No data found for either date");

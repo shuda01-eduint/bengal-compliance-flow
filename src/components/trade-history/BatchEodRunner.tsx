@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { CalendarIcon, Loader2, Play, AlertTriangle, ShieldCheck, RefreshCw, Trash2 } from "lucide-react";
 import { format, addDays, differenceInDays, parse } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
+import { fetchAllRows } from "@/lib/supabase-utils";
 
 interface BatchEodRunnerProps {
   onComplete?: () => void;
@@ -43,30 +44,6 @@ interface BatchEodResult {
   start_date?: string;
   end_date?: string;
   error?: string;
-}
-
-// Helper function to fetch all rows with pagination (Supabase limits to 1000)
-async function fetchAllRows<T>(
-  queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>
-): Promise<T[]> {
-  const PAGE_SIZE = 1000;
-  let allData: T[] = [];
-  let page = 0;
-  let hasMore = true;
-
-  while (hasMore) {
-    const from = page * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-    const result = await queryFn(from, to);
-    const { data, error } = result;
-
-    if (error) throw error;
-    if (data) allData = [...allData, ...data];
-    hasMore = data?.length === PAGE_SIZE;
-    page++;
-  }
-
-  return allData;
 }
 
 export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
