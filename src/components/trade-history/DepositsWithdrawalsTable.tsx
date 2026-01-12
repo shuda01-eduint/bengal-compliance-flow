@@ -31,6 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import * as XLSX from "xlsx";
 import { format, subDays } from "date-fns";
 import { BatchEodRunner } from "./BatchEodRunner";
+import { fetchAllRows } from "@/lib/supabase-utils";
 import {
   DepositsWithdrawalsRecordSchema,
   validateRecords,
@@ -494,19 +495,23 @@ export const DepositsWithdrawalsTable = () => {
         });
       }
 
-      // 3. Get previous day's EOD snapshot (opening balances)
-      const { data: previousEod, error: prevEodError } = await supabase
-        .from("eod_ledger_snapshots")
-        .select("investor_code, ledger_balance")
-        .eq("eod_date", previousDate);
+      // 3. Get previous day's EOD snapshot (opening balances) with pagination
+      const previousEod = await fetchAllRows<{
+        investor_code: string;
+        ledger_balance: number;
+      }>((from, to) =>
+        supabase
+          .from("eod_ledger_snapshots")
+          .select("investor_code, ledger_balance")
+          .eq("eod_date", previousDate)
+          .range(from, to)
+      );
       
       // Create a map of previous EOD balances
       const prevBalanceMap = new Map<string, number>();
-      if (!prevEodError && previousEod) {
-        previousEod.forEach((row) => {
-          prevBalanceMap.set(row.investor_code, row.ledger_balance || 0);
-        });
-      }
+      previousEod.forEach((row) => {
+        prevBalanceMap.set(row.investor_code, row.ledger_balance || 0);
+      });
 
       // 4. Get selected date's deposits/withdrawals per investor
       const { data: dateTx, error: txError } = await supabase
