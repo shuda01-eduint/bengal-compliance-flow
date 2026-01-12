@@ -161,7 +161,6 @@ const AccountingTab = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
-  const [hasTradesFilter, setHasTradesFilter] = useState<string>("with_activity");
   const [isAdmin, setIsAdmin] = useState(false);
   const [sortColumn, setSortColumn] = useState<string>("investor_code");
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -190,7 +189,7 @@ const AccountingTab = () => {
   // Reset to first page when search or filters change
   useEffect(() => {
     setCurrentPage(0);
-  }, [debouncedSearch, accountTypeFilter, hasTradesFilter]);
+  }, [debouncedSearch, accountTypeFilter]);
 
   // Load custom fields from localStorage
   useEffect(() => {
@@ -254,7 +253,7 @@ const AccountingTab = () => {
   // Fetch accounting data using RPC function (server-side search + pagination + filters + sorting)
   const effectivePageSize = pageSize === -1 ? 100000 : pageSize;
   const { data: accountingResult, isLoading: loadingData } = useQuery({
-    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, currentPage, pageSize, accountTypeFilter, hasTradesFilter, sortColumn, sortDirection],
+    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, currentPage, pageSize, accountTypeFilter, sortColumn, sortDirection],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_data', {
         _search_term: debouncedSearch || null,
@@ -265,7 +264,7 @@ const AccountingTab = () => {
         _page_size: effectivePageSize,
         _page_offset: pageSize === -1 ? 0 : currentPage * pageSize,
         _account_type_filter: accountTypeFilter,
-        _has_trades_filter: hasTradesFilter,
+        _has_trades_filter: 'with_activity',
         _sort_column: sortColumn,
         _sort_direction: sortDirection,
       });
@@ -276,7 +275,7 @@ const AccountingTab = () => {
 
   // Fetch summary data using RPC function (with filters for accurate totals)
   const { data: summaryResult, isLoading: loadingSummary } = useQuery({
-    queryKey: ['accounting-summary', fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, accountTypeFilter, hasTradesFilter],
+    queryKey: ['accounting-summary', fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, accountTypeFilter],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_summary', {
         _from_trade_date: fromTradeDateStr,
@@ -284,7 +283,7 @@ const AccountingTab = () => {
         _from_tx_date: fromDateStr,
         _to_tx_date: toDateStr,
         _account_type_filter: accountTypeFilter,
-        _has_trades_filter: hasTradesFilter,
+        _has_trades_filter: 'with_activity',
       });
       if (error) throw error;
       return data?.[0] || null;
@@ -438,7 +437,7 @@ const AccountingTab = () => {
         _page_size: 100000, // Large number to get all records
         _page_offset: 0,
         _account_type_filter: accountTypeFilter,
-        _has_trades_filter: hasTradesFilter,
+        _has_trades_filter: 'with_activity',
       });
 
       if (error) throw error;
@@ -1354,18 +1353,6 @@ const AccountingTab = () => {
               <SelectItem value="all">All Types</SelectItem>
               <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="margin">Margin</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* Has Trades Filter */}
-          <Select value={hasTradesFilter} onValueChange={setHasTradesFilter}>
-            <SelectTrigger className="w-[120px] lg:w-[140px] h-9 bg-muted/30 border-border/50 text-sm">
-              <SelectValue placeholder="Activity" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="with_activity">With Activity</SelectItem>
-              <SelectItem value="with_trades">With Trades Only</SelectItem>
-              <SelectItem value="all">All Accounts</SelectItem>
             </SelectContent>
           </Select>
 
