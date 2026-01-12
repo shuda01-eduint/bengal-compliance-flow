@@ -1352,8 +1352,8 @@ const AccountingTab = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="cash">Cash</SelectItem>
               <SelectItem value="margin">Margin</SelectItem>
-              <SelectItem value="cash">Cash/Regular</SelectItem>
             </SelectContent>
           </Select>
 
