@@ -80,17 +80,85 @@ export function InvestorLedgerTab() {
     queryKey: ['opening-balance', searchedCode, startDate?.toISOString()],
     queryFn: async () => {
       if (!searchedCode || !startDate) return null;
-      const dateStr = format(startDate, 'yyyy-MM-dd');
-      const { data, error } = await supabase
+      
+      // Get the day before start date for opening balance lookup
+      const dayBeforeStart = new Date(startDate);
+      dayBeforeStart.setDate(dayBeforeStart.getDate() - 1);
+      const dateStr = format(dayBeforeStart, 'yyyy-MM-dd');
+      
+      // First try eod_ledger_snapshots (imported opening balances)
+      const { data: eodData, error: eodError } = await supabase
+        .from('eod_ledger_snapshots')
+        .select('ledger_balance, eod_date')
+        .eq('investor_code', searchedCode)
+        .lte('eod_date', dateStr)
+        .order('eod_date', { ascending: false })
+        .limit(1);
+      
+      if (eodError) throw eodError;
+      
+      if (eodData && eodData.length > 0) {
+        const snapshotDate = eodData[0].eod_date;
+        const snapshotBalance = eodData[0].ledger_balance || 0;
+        
+        // If snapshot is older than day before start, we need to apply gap transactions
+        if (snapshotDate < dateStr) {
+          // Fetch trades between snapshot date (exclusive) and day before start (inclusive)
+          const nextDay = new Date(snapshotDate);
+          nextDay.setDate(nextDay.getDate() + 1);
+          const nextDayStr = format(nextDay, 'yyyyMMdd');
+          const dayBeforeStr = format(dayBeforeStart, 'yyyyMMdd');
+          
+          const { data: gapTrades } = await supabase
+            .from('trade_history')
+            .select('side, value')
+            .eq('client_code', searchedCode)
+            .gte('trade_date', nextDayStr)
+            .lte('trade_date', dayBeforeStr);
+          
+          const { data: gapTransactions } = await supabase
+            .from('deposits_withdrawals')
+            .select('transaction_type, amount')
+            .eq('investor_code', searchedCode)
+            .gt('transaction_date', snapshotDate)
+            .lte('transaction_date', dateStr);
+          
+          let adjustedBalance = snapshotBalance;
+          
+          // Apply gap trades
+          gapTrades?.forEach(trade => {
+            const value = Number(trade.value) || 0;
+            const isBuy = trade.side?.toUpperCase() === 'BUY' || trade.side?.toUpperCase() === 'B';
+            adjustedBalance = isBuy ? adjustedBalance - value : adjustedBalance + value;
+          });
+          
+          // Apply gap transactions
+          gapTransactions?.forEach(tx => {
+            const amount = Number(tx.amount) || 0;
+            const isDeposit = tx.transaction_type === 'Deposit';
+            adjustedBalance = isDeposit ? adjustedBalance + amount : adjustedBalance - amount;
+          });
+          
+          return adjustedBalance;
+        }
+        
+        return snapshotBalance;
+      }
+      
+      // Fallback to balances_raw if no EOD snapshot exists
+      const { data: rawData, error: rawError } = await supabase
         .from('balances_raw')
         .select('ledger_balance')
         .eq('investor_code', searchedCode)
-        .eq('as_of_date', dateStr)
+        .lte('as_of_date', dateStr)
+        .order('as_of_date', { ascending: false })
         .limit(1);
-      if (error) throw error;
-      if (data && data.length > 0) {
-        return data[0].ledger_balance || 0;
+      
+      if (rawError) throw rawError;
+      if (rawData && rawData.length > 0) {
+        return rawData[0].ledger_balance || 0;
       }
+      
       return 0;
     },
     enabled: !!searchedCode && !!startDate,
