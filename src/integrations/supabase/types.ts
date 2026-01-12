@@ -1556,64 +1556,119 @@ export type Database = {
         Args: { p_source_date: string; p_target_date: string }
         Returns: Json
       }
-      get_accounting_data: {
-        Args: {
-          _account_type_filter?: string
-          _from_trade_date?: string
-          _from_tx_date?: string
-          _has_trades_filter?: string
-          _page_offset?: number
-          _page_size?: number
-          _search_term?: string
-          _sort_column?: string
-          _sort_direction?: string
-          _to_trade_date?: string
-          _to_tx_date?: string
-        }
-        Returns: {
-          account_type: string
-          accrued_interest: number
-          adjusted_ledger: number
-          brokerage_amount: number
-          brokerage_commission: number
-          final_balance: number
-          gross_buy: number
-          gross_sell: number
-          interest_rate: number
-          investor_code: string
-          investor_name: string
-          ledger_balance: number
-          net_buy: number
-          net_sell: number
-          payable: number
-          receivable: number
-          total_count: number
-          total_deposits: number
-          total_withdrawals: number
-        }[]
-      }
-      get_accounting_summary: {
-        Args: {
-          _account_type_filter?: string
-          _from_trade_date?: string
-          _from_tx_date?: string
-          _has_trades_filter?: string
-          _search_term?: string
-          _to_trade_date?: string
-          _to_tx_date?: string
-        }
-        Returns: {
-          margin_accounts: number
-          total_accounts: number
-          total_accrued_interest: number
-          total_buy: number
-          total_margin_loan: number
-          total_payable: number
-          total_receivable: number
-          total_sell: number
-          total_trade_value: number
-        }[]
-      }
+      get_accounting_data:
+        | {
+            Args: {
+              _account_type_filter?: string
+              _from_trade_date?: string
+              _from_tx_date?: string
+              _has_trades_filter?: boolean
+              _page_offset?: number
+              _page_size?: number
+              _search_term?: string
+              _sort_column?: string
+              _sort_direction?: string
+              _to_trade_date?: string
+              _to_tx_date?: string
+            }
+            Returns: {
+              account_type: string
+              closing_balance: number
+              deposits: number
+              gross_buy: number
+              gross_sell: number
+              investor_code: string
+              investor_id: string
+              investor_name: string
+              net_buy: number
+              net_sell: number
+              opening_balance: number
+              rm_code: string
+              total_count: number
+              trade_count: number
+              withdrawals: number
+            }[]
+          }
+        | {
+            Args: {
+              _account_type_filter?: string
+              _from_trade_date?: string
+              _from_tx_date?: string
+              _has_trades_filter?: string
+              _page_offset?: number
+              _page_size?: number
+              _search_term?: string
+              _sort_column?: string
+              _sort_direction?: string
+              _to_trade_date?: string
+              _to_tx_date?: string
+            }
+            Returns: {
+              account_type: string
+              accrued_interest: number
+              adjusted_ledger: number
+              brokerage_amount: number
+              brokerage_commission: number
+              final_balance: number
+              gross_buy: number
+              gross_sell: number
+              interest_rate: number
+              investor_code: string
+              investor_name: string
+              ledger_balance: number
+              net_buy: number
+              net_sell: number
+              payable: number
+              receivable: number
+              total_count: number
+              total_deposits: number
+              total_withdrawals: number
+            }[]
+          }
+      get_accounting_summary:
+        | {
+            Args: {
+              _account_type_filter?: string
+              _from_trade_date?: string
+              _from_tx_date?: string
+              _has_trades_filter?: boolean
+              _search_term?: string
+              _to_trade_date?: string
+              _to_tx_date?: string
+            }
+            Returns: {
+              total_deposits: number
+              total_gross_buy: number
+              total_gross_sell: number
+              total_investors: number
+              total_net_buy: number
+              total_net_sell: number
+              total_trades: number
+              total_withdrawals: number
+            }[]
+          }
+        | {
+            Args: {
+              _account_type_filter?: string
+              _from_trade_date?: string
+              _from_tx_date?: string
+              _has_trades_filter?: string
+              _search_term?: string
+              _to_trade_date?: string
+              _to_tx_date?: string
+            }
+            Returns: {
+              margin_accounts: number
+              total_accounts: number
+              total_accrued_interest: number
+              total_buy: number
+              total_margin_loan: number
+              total_payable: number
+              total_receivable: number
+              total_sell: number
+              total_trade_value: number
+            }[]
+          }
       get_accounting_trade_sums: {
         Args: { _from_trade_date: string; _to_trade_date: string }
         Returns: {
