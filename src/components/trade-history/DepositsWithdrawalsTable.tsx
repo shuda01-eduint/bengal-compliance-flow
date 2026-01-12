@@ -537,13 +537,23 @@ export const DepositsWithdrawalsTable = () => {
       // Count-based duplicate detection
       toast.info("Analyzing file for duplicates...");
       
+      // Helper function to create normalized duplicate detection key
+      const createDuplicateKey = (investorCode: string, amount: number, transactionType: string, date: string) => {
+        return `${investorCode.toUpperCase().trim()}|${Number(amount).toFixed(2)}|${transactionType.toLowerCase().trim()}|${date}`;
+      };
+      
       // Get unique dates from the import to query
       const importDates = [...new Set(valid.map(r => r.transaction_date || format(new Date(), "yyyy-MM-dd")))];
       
       // Build count map from import file
       const importCounts = new Map<string, number>();
       valid.forEach(record => {
-        const key = `${record.investor_code}|${record.amount}|${record.transaction_type}|${record.transaction_date || format(new Date(), "yyyy-MM-dd")}`;
+        const key = createDuplicateKey(
+          record.investor_code,
+          record.amount,
+          record.transaction_type,
+          record.transaction_date || format(new Date(), "yyyy-MM-dd")
+        );
         importCounts.set(key, (importCounts.get(key) || 0) + 1);
       });
       
@@ -557,7 +567,7 @@ export const DepositsWithdrawalsTable = () => {
           console.error("Error fetching counts:", countError);
         } else if (counts) {
           counts.forEach((c: { investor_code: string; amount: number; transaction_type: string; count: number }) => {
-            const key = `${c.investor_code}|${c.amount}|${c.transaction_type}|${importDate}`;
+            const key = createDuplicateKey(c.investor_code, c.amount, c.transaction_type, importDate);
             existingCounts.set(key, Number(c.count));
           });
         }
@@ -569,7 +579,12 @@ export const DepositsWithdrawalsTable = () => {
       let duplicateCount = 0;
       
       for (const record of valid) {
-        const key = `${record.investor_code}|${record.amount}|${record.transaction_type}|${record.transaction_date || format(new Date(), "yyyy-MM-dd")}`;
+        const key = createDuplicateKey(
+          record.investor_code,
+          record.amount,
+          record.transaction_type,
+          record.transaction_date || format(new Date(), "yyyy-MM-dd")
+        );
         const existingCount = existingCounts.get(key) || 0;
         const importCount = importCounts.get(key) || 0;
         const alreadyInsertingCount = insertCounts.get(key) || 0;
