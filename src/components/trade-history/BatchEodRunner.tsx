@@ -21,7 +21,7 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { CalendarIcon, Loader2, Play, AlertTriangle, ShieldCheck, RefreshCw, Trash2 } from "lucide-react";
-import { format, addDays, differenceInDays, parse } from "date-fns";
+import { format, addDays, differenceInDays, parse, min } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchAllRows } from "@/lib/supabase-utils";
 
@@ -293,6 +293,8 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
     }
   };
 
+  const CHUNK_SIZE = 5; // Process 5 days at a time to prevent timeout
+
   const runBatchEod = async () => {
     if (!startDate || !endDate) {
       toast.error("Please select both start and end dates");
@@ -309,30 +311,67 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
     setProcessedDays(0);
     setProgress(0);
     setRunning(true);
-    setCurrentDateProcessing("Processing server-side...");
+
+    // Build chunks of date ranges
+    const chunks: { start: Date; end: Date }[] = [];
+    let chunkStart = startDate;
+
+    while (chunkStart <= endDate) {
+      const chunkEnd = min([addDays(chunkStart, CHUNK_SIZE - 1), endDate]);
+      chunks.push({ start: chunkStart, end: chunkEnd });
+      chunkStart = addDays(chunkEnd, 1);
+    }
+
+    toast.info(`Starting batch EOD: ${dayCount} days in ${chunks.length} chunks...`);
+
+    let totalClientsProcessed = 0;
+    let totalDaysProcessed = 0;
+    let hasError = false;
 
     try {
-      const startDateStr = format(startDate, "yyyy-MM-dd");
-      const endDateStr = format(endDate, "yyyy-MM-dd");
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const chunkStartStr = format(chunk.start, "yyyy-MM-dd");
+        const chunkEndStr = format(chunk.end, "yyyy-MM-dd");
+        const chunkDays = differenceInDays(chunk.end, chunk.start) + 1;
 
-      toast.info(`Starting batch EOD from ${startDateStr} to ${endDateStr}...`);
+        setCurrentDateProcessing(`Chunk ${i + 1}/${chunks.length}: ${format(chunk.start, "dd MMM")} - ${format(chunk.end, "dd MMM")}`);
 
-      // Call the SECURITY DEFINER function that bypasses RLS
-      const { data, error } = await supabase.rpc("run_batch_eod", {
-        p_start_date: startDateStr,
-        p_end_date: endDateStr,
-      });
+        const { data, error } = await supabase.rpc("run_batch_eod", {
+          p_start_date: chunkStartStr,
+          p_end_date: chunkEndStr,
+        });
 
-      if (error) throw error;
+        if (error) {
+          toast.error(`Chunk ${i + 1} failed`, { description: error.message });
+          hasError = true;
+          break;
+        }
 
-      const result = data as unknown as BatchEodResult;
+        const result = data as unknown as BatchEodResult;
 
-      if (result.success) {
-        setProcessedDays(result.days_processed || dayCount);
+        if (!result.success) {
+          toast.error(`Chunk ${i + 1} failed`, { description: result.error || "Unknown error" });
+          hasError = true;
+          break;
+        }
+
+        // Update progress
+        totalDaysProcessed += result.days_processed || chunkDays;
+        totalClientsProcessed += result.clients_processed || 0;
+        setProcessedDays(totalDaysProcessed);
+        setProgress(((i + 1) / chunks.length) * 100);
+
+        // Small delay between chunks to prevent overwhelming the database
+        if (i < chunks.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+
+      if (!hasError) {
         setProgress(100);
-
-        toast.success(`Batch EOD complete: ${result.days_processed} days processed`, {
-          description: `${result.clients_processed?.toLocaleString()} clients from ${format(startDate, "dd MMM")} to ${format(endDate, "dd MMM yyyy")}`,
+        toast.success(`Batch EOD complete: ${totalDaysProcessed} days processed`, {
+          description: `${totalClientsProcessed.toLocaleString()} client-days from ${format(startDate, "dd MMM")} to ${format(endDate, "dd MMM yyyy")}`,
         });
 
         // Invalidate EOD history cache so the table refreshes immediately
@@ -340,8 +379,6 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
 
         setOpen(false);
         onComplete?.();
-      } else {
-        throw new Error(result.error || "Unknown error occurred");
       }
     } catch (error: any) {
       console.error("Batch EOD error:", error);
