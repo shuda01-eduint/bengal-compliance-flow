@@ -59,29 +59,18 @@ interface ColumnConfig {
 }
 
 const STORAGE_KEY = 'accounting-custom-fields';
-const COLUMNS_STORAGE_KEY = 'accounting-columns-config-v2';
-const PAGE_SIZE_OPTIONS = [50, 100, 500, -1]; // -1 means "All"
-const DEFAULT_PAGE_SIZE = 50;
+const COLUMNS_STORAGE_KEY = 'accounting-columns-config-v3';
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'investor_code', label: 'Code', visible: true, align: 'left' },
   { id: 'investor_name', label: 'Name', visible: true, align: 'left' },
-  { id: 'account_type', label: 'Type', visible: true, align: 'left' },
-  { id: 'interest_rate', label: 'Int %', visible: true, align: 'right' },
-  { id: 'brokerage_commission', label: 'Comm %', visible: false, align: 'right' },
-  { id: 'ledger_balance', label: 'Ledger Bal', visible: true, align: 'right' },
+  { id: 'account_type', label: 'Department', visible: true, align: 'left' },
+  { id: 'ledger_balance', label: 'Opening Bal', visible: true, align: 'right' },
   { id: 'total_deposits', label: 'Deposits', visible: true, align: 'right', colorClass: 'text-green-400' },
   { id: 'total_withdrawals', label: 'Withdrawals', visible: true, align: 'right', colorClass: 'text-amber-400' },
   { id: 'gross_buy', label: 'Gross Buy', visible: true, align: 'right', colorClass: 'text-red-400' },
-  { id: 'net_buy', label: 'Net Buy', visible: true, align: 'right', colorClass: 'text-red-400' },
   { id: 'gross_sell', label: 'Gross Sell', visible: true, align: 'right', colorClass: 'text-green-400' },
-  { id: 'net_sell', label: 'Net Sell', visible: true, align: 'right', colorClass: 'text-green-400' },
-  { id: 'adjusted_ledger', label: 'Adj. Ledger', visible: false, align: 'right' },
-  { id: 'accrued_interest', label: 'Accrued Int.', visible: true, align: 'right', colorClass: 'text-orange-400' },
-  { id: 'payable', label: 'Payable', visible: false, align: 'right', colorClass: 'text-red-400' },
-  { id: 'brokerage_amount', label: 'Brokerage', visible: true, align: 'right' },
   { id: 'final_balance', label: 'Closing Balance', visible: true, align: 'right', colorClass: 'text-blue-400' },
-  { id: 'receivable', label: 'Net Receivable (after interest)', visible: false, align: 'right' },
 ];
 
 const evaluateFormula = (formula: string, row: AccountingRow): number => {
@@ -158,9 +147,6 @@ const AccountingTab = () => {
   const [tradeDetailsOpen, setTradeDetailsOpen] = useState(false);
   const [selectedTradeType, setSelectedTradeType] = useState<'BUY' | 'SELL'>('BUY');
   const [selectedTradeInvestor, setSelectedTradeInvestor] = useState<AccountingRow | null>(null);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
   const [isAdmin, setIsAdmin] = useState(false);
   const [sortColumn, setSortColumn] = useState<string>("investor_code");
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -186,10 +172,10 @@ const AccountingTab = () => {
   // Debounce search term for server-side search
   const debouncedSearch = useDebounce(searchTerm, 300);
 
-  // Reset to first page when search or filters change
+  // Search effect
   useEffect(() => {
-    setCurrentPage(0);
-  }, [debouncedSearch, accountTypeFilter]);
+    // Trigger refetch on search change
+  }, [debouncedSearch]);
 
   // Load custom fields from localStorage
   useEffect(() => {
@@ -250,21 +236,16 @@ const AccountingTab = () => {
   const fromTradeDateStr = format(fromDate, 'yyyyMMdd');
   const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
-  // Fetch accounting data using RPC function (server-side search + pagination + filters + sorting)
-  const effectivePageSize = pageSize === -1 ? 100000 : pageSize;
+  // Fetch accounting data using RPC function (server-side search + sorting, no pagination)
   const { data: accountingResult, isLoading: loadingData } = useQuery({
-    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, currentPage, pageSize, accountTypeFilter, sortColumn, sortDirection],
+    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, sortColumn, sortDirection],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_data', {
-        _search_term: debouncedSearch || null,
+        _search: debouncedSearch || null,
         _from_trade_date: fromTradeDateStr,
         _to_trade_date: toTradeDateStr,
         _from_tx_date: fromDateStr,
         _to_tx_date: toDateStr,
-        _page_size: effectivePageSize,
-        _page_offset: pageSize === -1 ? 0 : currentPage * pageSize,
-        _account_type_filter: accountTypeFilter,
-        _has_trades_filter: 'with_activity',
         _sort_column: sortColumn,
         _sort_direction: sortDirection,
       });
@@ -273,22 +254,8 @@ const AccountingTab = () => {
     },
   });
 
-  // Fetch summary data using RPC function (with filters for accurate totals)
-  const { data: summaryResult, isLoading: loadingSummary } = useQuery({
-    queryKey: ['accounting-summary', fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, accountTypeFilter],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_accounting_summary', {
-        _from_trade_date: fromTradeDateStr,
-        _to_trade_date: toTradeDateStr,
-        _from_tx_date: fromDateStr,
-        _to_tx_date: toDateStr,
-        _account_type_filter: accountTypeFilter,
-        _has_trades_filter: 'with_activity',
-      });
-      if (error) throw error;
-      return data?.[0] || null;
-    },
-  });
+  // Summary data can be computed locally from accountingResult
+  const loadingSummary = loadingData;
 
   // Fetch turnover by department
   const { data: departmentTurnover } = useQuery({
@@ -339,22 +306,22 @@ const AccountingTab = () => {
       const processedRow: AccountingRow = {
         investor_code: row.investor_code || '',
         investor_name: row.investor_name || '',
-        account_type: row.account_type || '',
-        interest_rate: Number(row.interest_rate) || 0,
-        brokerage_commission: Number(row.brokerage_commission) || 0,
-        ledger_balance: Number(row.ledger_balance) || 0,
+        account_type: row.department || '', // department from trade_history
+        interest_rate: 0,
+        brokerage_commission: 0,
+        ledger_balance: Number(row.opening_balance) || 0, // clients.ledger_balance as opening
         total_deposits: Number(row.total_deposits) || 0,
         total_withdrawals: Number(row.total_withdrawals) || 0,
         gross_buy: Number(row.gross_buy) || 0,
         gross_sell: Number(row.gross_sell) || 0,
-        net_buy: Number(row.net_buy) || 0,
-        net_sell: Number(row.net_sell) || 0,
-        adjusted_ledger: Number(row.adjusted_ledger) || 0,
-        accrued_interest: Number(row.accrued_interest) || 0,
-        brokerage_amount: Number(row.brokerage_amount) || 0,
-        final_balance: Number(row.final_balance) || 0,
-        receivable: Number(row.receivable) || 0,
-        payable: Number(row.payable) || 0,
+        net_buy: Number(row.gross_buy) || 0, // same as gross for simplified
+        net_sell: Number(row.gross_sell) || 0, // same as gross for simplified
+        adjusted_ledger: 0,
+        accrued_interest: 0,
+        brokerage_amount: 0,
+        final_balance: Number(row.closing_balance) || 0,
+        receivable: 0,
+        payable: 0,
       };
 
       // Calculate custom fields
@@ -367,12 +334,11 @@ const AccountingTab = () => {
   }, [accountingResult, customFields]);
 
   // Get total count from first row (all rows have the same total_count)
-  const totalCount = (accountingResult?.[0] as any)?.total_count || 0;
-  const totalPages = pageSize === -1 ? 1 : Math.ceil(Number(totalCount) / pageSize);
+  const totalCount = (accountingResult?.[0] as any)?.total_count || accountingResult?.length || 0;
 
-  // Summary data
+  // Summary data computed from accountingData
   const summary = useMemo(() => {
-    if (!summaryResult) {
+    if (!accountingData || accountingData.length === 0) {
       return {
         totalAccounts: 0,
         marginAccounts: 0,
@@ -385,19 +351,18 @@ const AccountingTab = () => {
         totalTradeValue: 0,
       };
     }
-    const sr = summaryResult as any;
     return {
-      totalAccounts: Number(sr.total_accounts) || 0,
-      marginAccounts: Number(sr.margin_accounts) || 0,
-      totalMarginLoan: Number(sr.total_margin_loan) || 0,
-      totalAccruedInterest: Number(sr.total_accrued_interest) || 0,
-      totalReceivable: Number(sr.total_receivable) || 0,
-      totalPayable: Number(sr.total_payable) || 0,
-      totalBuy: Number(sr.total_buy) || 0,
-      totalSell: Number(sr.total_sell) || 0,
-      totalTradeValue: Number(sr.total_trade_value) || 0,
+      totalAccounts: accountingData.length,
+      marginAccounts: 0,
+      totalMarginLoan: 0,
+      totalAccruedInterest: 0,
+      totalReceivable: 0,
+      totalPayable: 0,
+      totalBuy: accountingData.reduce((sum, row) => sum + (row.gross_buy || 0), 0),
+      totalSell: accountingData.reduce((sum, row) => sum + (row.gross_sell || 0), 0),
+      totalTradeValue: accountingData.reduce((sum, row) => sum + (row.gross_buy || 0) + (row.gross_sell || 0), 0),
     };
-  }, [summaryResult]);
+  }, [accountingData]);
 
   const isLoading = loadingData || loadingSummary;
 
@@ -428,18 +393,9 @@ const AccountingTab = () => {
     const toastId = toast.loading('Preparing export...');
     
     try {
-      // Fetch ALL data without pagination for export
-      const { data: allData, error } = await supabase.rpc('get_accounting_data', {
-        _search_term: debouncedSearch || null,
-        _from_trade_date: fromTradeDateStr,
-        _to_trade_date: toTradeDateStr,
-        _from_tx_date: fromDateStr,
-        _to_tx_date: toDateStr,
-        _page_size: 100000, // Large number to get all records
-        _page_offset: 0,
-        _account_type_filter: accountTypeFilter,
-        _has_trades_filter: 'with_activity',
-      });
+      // Use already fetched data for export (no pagination)
+      const allData = accountingResult || [];
+      const error = null;
 
       if (error) throw error;
 
@@ -526,7 +482,6 @@ const AccountingTab = () => {
       setSortColumn(columnId);
       setSortDirection('asc');
     }
-    setCurrentPage(0); // Reset to first page when sorting
   };
 
   // Drag and drop handlers for column reordering
@@ -1345,18 +1300,6 @@ const AccountingTab = () => {
             </Popover>
           </div>
 
-          {/* Account Type Filter */}
-          <Select value={accountTypeFilter} onValueChange={setAccountTypeFilter}>
-            <SelectTrigger className="w-[120px] lg:w-[140px] h-9 bg-muted/30 border-border/50 text-sm">
-              <SelectValue placeholder="Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="margin">Margin</SelectItem>
-            </SelectContent>
-          </Select>
-
           <span className="text-xs lg:text-sm text-muted-foreground hidden md:inline">
             Period: {format(fromDate, 'dd MMM')} - {format(toDate, 'dd MMM yyyy')}
           </span>
@@ -1648,53 +1591,11 @@ const AccountingTab = () => {
                 </Table>
               </div>
 
-              {/* Pagination */}
-              <div className="flex items-center justify-between px-6 py-4 border-t flex-wrap gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-muted-foreground">
-                    {pageSize === -1 
-                      ? `Showing all ${Number(totalCount).toLocaleString()} records`
-                      : `Showing ${currentPage * pageSize + 1} - ${Math.min((currentPage + 1) * pageSize, Number(totalCount))} of ${Number(totalCount).toLocaleString()} records`
-                    }
-                  </span>
-                  <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(0); }}>
-                    <SelectTrigger className="w-[100px] h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PAGE_SIZE_OPTIONS.map(size => (
-                        <SelectItem key={size} value={String(size)}>
-                          {size === -1 ? 'All' : `${size} / page`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {pageSize !== -1 && totalPages > 1 && (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-                      disabled={currentPage === 0}
-                    >
-                      <ChevronLeft className="h-4 w-4 mr-1" />
-                      Previous
-                    </Button>
-                    <span className="text-sm text-muted-foreground px-2">
-                      Page {currentPage + 1} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
-                      disabled={currentPage >= totalPages - 1}
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                )}
+              {/* Record Count */}
+              <div className="flex items-center justify-between px-6 py-4 border-t">
+                <span className="text-sm text-muted-foreground">
+                  Showing all {Number(totalCount).toLocaleString()} records
+                </span>
               </div>
             </div>
           )}

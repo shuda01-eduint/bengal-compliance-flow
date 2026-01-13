@@ -1591,12 +1591,8 @@ export type Database = {
           }
         | {
             Args: {
-              _account_type_filter?: string
               _from_trade_date?: string
               _from_tx_date?: string
-              _has_trades_filter?: string
-              _limit_val?: number
-              _offset_val?: number
               _search?: string
               _sort_column?: string
               _sort_direction?: string
@@ -1604,18 +1600,14 @@ export type Database = {
               _to_tx_date?: string
             }
             Returns: {
-              account_type: string
-              brokerage_amount: number
-              brokerage_commission: number
+              closing_balance: number
               department: string
-              final_balance: number
               gross_buy: number
               gross_sell: number
               investor_code: string
               investor_name: string
-              net_buy: number
-              net_sell: number
               opening_balance: number
+              rm_name: string
               total_count: number
               total_deposits: number
               total_withdrawals: number
