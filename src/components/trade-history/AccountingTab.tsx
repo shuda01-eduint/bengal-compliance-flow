@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
 import { TradeDetailsDialog } from "./TradeDetailsDialog";
 import { useDebounce } from "@/hooks/useDebounce";
+import { rpcWithRetry, formatRpcError } from "@/lib/rpc-utils";
 
 export interface AccountingRow {
   investor_code: string;
@@ -291,7 +292,7 @@ const AccountingTab = () => {
   const fromTradeDateStr = format(fromDate, 'yyyyMMdd');
   const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
-  // Fetch all accounting data using RPC function with pagination to bypass 1000 row limit
+  // Fetch all accounting data using RPC function with pagination and retry logic
   const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
     queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr],
     queryFn: async () => {
@@ -301,7 +302,7 @@ const AccountingTab = () => {
       let hasMore = true;
 
       while (hasMore) {
-        const { data, error } = await supabase.rpc('get_accounting_data', {
+        const { data, error } = await rpcWithRetry<any[]>('get_accounting_data', {
           _search: debouncedSearch || null,
           _from_trade_date: fromTradeDateStr,
           _to_trade_date: toTradeDateStr,
@@ -321,10 +322,11 @@ const AccountingTab = () => {
       return allData;
     },
     retry: (failureCount, error: Error) => {
+      const msg = error?.message || '';
+      // Don't retry on schema errors - they need code fixes
+      if (msg.includes('does not exist') || msg.includes('column')) return false;
       // Don't retry on timeout errors - suggest narrowing date range instead
-      if (error?.message?.includes('timeout') || error?.message?.includes('57014')) {
-        return false;
-      }
+      if (msg.includes('timeout') || msg.includes('57014')) return false;
       return failureCount < 2;
     },
   });
@@ -659,6 +661,20 @@ const AccountingTab = () => {
 
   return (
     <div className="space-y-4 lg:space-y-6 w-full overflow-x-hidden">
+      {/* Error Display */}
+      {isError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>{formatRpcError(queryError as Error)}</span>
+            <Button variant="outline" size="sm" onClick={() => refetch()} className="ml-4">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Summary Cards - Sticky */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-3 lg:pb-4 -mx-4 px-4 pt-2">
         {/* Department Charts - Clickable Toggle */}
