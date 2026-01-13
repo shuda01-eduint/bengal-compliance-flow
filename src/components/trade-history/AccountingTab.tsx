@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { format, subDays } from "date-fns";
-import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award, ArrowUpDown, GripVertical } from "lucide-react";
+import { format, subDays, differenceInDays, parseISO } from "date-fns";
+import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award, ArrowUpDown, GripVertical, AlertTriangle, RefreshCw } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -142,7 +143,8 @@ const AccountingTab = () => {
   const [newFieldFormula, setNewFieldFormula] = useState("");
   const [chartView, setChartView] = useState<ChartView>('commission');
   const [selectedInvestor, setSelectedInvestor] = useState<AccountingRow | null>(null);
-  const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 2));
+  // Default to today only (single day) to prevent timeouts
+  const [fromDate, setFromDate] = useState<Date>(new Date());
   const [toDate, setToDate] = useState<Date>(new Date());
   const [tradeDetailsOpen, setTradeDetailsOpen] = useState(false);
   const [selectedTradeType, setSelectedTradeType] = useState<'BUY' | 'SELL'>('BUY');
@@ -151,6 +153,11 @@ const AccountingTab = () => {
   const [sortColumn, setSortColumn] = useState<string>("investor_code");
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
+  const [dateRangeWarning, setDateRangeWarning] = useState<string | null>(null);
+
+  // Calculate date range in days for guardrails
+  const dateRangeDays = useMemo(() => differenceInDays(toDate, fromDate) + 1, [fromDate, toDate]);
+  const isLargeRange = dateRangeDays > 7;
 
   // Check if user is admin
   useEffect(() => {
@@ -163,19 +170,63 @@ const AccountingTab = () => {
         .select("role")
         .eq("user_id", user.id)
         .eq("role", "admin")
-        .single();
+        .maybeSingle();
       setIsAdmin(!!roleData);
     };
     checkAdmin();
   }, []);
 
+  // Initialize with latest trade date on mount
+  useEffect(() => {
+    const fetchLatestTradeDate = async () => {
+      const { data } = await supabase
+        .from('trade_history')
+        .select('trade_date')
+        .order('trade_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (data?.trade_date) {
+        // trade_date is in YYYYMMDD format
+        const dateStr = data.trade_date;
+        const year = parseInt(dateStr.substring(0, 4));
+        const month = parseInt(dateStr.substring(4, 6)) - 1;
+        const day = parseInt(dateStr.substring(6, 8));
+        const latestDate = new Date(year, month, day);
+        setFromDate(latestDate);
+        setToDate(latestDate);
+      }
+    };
+    fetchLatestTradeDate();
+  }, []);
+
+  // Update date range warning
+  useEffect(() => {
+    if (isLargeRange) {
+      setDateRangeWarning(`Large date range (${dateRangeDays} days) may load slowly.`);
+    } else {
+      setDateRangeWarning(null);
+    }
+  }, [dateRangeDays, isLargeRange]);
+
   // Debounce search term for server-side search
   const debouncedSearch = useDebounce(searchTerm, 300);
 
-  // Search effect
-  useEffect(() => {
-    // Trigger refetch on search change
-  }, [debouncedSearch]);
+  // Handler to sync toDate when fromDate changes (single day mode)
+  const handleFromDateChange = (date: Date | undefined) => {
+    if (date) {
+      setFromDate(date);
+      // If user selects a from date after the to date, sync them
+      if (date > toDate) {
+        setToDate(date);
+      }
+    }
+  };
+
+  // Handler to set single day mode
+  const handleSetSingleDay = () => {
+    setToDate(fromDate);
+  };
 
   // Load custom fields from localStorage
   useEffect(() => {
@@ -237,7 +288,7 @@ const AccountingTab = () => {
   const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
   // Fetch accounting data using RPC function (server-side search + sorting, no pagination)
-  const { data: accountingResult, isLoading: loadingData, isError, error: queryError } = useQuery({
+  const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
     queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_data', {
@@ -251,7 +302,21 @@ const AccountingTab = () => {
       console.log('[AccountingTab] Fetched data:', data?.length, 'rows');
       return data || [];
     },
+    retry: (failureCount, error: Error) => {
+      // Don't retry on timeout errors - suggest narrowing date range instead
+      if (error?.message?.includes('timeout') || error?.message?.includes('57014')) {
+        return false;
+      }
+      return failureCount < 2;
+    },
   });
+
+  // Check if error is a timeout
+  const isTimeoutError = useMemo(() => {
+    if (!queryError) return false;
+    const msg = (queryError as Error)?.message || '';
+    return msg.includes('timeout') || msg.includes('57014') || msg.includes('canceling statement');
+  }, [queryError]);
 
   // Summary data can be computed locally from accountingResult
   const loadingSummary = loadingData;
@@ -1281,7 +1346,7 @@ const AccountingTab = () => {
                 <Calendar
                   mode="single"
                   selected={fromDate}
-                  onSelect={(d) => d && setFromDate(d)}
+                  onSelect={handleFromDateChange}
                   className="pointer-events-auto"
                 />
               </PopoverContent>
@@ -1303,11 +1368,31 @@ const AccountingTab = () => {
                 />
               </PopoverContent>
             </Popover>
+            {/* Single Day Mode Button */}
+            {dateRangeDays > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSetSingleDay}
+                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                title="Set To = From (single day)"
+              >
+                1 Day
+              </Button>
+            )}
           </div>
 
-          <span className="text-xs lg:text-sm text-muted-foreground hidden md:inline">
-            Period: {format(fromDate, 'dd MMM')} - {format(toDate, 'dd MMM yyyy')}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs lg:text-sm text-muted-foreground hidden md:inline">
+              Period: {format(fromDate, 'dd MMM')} - {format(toDate, 'dd MMM yyyy')} ({dateRangeDays} day{dateRangeDays !== 1 ? 's' : ''})
+            </span>
+            {isLargeRange && (
+              <span className="text-xs text-amber-400 flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" />
+                Large range
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto flex-wrap">
             <Dialog open={isFieldDialogOpen} onOpenChange={setIsFieldDialogOpen}>
@@ -1457,12 +1542,39 @@ const AccountingTab = () => {
         </div>
       </div>
 
-      {/* Error Banner */}
+      {/* Error Banner - Enhanced for timeout errors */}
       {isError && (
-        <div className="bg-destructive/10 border border-destructive/50 rounded-lg p-4 mb-4">
-          <p className="text-destructive font-medium">Failed to load accounting data</p>
-          <p className="text-destructive/70 text-sm mt-1">{(queryError as Error)?.message || 'Unknown error'}</p>
-        </div>
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div>
+                <p className="font-medium">
+                  {isTimeoutError ? 'Query timed out - date range too large' : 'Failed to load accounting data'}
+                </p>
+                <p className="text-sm opacity-80 mt-1">
+                  {isTimeoutError 
+                    ? `The selected ${dateRangeDays}-day range requires too much processing. Try a single day.`
+                    : ((queryError as Error)?.message || 'Unknown error')}
+                </p>
+              </div>
+              {isTimeoutError && dateRangeDays > 1 && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    handleSetSingleDay();
+                    setTimeout(() => refetch(), 100);
+                  }}
+                  className="shrink-0"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Try Single Day
+                </Button>
+              )}
+            </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* Debug Info */}
