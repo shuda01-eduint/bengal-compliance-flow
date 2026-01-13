@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,49 +22,10 @@ import {
 import { CalendarIcon, Search, Filter, Loader2, ChevronLeft, ChevronRight, Settings2, Plus, Trash2, Calculator, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-
-interface TradeRecord {
-  id: string;
-  action: string | null;
-  status: string | null;
-  side: string | null;
-  security_code: string | null;
-  client_code: string | null;
-  quantity: number | null;
-  price: number | null;
-  value: number | null;
-  trade_date: string | null;
-  trade_time: string | null;
-  file_name: string | null;
-  uploaded_at: string;
-  order_id: string | null;
-  exec_id: string | null;
-  isin: string | null;
-  board: string | null;
-  session: string | null;
-  fill_type: string | null;
-  category: string | null;
-  boid: string | null;
-  trader_dealer_id: string | null;
-  owner_dealer_id: string | null;
-  // Denormalized investor/client data (stored on trade record)
-  brokerage_commission: number | null;
-  interest_rate: number | null;
-  account_type: string | null;
-  investor_type: string | null;
-  ledger_balance_snapshot: number | null;
-  // Denormalized agent/RM data
-  agent_id: string | null;
-  rm_id: string | null;
-  rm_name: string | null;
-  department: string | null;
-  // Denormalized deposit/withdrawal data
-  total_deposits: number | null;
-  total_withdrawals: number | null;
-  net_deposit: number | null;
-}
+import { useTradesPaginated, useAvailableFileNames } from "@/hooks/useTradesPaginated";
+import { useDebounce } from "@/hooks/useDebounce";
+import type { TradeHistory } from "@/services/types";
 
 interface ColumnConfig {
   key: string;
@@ -101,18 +62,15 @@ const BASE_COLUMNS: ColumnConfig[] = [
   { key: "trader_dealer_id", label: "Trader ID", defaultVisible: false, type: 'string' },
   { key: "owner_dealer_id", label: "Owner ID", defaultVisible: false, type: 'string' },
   { key: "file_name", label: "File", defaultVisible: true, type: 'string' },
-  // Denormalized investor/client fields
   { key: "brokerage_commission", label: "Brokerage Comm.", defaultVisible: false, type: 'number' },
   { key: "interest_rate", label: "Interest Rate", defaultVisible: false, type: 'number' },
   { key: "account_type", label: "Account Type", defaultVisible: false, type: 'string' },
   { key: "investor_type", label: "Investor Type", defaultVisible: false, type: 'string' },
   { key: "ledger_balance_snapshot", label: "Ledger Balance", defaultVisible: true, type: 'currency' },
-  // Denormalized agent/RM fields
   { key: "agent_id", label: "Agent ID", defaultVisible: false, type: 'string' },
   { key: "rm_id", label: "RM ID", defaultVisible: false, type: 'string' },
   { key: "rm_name", label: "RM Name", defaultVisible: true, type: 'string' },
   { key: "department", label: "Department", defaultVisible: false, type: 'string' },
-  // Denormalized deposit/withdrawal fields
   { key: "total_deposits", label: "Total Deposits", defaultVisible: false, type: 'currency' },
   { key: "total_withdrawals", label: "Total Withdrawals", defaultVisible: false, type: 'currency' },
   { key: "net_deposit", label: "Net Deposit", defaultVisible: false, type: 'currency' },
@@ -121,21 +79,17 @@ const BASE_COLUMNS: ColumnConfig[] = [
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 // Safe formula evaluator
-const evaluateFormula = (formula: string, trade: TradeRecord): string | number => {
+const evaluateFormula = (formula: string, trade: TradeHistory): string | number => {
   try {
-    // Replace field references with actual values
     let expression = formula;
     
-    // Computed fields
     const buyValue = trade.side === "BUY" ? (trade.value || 0) : 0;
     const sellValue = trade.side === "SELL" ? (trade.value || 0) : 0;
-    const netBuy = buyValue - sellValue; // positive means net buy
-    const netSell = sellValue - buyValue; // positive means net sell (adds to cash)
+    const netBuy = buyValue - sellValue;
+    const netSell = sellValue - buyValue;
     const adjustedBalance = (trade.ledger_balance_snapshot || 0) + (trade.total_deposits || 0) - (trade.total_withdrawals || 0);
-    // Dynamic ledger: base balance + deposits - withdrawals + net sell (selling adds cash)
     const dynamicLedger = (trade.ledger_balance_snapshot || 0) + (trade.total_deposits || 0) - (trade.total_withdrawals || 0) + netSell;
     
-    // Available fields for formulas (denormalized investor data stored on trade)
     const fields: Record<string, number | string | null> = {
       quantity: trade.quantity,
       price: trade.price,
@@ -149,7 +103,6 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
       total_deposits: trade.total_deposits,
       total_withdrawals: trade.total_withdrawals,
       net_deposit: trade.net_deposit,
-      // Computed fields
       buy_value: buyValue,
       sell_value: sellValue,
       net_buy: netBuy,
@@ -158,7 +111,6 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
       dynamic_ledger: dynamicLedger,
     };
 
-    // Replace field names with values (longer names first to avoid partial matches)
     const sortedKeys = Object.keys(fields).sort((a, b) => b.length - a.length);
     sortedKeys.forEach((key) => {
       const val = fields[key];
@@ -172,7 +124,6 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
       }
     });
 
-    // Support common functions
     expression = expression.replace(/ABS\(/gi, 'Math.abs(');
     expression = expression.replace(/ROUND\(/gi, 'Math.round(');
     expression = expression.replace(/FLOOR\(/gi, 'Math.floor(');
@@ -182,19 +133,16 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
     expression = expression.replace(/POW\(/gi, 'Math.pow(');
     expression = expression.replace(/SQRT\(/gi, 'Math.sqrt(');
 
-    // Support IF statements: IF(condition, trueVal, falseVal) - handle nested IFs
     let maxIterations = 10;
     while (expression.includes('IF(') && maxIterations > 0) {
       expression = expression.replace(/IF\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi, '($1 ? $2 : $3)');
       maxIterations--;
     }
 
-    // Validate - only allow safe characters (digits, operators, Math functions, quotes)
     if (!/^[\d\s\+\-\*\/\(\)\.\,\?\:\<\>\=\!\&\|\"\w]+$/i.test(expression)) {
       return 'Invalid';
     }
 
-    // Evaluate
     const result = new Function(`return ${expression}`)();
     return typeof result === 'number' ? (isNaN(result) ? 0 : result) : result;
   } catch (e) {
@@ -204,18 +152,13 @@ const evaluateFormula = (formula: string, trade: TradeRecord): string | number =
 };
 
 export function TradeHistoryTable() {
-  const [trades, setTrades] = useState<TradeRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
   const [sideFilter, setSideFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
-  const [fileNames, setFileNames] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [totalCount, setTotalCount] = useState(0);
   const [hideZeroValues, setHideZeroValues] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortColumn, setSortColumn] = useState<string>("trade_date");
@@ -223,13 +166,12 @@ export function TradeHistoryTable() {
   const { toast } = useToast();
 
   // Debounce search input
+  const debouncedSearch = useDebounce(searchInput, 500);
+
+  // Reset page when filters change
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchTerm(searchInput);
-      setCurrentPage(1);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [searchInput]);
+    setCurrentPage(1);
+  }, [debouncedSearch, sideFilter, selectedFile, dateFrom, dateTo, hideZeroValues, statusFilter]);
 
   // Column customization
   const [visibleColumns, setVisibleColumns] = useState<string[]>(
@@ -250,126 +192,44 @@ export function TradeHistoryTable() {
     localStorage.setItem('tradeHistory_customColumns', JSON.stringify(customColumns));
   }, [customColumns]);
 
+  // Fetch file names using the new hook
+  const { data: fileNames = [] } = useAvailableFileNames();
+
+  // Build filters for the query
+  const filters = useMemo(() => ({
+    dateFrom: dateFrom ? format(dateFrom, "yyyyMMdd") : undefined,
+    dateTo: dateTo ? format(dateTo, "yyyyMMdd") : undefined,
+    clientCode: debouncedSearch || undefined,
+    side: sideFilter !== "all" ? sideFilter : undefined,
+    fileName: selectedFile !== "all" ? selectedFile : undefined,
+    status: statusFilter !== "all" ? statusFilter : undefined,
+    hideZeroValues,
+  }), [dateFrom, dateTo, debouncedSearch, sideFilter, selectedFile, statusFilter, hideZeroValues]);
+
+  // Use the new paginated hook
+  const { data: tradesData, isLoading, error } = useTradesPaginated({
+    filters,
+    pagination: { page: currentPage, pageSize },
+    sort: { column: sortColumn, ascending: sortDirection === "asc" },
+  });
+
+  const trades = tradesData?.data || [];
+  const totalCount = tradesData?.totalCount || 0;
+  const totalPages = Math.ceil(totalCount / pageSize);
+
+  // Show error toast
   useEffect(() => {
-    fetchFileNames();
-    fetchTotalCount();
-  }, []);
-
-  // Fetch trades with server-side filtering
-  useEffect(() => {
-    fetchTrades();
-  }, [searchTerm, sideFilter, selectedFile, dateFrom, dateTo, currentPage, pageSize, hideZeroValues, statusFilter, sortColumn, sortDirection]);
-
-  const fetchFileNames = async () => {
-    try {
-      // Use the efficient RPC function to get file stats
-      const { data, error } = await supabase.rpc('get_trade_file_stats');
-      
-      if (error) {
-        console.error("Error fetching file names:", error);
-        return;
-      }
-      
-      if (data) {
-        const fileNames = data.map((d: { file_name: string }) => d.file_name);
-        setFileNames(fileNames);
-      }
-    } catch (error) {
-      console.error("Error fetching file names:", error);
-    }
-  };
-
-  const fetchTotalCount = async () => {
-    // Skip count for initial load - will be set when fetching trades with filters
-    setTotalCount(0);
-  };
-
-  const fetchTrades = async () => {
-    setLoading(true);
-    try {
-      // Always use planned count to avoid timeouts on large tables
-      let query = supabase
-        .from("trade_history")
-        .select("*", { count: "planned" });
-
-      // Apply search filter (server-side)
-      if (searchTerm) {
-        query = query.or(`client_code.ilike.%${searchTerm}%,security_code.ilike.%${searchTerm}%`);
-      }
-
-      // Apply side filter
-      if (sideFilter !== "all") {
-        query = query.eq("side", sideFilter);
-      }
-
-      // Apply file filter
-      if (selectedFile !== "all") {
-        query = query.eq("file_name", selectedFile);
-      }
-
-      // Apply date filters
-      if (dateFrom) {
-        const fromStr = format(dateFrom, "yyyyMMdd");
-        query = query.gte("trade_date", fromStr);
-      }
-      if (dateTo) {
-        const toStr = format(dateTo, "yyyyMMdd");
-        query = query.lte("trade_date", toStr);
-      }
-
-      // Apply zero-value filter
-      if (hideZeroValues) {
-        query = query.gt("value", 0);
-      }
-
-      // Apply status filter
-      if (statusFilter !== "all") {
-        query = query.eq("status", statusFilter);
-      }
-
-      // Apply pagination - fetch limited records
-      const from = (currentPage - 1) * pageSize;
-      const to = from + pageSize - 1;
-
-      // Fetch trades - denormalized fields are already on trade_history
-      const { data, error } = await query
-        .order(sortColumn, { ascending: sortDirection === "asc" })
-        .range(from, to);
-
-      if (error) throw error;
-      
-      setTrades(data || []);
-      // Estimate count based on returned data (count query is too slow on large tables)
-      const returnedRows = data?.length || 0;
-      if (currentPage === 1) {
-        // On first page, estimate based on whether we got a full page
-        const estimated = returnedRows === pageSize ? pageSize * 10 : returnedRows;
-        setFilteredCount(estimated);
-      } else if (returnedRows === pageSize) {
-        // If we got a full page, there might be more
-        setFilteredCount(Math.max(filteredCount, (currentPage * pageSize) + pageSize));
-      } else {
-        // Partial page means we're at the end
-        setFilteredCount((currentPage - 1) * pageSize + returnedRows);
-      }
-    } catch (error) {
-      console.error("Error fetching trades:", error);
+    if (error) {
       toast({
         title: "Error",
         description: "Failed to fetch trade history",
         variant: "destructive",
       });
-    } finally {
-      setLoading(false);
     }
-  };
-
-  const [filteredCount, setFilteredCount] = useState(0);
-  const totalPages = Math.ceil(filteredCount / pageSize);
+  }, [error, toast]);
 
   const clearFilters = () => {
     setSearchInput("");
-    setSearchTerm("");
     setSideFilter("all");
     setStatusFilter("all");
     setDateFrom(undefined);
@@ -399,7 +259,7 @@ export function TradeHistoryTable() {
   };
 
   const goToPage = (page: number) => {
-    setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+    setCurrentPage(Math.max(1, Math.min(page, totalPages || 1)));
   };
 
   const handleSort = (columnKey: string) => {
@@ -441,8 +301,8 @@ export function TradeHistoryTable() {
     setCustomColumns(prev => prev.filter(c => c.id !== id));
   };
 
-  const renderCellValue = (trade: TradeRecord, column: ColumnConfig) => {
-    const value = trade[column.key as keyof TradeRecord];
+  const renderCellValue = (trade: TradeHistory, column: ColumnConfig) => {
+    const value = trade[column.key as keyof TradeHistory];
     
     switch (column.type) {
       case 'date':
@@ -474,6 +334,11 @@ export function TradeHistoryTable() {
           <CardTitle className="flex items-center gap-2">
             <Filter className="h-5 w-5" />
             Trade History
+            {totalCount > 0 && (
+              <Badge variant="secondary" className="ml-2">
+                {totalCount.toLocaleString()} records
+              </Badge>
+            )}
           </CardTitle>
           <div className="flex gap-2">
             {/* Add Formula Column */}
@@ -490,9 +355,8 @@ export function TradeHistoryTable() {
                   <DialogDescription className="space-y-2">
                     <p>Create a calculated column using formulas.</p>
                     <p className="text-xs"><strong>Fields:</strong> quantity, price, value, side, ledger_balance, total_deposits, total_withdrawals, net_deposit, brokerage_commission, interest_rate</p>
-                    <p className="text-xs"><strong>Computed:</strong> buy_value, sell_value, net_buy, adjusted_balance</p>
+                    <p className="text-xs"><strong>Computed:</strong> buy_value, sell_value, net_buy, adjusted_balance, dynamic_ledger</p>
                     <p className="text-xs"><strong>Functions:</strong> IF(cond, true, false), ABS(), ROUND(), MIN(), MAX()</p>
-                    <p className="text-xs"><strong>Example:</strong> IF(ledger_balance &gt; 0, adjusted_balance - IF(net_buy &gt; 0, net_buy, 0), 0)</p>
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
@@ -512,15 +376,6 @@ export function TradeHistoryTable() {
                       onChange={(e) => setNewColumnFormula(e.target.value)}
                       rows={3}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Available fields: quantity, price, value, side, ledger_balance, total_deposits, total_withdrawals, net_deposit, brokerage_commission, interest_rate, account_type, investor_type<br />
-                      Computed: buy_value, sell_value, net_buy, net_sell, adjusted_balance, <strong>dynamic_ledger</strong> (ledger + deposits - withdrawals + net_sell)<br />
-                      Examples: <br />
-                      • Dynamic Balance: <code>dynamic_ledger</code><br />
-                      • Commission: <code>value * brokerage_commission / 100</code><br />
-                      • Conditional: <code>IF(dynamic_ledger &gt; 0, dynamic_ledger - IF(net_buy &gt; 0, net_buy, 0), 0)</code><br />
-                      • Functions: ABS(), ROUND(), MIN(), MAX(), SQRT(), IF()
-                    </p>
                   </div>
 
                   {/* Formula Preview */}
@@ -620,7 +475,7 @@ export function TradeHistoryTable() {
             />
           </div>
 
-          <Select value={sideFilter} onValueChange={(v) => { setSideFilter(v); setCurrentPage(1); }}>
+          <Select value={sideFilter} onValueChange={setSideFilter}>
             <SelectTrigger>
               <SelectValue placeholder="Side" />
             </SelectTrigger>
@@ -631,7 +486,7 @@ export function TradeHistoryTable() {
             </SelectContent>
           </Select>
 
-          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger>
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -644,7 +499,7 @@ export function TradeHistoryTable() {
             </SelectContent>
           </Select>
 
-          <Select value={selectedFile} onValueChange={(v) => { setSelectedFile(v); setCurrentPage(1); }}>
+          <Select value={selectedFile} onValueChange={setSelectedFile}>
             <SelectTrigger>
               <SelectValue placeholder="File" />
             </SelectTrigger>
@@ -658,175 +513,174 @@ export function TradeHistoryTable() {
             </SelectContent>
           </Select>
 
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className={cn("justify-start text-left font-normal", !dateFrom && "text-muted-foreground")}>
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {dateFrom ? format(dateFrom, "dd MMM yyyy") : "From date"}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={dateFrom} onSelect={(d) => { setDateFrom(d); setCurrentPage(1); }} className="pointer-events-auto" />
-            </PopoverContent>
-          </Popover>
-
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className={cn("justify-start text-left font-normal", !dateTo && "text-muted-foreground")}>
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {dateTo ? format(dateTo, "dd MMM yyyy") : "To date"}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={dateTo} onSelect={(d) => { setDateTo(d); setCurrentPage(1); }} className="pointer-events-auto" />
-            </PopoverContent>
-          </Popover>
-        </div>
-
-        {/* Additional Filters Row */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Checkbox 
-              id="hideZeroValues" 
-              checked={hideZeroValues} 
-              onCheckedChange={(checked) => { setHideZeroValues(checked === true); setCurrentPage(1); }}
-            />
-            <label htmlFor="hideZeroValues" className="text-sm cursor-pointer">
-              Hide zero-value trades (expired/cancelled)
-            </label>
+          <div className="flex gap-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start text-left font-normal">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {dateFrom ? format(dateFrom, "dd MMM") : "From"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={dateFrom}
+                  onSelect={setDateFrom}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-start text-left font-normal">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {dateTo ? format(dateTo, "dd MMM") : "To"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={dateTo}
+                  onSelect={setDateTo}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
 
+        {/* Filter controls row */}
         <div className="flex items-center justify-between">
-          <Button variant="ghost" size="sm" onClick={clearFilters}>
-            Clear Filters
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Showing {trades.length} of {filteredCount} filtered trades (Total: {totalCount.toLocaleString()})
-          </span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="hideZero"
+                checked={hideZeroValues}
+                onCheckedChange={(checked) => setHideZeroValues(checked === true)}
+              />
+              <label htmlFor="hideZero" className="text-sm">Hide zero-value trades</label>
+            </div>
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              Clear Filters
+            </Button>
+          </div>
+
+          <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(1); }}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <SelectItem key={size} value={String(size)}>
+                  {size} per page
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Table */}
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        ) : (
-          <div className="rounded-md border overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {BASE_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(column => (
-                    <TableHead 
-                      key={column.key} 
-                      className={cn(
-                        "cursor-pointer hover:bg-muted/50 select-none",
-                        (column.type === 'number' || column.type === 'currency') && 'text-right'
+        <div className="border rounded-md overflow-auto max-h-[60vh]">
+          <Table>
+            <TableHeader className="sticky top-0 bg-background z-10">
+              <TableRow>
+                {BASE_COLUMNS.filter(c => visibleColumns.includes(c.key)).map((column) => (
+                  <TableHead 
+                    key={column.key}
+                    className="cursor-pointer hover:bg-secondary/50 whitespace-nowrap"
+                    onClick={() => handleSort(column.key)}
+                  >
+                    <div className="flex items-center gap-1">
+                      {column.label}
+                      {sortColumn === column.key ? (
+                        sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="h-3 w-3 opacity-30" />
                       )}
-                      onClick={() => handleSort(column.key)}
-                    >
-                      <div className={cn("flex items-center gap-1", (column.type === 'number' || column.type === 'currency') && 'justify-end')}>
-                        {column.label}
-                        {sortColumn === column.key ? (
-                          sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
-                        ) : (
-                          <ArrowUpDown className="h-3 w-3 opacity-30" />
-                        )}
-                      </div>
-                    </TableHead>
-                  ))}
-                  {customColumns.map(col => (
-                    <TableHead key={col.id} className="text-right bg-primary/5">
-                      <div className="flex items-center gap-1 justify-end">
-                        <Calculator className="h-3 w-3" />
-                        {col.name}
-                      </div>
-                    </TableHead>
-                  ))}
+                    </div>
+                  </TableHead>
+                ))}
+                {customColumns.map((col) => (
+                  <TableHead key={col.id} className="whitespace-nowrap">
+                    <div className="flex items-center gap-1">
+                      {col.name}
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-4 w-4 opacity-50 hover:opacity-100"
+                        onClick={(e) => { e.stopPropagation(); removeCustomColumn(col.id); }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={visibleColumns.length + customColumns.length} className="text-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {trades.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={visibleColumns.length + customColumns.length} className="text-center py-8 text-muted-foreground">
-                      No trades found
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  trades.map((trade) => (
-                    <TableRow key={trade.id}>
-                      {BASE_COLUMNS.filter(c => visibleColumns.includes(c.key)).map(column => (
-                        <TableCell 
-                          key={column.key} 
-                          className={cn(
-                            "whitespace-nowrap",
-                            (column.type === 'number' || column.type === 'currency') && 'text-right',
-                            column.key === 'file_name' && 'max-w-[150px] truncate text-xs text-muted-foreground'
-                          )}
-                        >
-                          {renderCellValue(trade, column)}
+              ) : trades.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={visibleColumns.length + customColumns.length} className="text-center py-8 text-muted-foreground">
+                    No trades found
+                  </TableCell>
+                </TableRow>
+              ) : (
+                trades.map((trade) => (
+                  <TableRow key={trade.id}>
+                    {BASE_COLUMNS.filter(c => visibleColumns.includes(c.key)).map((column) => (
+                      <TableCell key={column.key} className="whitespace-nowrap">
+                        {renderCellValue(trade, column)}
+                      </TableCell>
+                    ))}
+                    {customColumns.map((col) => {
+                      const result = evaluateFormula(col.formula, trade);
+                      const isError = result === 'Error' || result === 'Invalid';
+                      return (
+                        <TableCell key={col.id} className={cn("whitespace-nowrap", isError && "text-destructive")}>
+                          {typeof result === 'number' ? formatCurrency(result) : result}
                         </TableCell>
-                      ))}
-                      {customColumns.map(col => {
-                        const result = evaluateFormula(col.formula, trade);
-                        return (
-                          <TableCell key={col.id} className="text-right bg-primary/5 font-mono text-sm">
-                            {typeof result === 'number' ? result.toLocaleString(undefined, { maximumFractionDigits: 2 }) : result}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                      );
+                    })}
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
 
         {/* Pagination */}
-        {!loading && filteredCount > 0 && (
-          <div className="flex items-center justify-between pt-4">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Rows per page:</span>
-              <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
-                <SelectTrigger className="w-[70px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PAGE_SIZE_OPTIONS.map((size) => (
-                    <SelectItem key={size} value={String(size)}>
-                      {size}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                Page {currentPage} of {totalPages || 1}
-              </span>
-              <div className="flex gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => goToPage(currentPage - 1)}
-                  disabled={currentPage <= 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => goToPage(currentPage + 1)}
-                  disabled={currentPage >= totalPages}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            Showing {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, totalCount)} of {totalCount.toLocaleString()}
           </div>
-        )}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage <= 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm">
+              Page {currentPage} of {totalPages || 1}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={currentPage >= totalPages}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

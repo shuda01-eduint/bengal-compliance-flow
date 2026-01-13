@@ -2,15 +2,14 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { EmployeeCard } from "@/components/employees/EmployeeCard";
 import { EmployeeFilters } from "@/components/employees/EmployeeFilters";
 import { EmployeeAgentCodes } from "@/components/employees/EmployeeAgentCodes";
-import { AgentTradeDetailsTable } from "@/components/trade-history/AgentTradeDetailsTable";
 import { UserManagementTab } from "@/components/organization/UserManagementTab";
 import { AgentCard } from "@/components/agents/AgentCard";
 import { AgentFilters } from "@/components/agents/AgentFilters";
 import { AgentImportDialog } from "@/components/agents/AgentImportDialog";
 import { AgentListItem } from "@/components/agents/AgentListItem";
 import { AgentCodesTable } from "@/components/trade-history/AgentCodesTable";
-import { useEmployees } from "@/hooks/useEmployees";
-import { useAgents } from "@/hooks/useAgents";
+import { useAllEmployees, useEmployeeFilterOptions } from "@/hooks/useEmployeesPaginated";
+import { useAllAgents, useUniqueRMs } from "@/hooks/useAgentsPaginated";
 import { departments } from "@/data/employees";
 import { useState, useMemo } from "react";
 import { Mail, Phone, User, Building2, Users, ChevronRight, UserCog, Loader2, Briefcase, Link } from "lucide-react";
@@ -28,8 +27,10 @@ const EmployeesPage = () => {
   const [selectedStatus, setSelectedStatus] = useState("all");
   const [agentViewMode, setAgentViewMode] = useState<"grid" | "list">("grid");
   
-  const { data: employees = [], isLoading } = useEmployees();
-  const { data: agents = [], isLoading: isLoadingAgents } = useAgents();
+  // Use new paginated hooks
+  const { data: employees = [], isLoading } = useAllEmployees();
+  const { data: agents = [], isLoading: isLoadingAgents } = useAllAgents();
+  const { data: rmOptions = [] } = useUniqueRMs();
 
   const filteredEmployees = useMemo(() => {
     return employees.filter((employee) => {
@@ -46,10 +47,9 @@ const EmployeesPage = () => {
     });
   }, [employees, searchQuery, selectedDepartment]);
 
-  const rmOptions = useMemo(() => {
-    const unique = [...new Set(agents.map(a => a.rm_name).filter((name): name is string => Boolean(name) && name.trim() !== ""))];
-    return unique.sort();
-  }, [agents]);
+  const rmOptionsList = useMemo(() => {
+    return rmOptions.map(rm => rm.rmName).filter((name): name is string => Boolean(name));
+  }, [rmOptions]);
 
   const filteredAgents = useMemo(() => {
     return agents.filter((agent) => {
@@ -266,7 +266,7 @@ const EmployeesPage = () => {
             onStatusChange={setSelectedStatus}
             viewMode={agentViewMode}
             onViewModeChange={setAgentViewMode}
-            rmOptions={rmOptions}
+            rmOptions={rmOptionsList}
           />
 
           {isLoadingAgents ? (
