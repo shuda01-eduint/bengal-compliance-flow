@@ -1583,26 +1583,31 @@ export type Database = {
           }
         | {
             Args: {
-              _from_trade_date?: string
-              _from_tx_date?: string
+              _from_trade_date: string
+              _from_tx_date: string
               _limit?: number
               _offset?: number
               _search?: string
-              _to_trade_date?: string
-              _to_tx_date?: string
+              _to_trade_date: string
+              _to_tx_date: string
             }
             Returns: {
               account_type: string
+              balance_change: number
+              brokerage: number
+              buy_turnover: number
               closing_balance: number
               department: string
-              deposits: number
-              gross_buy: number
-              gross_sell: number
               investor_code: string
               investor_name: string
+              net_deposits: number
+              net_turnover: number
               opening_balance: number
-              rm_name: string
-              withdrawals: number
+              rm: string
+              sell_turnover: number
+              total_deposits: number
+              total_withdrawals: number
+              trade_count: number
             }[]
           }
       get_accounting_summary: {
