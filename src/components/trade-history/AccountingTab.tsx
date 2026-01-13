@@ -306,20 +306,21 @@ const AccountingTab = () => {
       const processedRow: AccountingRow = {
         investor_code: row.investor_code || '',
         investor_name: row.investor_name || '',
-        account_type: row.department || '', // department from trade_history
+        account_type: row.department || '', // department from backend
         interest_rate: 0,
         brokerage_commission: 0,
-        ledger_balance: Number(row.opening_balance) || 0, // clients.ledger_balance as opening
-        total_deposits: Number(row.total_deposits) || 0,
-        total_withdrawals: Number(row.total_withdrawals) || 0,
+        // Backend returns: opening_balance, deposits, withdrawals, gross_buy, gross_sell, closing_balance
+        ledger_balance: Number(row.opening_balance ?? row.ledger_balance) || 0,
+        total_deposits: Number(row.deposits ?? row.total_deposits) || 0,
+        total_withdrawals: Number(row.withdrawals ?? row.total_withdrawals) || 0,
         gross_buy: Number(row.gross_buy) || 0,
         gross_sell: Number(row.gross_sell) || 0,
-        net_buy: Number(row.gross_buy) || 0, // same as gross for simplified
-        net_sell: Number(row.gross_sell) || 0, // same as gross for simplified
+        net_buy: Number(row.gross_buy) || 0,
+        net_sell: Number(row.gross_sell) || 0,
         adjusted_ledger: 0,
         accrued_interest: 0,
         brokerage_amount: 0,
-        final_balance: Number(row.closing_balance) || 0,
+        final_balance: Number(row.closing_balance ?? row.final_balance) || 0,
         receivable: 0,
         payable: 0,
       };
