@@ -253,11 +253,11 @@ class InvestorServiceClass extends BaseService<Investor> {
 
     if (error) throw error;
 
-    const result = data?.[0] || {};
+    const result = (data as any)?.[0] || {};
     return {
-      accountTypes: result.account_types || [],
-      investorTypes: result.investor_types || [],
-      statuses: result.statuses || [],
+      accountTypes: (result.account_types as string[]) || [],
+      investorTypes: (result.investor_types as string[]) || [],
+      statuses: (result.statuses as string[]) || [],
     };
   }
 

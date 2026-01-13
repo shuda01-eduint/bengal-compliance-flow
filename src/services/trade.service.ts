@@ -169,23 +169,45 @@ class DepositWithdrawalServiceClass extends BaseService<DepositWithdrawal> {
     pagination?: PaginationParams;
     sort?: SortParams;
   }): Promise<PaginatedResponse<DepositWithdrawal>> {
-    const filters: any = {};
+    const page = params?.pagination?.page ?? 1;
+    const pageSize = params?.pagination?.pageSize ?? 50;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let query = supabase
+      .from("deposits_withdrawals")
+      .select("*", { count: "exact" })
+      .range(from, to);
 
     if (params?.filters?.type) {
-      filters.transaction_type = params.filters.type;
+      query = query.eq("transaction_type", params.filters.type);
     }
     if (params?.filters?.date) {
-      filters.transaction_date = params.filters.date;
+      query = query.eq("transaction_date", params.filters.date);
     }
     if (params?.filters?.rmEmail) {
-      filters.rm_email = params.filters.rmEmail;
+      query = query.eq("rm_email", params.filters.rmEmail);
     }
 
-    return this.fetchPaginated({
-      filters,
-      pagination: params?.pagination,
-      sort: params?.sort || this.defaultSort,
-    });
+    const sort = params?.sort || this.defaultSort;
+    if (sort) {
+      query = query.order(sort.column, { ascending: sort.ascending ?? true });
+    }
+
+    const { data, error, count } = await query;
+
+    if (error) throw error;
+
+    const totalCount = count || 0;
+    const hasMore = from + (data?.length || 0) < totalCount;
+
+    return {
+      data: (data as DepositWithdrawal[]) || [],
+      totalCount,
+      hasMore,
+      page,
+      pageSize,
+    };
   }
 
   /**
@@ -248,10 +270,10 @@ class DepositWithdrawalServiceClass extends BaseService<DepositWithdrawal> {
   /**
    * Bulk insert deposits/withdrawals
    */
-  async bulkInsert(
+  async bulkInsertDeposits(
     records: DepositWithdrawalInsert[],
     options?: { onProgress?: ProgressCallback }
-  ): Promise<{ success: number; failed: number; errors: string[] }> {
+  ): Promise<{ success: number; failed: number; errors: string[]; total: number }> {
     return super.bulkInsert(records as any[], {
       batchSize: 500,
       onProgress: options?.onProgress,
