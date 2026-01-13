@@ -1556,63 +1556,28 @@ export type Database = {
         Args: { p_source_date: string; p_target_date: string }
         Returns: Json
       }
-      get_accounting_data:
-        | {
-            Args: {
-              _account_type_filter?: string
-              _from_trade_date?: string
-              _from_tx_date?: string
-              _has_trades_filter?: string
-              _limit_val?: number
-              _offset_val?: number
-              _search?: string
-              _sort_column?: string
-              _sort_direction?: string
-              _to_trade_date?: string
-              _to_tx_date?: string
-            }
-            Returns: {
-              account_type: string
-              brokerage_amount: number
-              brokerage_commission: number
-              department: string
-              final_balance: number
-              gross_buy: number
-              gross_sell: number
-              investor_code: string
-              investor_name: string
-              net_buy: number
-              net_sell: number
-              opening_balance: number
-              total_count: number
-              total_deposits: number
-              total_withdrawals: number
-            }[]
-          }
-        | {
-            Args: {
-              _from_trade_date?: string
-              _from_tx_date?: string
-              _search?: string
-              _sort_column?: string
-              _sort_direction?: string
-              _to_trade_date?: string
-              _to_tx_date?: string
-            }
-            Returns: {
-              closing_balance: number
-              department: string
-              gross_buy: number
-              gross_sell: number
-              investor_code: string
-              investor_name: string
-              opening_balance: number
-              rm_name: string
-              total_count: number
-              total_deposits: number
-              total_withdrawals: number
-            }[]
-          }
+      get_accounting_data: {
+        Args: {
+          _from_trade_date?: string
+          _from_tx_date?: string
+          _search?: string
+          _sort_column?: string
+          _sort_direction?: string
+          _to_trade_date?: string
+          _to_tx_date?: string
+        }
+        Returns: {
+          closing_balance: number
+          department: string
+          deposits: number
+          gross_buy: number
+          gross_sell: number
+          investor_code: string
+          investor_name: string
+          opening_balance: number
+          withdrawals: number
+        }[]
+      }
       get_accounting_summary: {
         Args: {
           _account_type_filter?: string
