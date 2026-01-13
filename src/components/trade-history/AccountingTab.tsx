@@ -237,7 +237,7 @@ const AccountingTab = () => {
   const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
   // Fetch accounting data using RPC function (server-side search + sorting, no pagination)
-  const { data: accountingResult, isLoading: loadingData } = useQuery({
+  const { data: accountingResult, isLoading: loadingData, isError, error: queryError } = useQuery({
     queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, sortColumn, sortDirection],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_data', {
@@ -250,6 +250,7 @@ const AccountingTab = () => {
         _sort_direction: sortDirection,
       });
       if (error) throw error;
+      console.log('[AccountingTab] Fetched data:', data?.length, 'rows');
       return data || [];
     },
   });
@@ -300,7 +301,12 @@ const AccountingTab = () => {
 
   // Process accounting data with custom fields (filtering now done server-side)
   const accountingData = useMemo(() => {
-    if (!accountingResult) return [];
+    if (!accountingResult) {
+      console.log('[AccountingTab] No accountingResult yet');
+      return [];
+    }
+    
+    console.log('[AccountingTab] Processing', accountingResult.length, 'rows');
     
     return accountingResult.map((row: any) => {
       const processedRow: AccountingRow = {
@@ -1426,6 +1432,20 @@ const AccountingTab = () => {
                     </div>
                   ))}
                 </div>
+                <div className="pt-4 border-t">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full"
+                    onClick={() => {
+                      setColumns(DEFAULT_COLUMNS);
+                      localStorage.removeItem(COLUMNS_STORAGE_KEY);
+                      toast.success('Columns reset to defaults');
+                    }}
+                  >
+                    Reset to Defaults
+                  </Button>
+                </div>
               </DialogContent>
             </Dialog>
 
@@ -1437,6 +1457,37 @@ const AccountingTab = () => {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Error Banner */}
+      {isError && (
+        <div className="bg-destructive/10 border border-destructive/50 rounded-lg p-4 mb-4">
+          <p className="text-destructive font-medium">Failed to load accounting data</p>
+          <p className="text-destructive/70 text-sm mt-1">{(queryError as Error)?.message || 'Unknown error'}</p>
+        </div>
+      )}
+
+      {/* Debug Info */}
+      <div className="text-xs text-muted-foreground mb-2 flex flex-wrap gap-2 items-center">
+        <span>Fetched: <strong>{accountingResult?.length ?? 0}</strong> rows</span>
+        <span>|</span>
+        <span>Range: {format(fromDate, 'MMM dd')} → {format(toDate, 'MMM dd, yyyy')}</span>
+        <span>|</span>
+        <span>Visible columns: <strong>{visibleColumns.length}</strong></span>
+        {visibleColumns.length === 0 && (
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-6 text-xs ml-2"
+            onClick={() => {
+              setColumns(DEFAULT_COLUMNS);
+              localStorage.removeItem(COLUMNS_STORAGE_KEY);
+              toast.success('Columns reset to defaults');
+            }}
+          >
+            Reset Columns
+          </Button>
+        )}
       </div>
 
       {/* Data Table */}
@@ -1581,10 +1632,17 @@ const AccountingTab = () => {
                         <TableCell></TableCell>
                       </TableRow>
                     ))}
-                    {sortedData.length === 0 && (
+                    {sortedData.length === 0 && !isError && (
                       <TableRow>
-                        <TableCell colSpan={visibleColumns.length + customFields.length + 1} className="text-center py-8 text-muted-foreground">
-                          {debouncedSearch ? 'No investors found matching your search' : 'No accounting data available'}
+                        <TableCell colSpan={visibleColumns.length + customFields.length + 1} className="text-center py-8">
+                          <p className="text-muted-foreground">
+                            {debouncedSearch 
+                              ? `No investors found matching "${debouncedSearch}"` 
+                              : `No trades or transactions found for ${format(fromDate, 'MMM dd')} - ${format(toDate, 'MMM dd, yyyy')}`}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Try adjusting the date range or clearing your search
+                          </p>
                         </TableCell>
                       </TableRow>
                     )}
