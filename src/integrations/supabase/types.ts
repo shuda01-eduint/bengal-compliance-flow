@@ -1565,6 +1565,7 @@ export type Database = {
           _to_tx_date?: string
         }
         Returns: {
+          account_type: string
           closing_balance: number
           department: string
           deposits: number
@@ -1573,6 +1574,7 @@ export type Database = {
           investor_code: string
           investor_name: string
           opening_balance: number
+          rm_name: string
           withdrawals: number
         }[]
       }
