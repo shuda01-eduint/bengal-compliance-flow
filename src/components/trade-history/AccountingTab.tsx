@@ -27,6 +27,8 @@ export interface AccountingRow {
   investor_code: string;
   investor_name: string;
   account_type: string;
+  rm_name: string;
+  department: string;
   interest_rate: number;
   brokerage_commission: number;
   ledger_balance: number;
@@ -65,7 +67,9 @@ const COLUMNS_STORAGE_KEY = 'accounting-columns-config-v3';
 const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'investor_code', label: 'Code', visible: true, align: 'left' },
   { id: 'investor_name', label: 'Name', visible: true, align: 'left' },
-  { id: 'account_type', label: 'Department', visible: true, align: 'left' },
+  { id: 'account_type', label: 'Account Type', visible: true, align: 'left' },
+  { id: 'rm_name', label: 'RM', visible: true, align: 'left' },
+  { id: 'department', label: 'Department', visible: true, align: 'left' },
   { id: 'ledger_balance', label: 'Opening Bal', visible: true, align: 'right' },
   { id: 'total_deposits', label: 'Deposits', visible: true, align: 'right', colorClass: 'text-green-400' },
   { id: 'total_withdrawals', label: 'Withdrawals', visible: true, align: 'right', colorClass: 'text-amber-400' },
@@ -375,7 +379,9 @@ const AccountingTab = () => {
       const processedRow: AccountingRow = {
         investor_code: row.investor_code || '',
         investor_name: row.investor_name || '',
-        account_type: row.department || '', // department from backend
+        account_type: row.account_type || '',
+        rm_name: row.rm_name || '',
+        department: row.department || '',
         interest_rate: 0,
         brokerage_commission: 0,
         // Backend returns: opening_balance, deposits, withdrawals, gross_buy, gross_sell, closing_balance
