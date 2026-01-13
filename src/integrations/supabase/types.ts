@@ -1852,39 +1852,16 @@ export type Database = {
           loan_change: number
         }[]
       }
-      get_negative_balance_codes:
-        | {
-            Args: {
-              _from_date?: string
-              _limit?: number
-              _offset?: number
-              _search?: string
-              _to_date?: string
-            }
-            Returns: {
-              amount: number
-              client_code: string
-              client_name: string
-              event_date: string
-              event_day: number
-              instrument: string
-              last_day: number
-              rm_name: string
-            }[]
-          }
-        | {
-            Args: { from_dt?: string; search_term?: string; to_dt?: string }
-            Returns: {
-              amount: number
-              client_code: string
-              client_name: string
-              closing_balance: number
-              department: string
-              event_date: string
-              opening_balance: number
-              rm_name: string
-            }[]
-          }
+      get_negative_balance_codes: {
+        Args: { p_from_date?: string; p_search?: string; p_to_date?: string }
+        Returns: {
+          client_code: string
+          client_name: string
+          closing_balance: number
+          event_date: string
+          rm_name: string
+        }[]
+      }
       get_trade_file_stats: {
         Args: never
         Returns: {

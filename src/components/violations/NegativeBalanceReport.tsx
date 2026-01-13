@@ -24,11 +24,8 @@ interface NegativeBalanceRecord {
   event_date: string;
   client_code: string;
   client_name: string;
-  instrument: string;
-  amount: number;
-  last_day: number;
-  event_day: number;
   rm_name: string;
+  closing_balance: number;
 }
 
 export function NegativeBalanceReport() {
@@ -43,11 +40,9 @@ export function NegativeBalanceReport() {
     queryKey: ["negative-balance-codes", fromDate, toDate, debouncedSearch],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_negative_balance_codes", {
-        _from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
-        _to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
-        _search: debouncedSearch,
-        _limit: 1000,
-        _offset: 0,
+        p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
+        p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
+        p_search: debouncedSearch || "",
       });
 
       if (error) throw error;
@@ -59,7 +54,7 @@ export function NegativeBalanceReport() {
 
   // Calculate summary stats
   const totalNegativeAccounts = new Set(records.map((r) => r.client_code)).size;
-  const totalAmount = records.reduce((sum, r) => sum + (r.amount || 0), 0);
+  const totalAmount = records.reduce((sum, r) => sum + (r.closing_balance || 0), 0);
   const avgBalance = totalNegativeAccounts > 0 ? totalAmount / totalNegativeAccounts : 0;
 
   const formatCurrency = (value: number) => {
@@ -85,10 +80,7 @@ export function NegativeBalanceReport() {
       "Event Date": formatEventDate(r.event_date),
       "Client Code": r.client_code,
       "Client Name": r.client_name,
-      Instrument: r.instrument,
-      Amount: r.amount,
-      "Last Day": r.last_day,
-      "Event Day": r.event_day,
+      "Closing Balance": r.closing_balance,
       "RM Name": r.rm_name,
     }));
 
@@ -231,10 +223,7 @@ export function NegativeBalanceReport() {
                     <TableHead>Event Date</TableHead>
                     <TableHead>Client Code</TableHead>
                     <TableHead>Client Name</TableHead>
-                    <TableHead>Instrument</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="text-center">Last Day</TableHead>
-                    <TableHead className="text-center">Event Day</TableHead>
+                    <TableHead className="text-right">Closing Balance</TableHead>
                     <TableHead>RM Name</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -244,17 +233,11 @@ export function NegativeBalanceReport() {
                       <TableCell>{formatEventDate(record.event_date)}</TableCell>
                       <TableCell className="font-medium">{record.client_code}</TableCell>
                       <TableCell>{record.client_name}</TableCell>
-                      <TableCell>{record.instrument}</TableCell>
                       <TableCell 
-                        className={cn(
-                          "text-right font-medium",
-                          record.amount < 0 && "bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200"
-                        )}
+                        className="text-right font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200"
                       >
-                        {formatCurrency(record.amount)}
+                        {formatCurrency(record.closing_balance)}
                       </TableCell>
-                      <TableCell className="text-center">{record.last_day}</TableCell>
-                      <TableCell className="text-center">{record.event_day}</TableCell>
                       <TableCell>{record.rm_name}</TableCell>
                     </TableRow>
                   ))}

@@ -15,7 +15,8 @@ import {
   Contact,
   Calculator,
   PieChart,
-  UserCog
+  UserCog,
+  AlertTriangle
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ const navigation: NavItem[] = [
   { name: "Securities", href: "/securities", icon: Landmark, adminOnly: true },
   { name: "Accounting", href: "/accounting", icon: Calculator },
   { name: "Investors", href: "/investors", icon: Contact, adminOnly: true },
+  { name: "Violations", href: "/violations", icon: AlertTriangle, adminOnly: true },
   { name: "Compliance Reports", href: "/reports", icon: FileText, adminOnly: true },
   { name: "Post-Report Activity", href: "/activity", icon: Activity, adminOnly: true },
   { name: "Organization", href: "/employees", icon: Users },
