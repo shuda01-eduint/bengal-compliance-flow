@@ -585,21 +585,25 @@ const AccountingTab = () => {
     setDraggedColumn(null);
   };
 
-  // Data is already sorted server-side, only apply client-side sort for custom fields
+  // Client-side sorting for all columns
   const sortedData = useMemo(() => {
-    // If sorting by a custom field, do client-side sorting
-    const isCustomField = customFields.some(f => f.id === sortColumn);
-    if (!isCustomField) return accountingData;
-    
     return [...accountingData].sort((a, b) => {
       const aVal = a[sortColumn];
       const bVal = b[sortColumn];
       
+      // Handle string columns (investor_code, investor_name, account_type)
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        return sortDirection === 'asc' 
+          ? aVal.localeCompare(bVal) 
+          : bVal.localeCompare(aVal);
+      }
+      
+      // Handle numeric columns (including final_balance / Closing Balance)
       const aNum = Number(aVal) || 0;
       const bNum = Number(bVal) || 0;
       return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
     });
-  }, [accountingData, sortColumn, sortDirection, customFields]);
+  }, [accountingData, sortColumn, sortDirection]);
 
   const getCellValue = (row: AccountingRow, columnId: string) => {
     const value = row[columnId];
