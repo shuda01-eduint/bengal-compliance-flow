@@ -291,20 +291,34 @@ const AccountingTab = () => {
   const fromTradeDateStr = format(fromDate, 'yyyyMMdd');
   const toTradeDateStr = format(toDate, 'yyyyMMdd');
 
-  // Fetch accounting data using RPC function (server-side search + sorting, no pagination)
+  // Fetch all accounting data using RPC function with pagination to bypass 1000 row limit
   const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
     queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_accounting_data', {
-        _search: debouncedSearch || null,
-        _from_trade_date: fromTradeDateStr,
-        _to_trade_date: toTradeDateStr,
-        _from_tx_date: fromDateStr,
-        _to_tx_date: toDateStr,
-      });
-      if (error) throw error;
-      console.log('[AccountingTab] Fetched data:', data?.length, 'rows');
-      return data || [];
+      const PAGE_SIZE = 1000;
+      let allData: any[] = [];
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data, error } = await supabase.rpc('get_accounting_data', {
+          _search: debouncedSearch || null,
+          _from_trade_date: fromTradeDateStr,
+          _to_trade_date: toTradeDateStr,
+          _from_tx_date: fromDateStr,
+          _to_tx_date: toDateStr,
+          _limit: PAGE_SIZE,
+          _offset: offset,
+        });
+        
+        if (error) throw error;
+        if (data) allData = [...allData, ...data];
+        hasMore = data?.length === PAGE_SIZE;
+        offset += PAGE_SIZE;
+      }
+
+      console.log('[AccountingTab] Fetched total:', allData.length, 'rows');
+      return allData;
     },
     retry: (failureCount, error: Error) => {
       // Don't retry on timeout errors - suggest narrowing date range instead
