@@ -1561,8 +1561,6 @@ export type Database = {
           _from_trade_date?: string
           _from_tx_date?: string
           _search?: string
-          _sort_column?: string
-          _sort_direction?: string
           _to_trade_date?: string
           _to_tx_date?: string
         }

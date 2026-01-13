@@ -238,7 +238,7 @@ const AccountingTab = () => {
 
   // Fetch accounting data using RPC function (server-side search + sorting, no pagination)
   const { data: accountingResult, isLoading: loadingData, isError, error: queryError } = useQuery({
-    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, sortColumn, sortDirection],
+    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_data', {
         _search: debouncedSearch || null,
@@ -246,8 +246,6 @@ const AccountingTab = () => {
         _to_trade_date: toTradeDateStr,
         _from_tx_date: fromDateStr,
         _to_tx_date: toDateStr,
-        _sort_column: sortColumn,
-        _sort_direction: sortDirection,
       });
       if (error) throw error;
       console.log('[AccountingTab] Fetched data:', data?.length, 'rows');
