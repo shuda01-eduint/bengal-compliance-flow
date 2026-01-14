@@ -159,6 +159,8 @@ const AccountingTab = () => {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const [dateRangeWarning, setDateRangeWarning] = useState<string | null>(null);
+  const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
+  const [activityFilter, setActivityFilter] = useState<string>("all");
 
   // Calculate date range in days for guardrails
   const dateRangeDays = useMemo(() => differenceInDays(toDate, fromDate) + 1, [fromDate, toDate]);
@@ -294,7 +296,7 @@ const AccountingTab = () => {
 
   // Fetch all accounting data using RPC function with pagination and retry logic
   const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
-    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr],
+    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, accountTypeFilter, activityFilter],
     queryFn: async () => {
       const PAGE_SIZE = 1000;
       let allData: any[] = [];
@@ -310,6 +312,8 @@ const AccountingTab = () => {
           _to_tx_date: toDateStr,
           _limit: PAGE_SIZE,
           _offset: offset,
+          _account_type_filter: accountTypeFilter,
+          _has_activity_filter: activityFilter,
         });
         
         if (error) throw error;
@@ -1373,6 +1377,30 @@ const AccountingTab = () => {
 
         {/* Actions Row */}
         <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-2 lg:gap-3">
+          {/* Account Type Filter */}
+          <Select value={accountTypeFilter} onValueChange={setAccountTypeFilter}>
+            <SelectTrigger className="w-[130px] h-8 bg-muted/30 border-border/50">
+              <SelectValue placeholder="Account Type" />
+            </SelectTrigger>
+            <SelectContent className="bg-popover border z-50">
+              <SelectItem value="all">All Accounts</SelectItem>
+              <SelectItem value="cash">Cash</SelectItem>
+              <SelectItem value="margin">Margin</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Activity Filter */}
+          <Select value={activityFilter} onValueChange={setActivityFilter}>
+            <SelectTrigger className="w-[140px] h-8 bg-muted/30 border-border/50">
+              <SelectValue placeholder="Activity" />
+            </SelectTrigger>
+            <SelectContent className="bg-popover border z-50">
+              <SelectItem value="all">All Activity</SelectItem>
+              <SelectItem value="with_activity">With Activity</SelectItem>
+              <SelectItem value="no_activity">No Activity</SelectItem>
+            </SelectContent>
+          </Select>
+
           {/* Date Range Selection */}
           <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
             <Popover>

@@ -1558,8 +1558,10 @@ export type Database = {
       }
       get_accounting_data: {
         Args: {
+          _account_type_filter?: string
           _from_trade_date?: string
           _from_tx_date?: string
+          _has_activity_filter?: string
           _limit?: number
           _offset?: number
           _search?: string
