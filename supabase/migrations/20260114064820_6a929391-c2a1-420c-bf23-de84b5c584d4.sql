@@ -1,4 +1,7 @@
 
+-- Drop old function overloads to fix ambiguity error
+DROP FUNCTION IF EXISTS public.get_accounting_data(text, text, text, text, text, integer, integer) CASCADE;
+
 CREATE OR REPLACE FUNCTION public.get_accounting_data(
     _search TEXT DEFAULT NULL,
     _from_trade_date TEXT DEFAULT NULL,
