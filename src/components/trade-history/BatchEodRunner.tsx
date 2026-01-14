@@ -41,7 +41,7 @@ interface StaleWarning {
 interface BatchEodResult {
   success: boolean;
   days_processed?: number;
-  clients_processed?: number;
+  total_snapshots?: number;
   start_date?: string;
   end_date?: string;
   error?: string;
@@ -293,7 +293,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
     }
   };
 
-  const CHUNK_SIZE = 5; // Process 5 days at a time to prevent timeout
+  const CHUNK_SIZE = 1; // Process 1 day at a time to prevent timeout
 
   const runBatchEod = async () => {
     if (!startDate || !endDate) {
@@ -358,7 +358,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
 
         // Update progress
         totalDaysProcessed += result.days_processed || chunkDays;
-        totalClientsProcessed += result.clients_processed || 0;
+        totalClientsProcessed += result.total_snapshots || 0;
         setProcessedDays(totalDaysProcessed);
         setProgress(((i + 1) / chunks.length) * 100);
 
