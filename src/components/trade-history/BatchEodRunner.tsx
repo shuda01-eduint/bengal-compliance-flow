@@ -371,7 +371,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
       if (!hasError) {
         setProgress(100);
         toast.success(`Batch EOD complete: ${totalDaysProcessed} days processed`, {
-          description: `${totalClientsProcessed.toLocaleString()} client-days from ${format(startDate, "dd MMM")} to ${format(endDate, "dd MMM yyyy")}`,
+          description: `${totalClientsProcessed.toLocaleString()} client-days from ${format(startDate, "yyyy-MM-dd")} to ${format(endDate, "yyyy-MM-dd")}`,
         });
 
         // Invalidate EOD history cache so the table refreshes immediately
@@ -525,6 +525,18 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
               </Popover>
             </div>
           </div>
+
+          {/* Date Confirmation */}
+          {startDate && endDate && !running && (
+            <div className="p-3 bg-primary/5 border border-primary/20 rounded-md">
+              <p className="text-sm font-medium text-center">
+                You are about to run EOD for:<br />
+                <span className="text-primary font-mono">
+                  {format(startDate, "yyyy-MM-dd")} → {format(endDate, "yyyy-MM-dd")}
+                </span>
+              </p>
+            </div>
+          )}
 
           {/* Progress */}
           {running && (
