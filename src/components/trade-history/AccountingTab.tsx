@@ -310,10 +310,10 @@ const AccountingTab = () => {
           _to_trade_date: toTradeDateStr,
           _from_tx_date: fromDateStr,
           _to_tx_date: toDateStr,
-          _limit: PAGE_SIZE,
-          _offset: offset,
           _account_type_filter: accountTypeFilter,
           _has_activity_filter: activityFilter,
+          _limit: PAGE_SIZE,
+          _offset: offset,
         });
         
         if (error) throw error;
