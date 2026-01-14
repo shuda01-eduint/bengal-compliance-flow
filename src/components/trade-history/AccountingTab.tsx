@@ -304,14 +304,14 @@ const AccountingTab = () => {
       let hasMore = true;
 
       while (hasMore) {
-        const { data, error } = await rpcWithRetry<any[]>('get_accounting_data', {
-          _search: debouncedSearch || null,
+        const { data, error } = await rpcWithRetry<any[]>('get_accounting_data_v2', {
+          _search: debouncedSearch || '',
           _from_trade_date: fromTradeDateStr,
           _to_trade_date: toTradeDateStr,
           _from_tx_date: fromDateStr,
           _to_tx_date: toDateStr,
-          _account_type_filter: accountTypeFilter,
-          _has_activity_filter: activityFilter,
+          _account_type_filter: accountTypeFilter || 'all',
+          _has_activity_filter: activityFilter || 'all',
           _limit: PAGE_SIZE,
           _offset: offset,
         });
