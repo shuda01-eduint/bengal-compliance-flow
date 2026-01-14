@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -17,11 +18,27 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { CalendarIcon, Loader2, Play, AlertTriangle, ShieldCheck, RefreshCw, Trash2 } from "lucide-react";
-import { format, addDays, differenceInDays, parse, min } from "date-fns";
+import { CalendarIcon, Loader2, Play, AlertTriangle, ShieldCheck, RefreshCw, Trash2, Search, Download, Eye, ArrowUpDown } from "lucide-react";
+import { format, addDays, parse } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchAllRows } from "@/lib/supabase-utils";
 
@@ -29,13 +46,24 @@ interface BatchEodRunnerProps {
   onComplete?: () => void;
 }
 
+interface MismatchDetail {
+  investorCode: string;
+  storedBalance: number;
+  expectedBalance: number;
+  difference: number;
+  baseBalance: number;
+  totalBuys: number;
+  totalSells: number;
+  deposits: number;
+  withdrawals: number;
+}
+
 interface StaleWarning {
   date: string;
   mismatchCount: number;
-  sampleClient: string;
-  storedValue: number;
-  expectedValue: number;
+  mismatches: MismatchDetail[];
   suggestedStartDate: Date | null;
+  totalDifference: number;
 }
 
 interface BatchEodResult {
@@ -46,6 +74,9 @@ interface BatchEodResult {
   end_date?: string;
   error?: string;
 }
+
+type SortField = 'investorCode' | 'storedBalance' | 'expectedBalance' | 'difference';
+type SortDirection = 'asc' | 'desc';
 
 export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const { user } = useAuth();
@@ -60,6 +91,81 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const [verifying, setVerifying] = useState(false);
   const [staleWarning, setStaleWarning] = useState<StaleWarning | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [showMismatchDetails, setShowMismatchDetails] = useState(false);
+  const [mismatchSearch, setMismatchSearch] = useState("");
+  const [sortField, setSortField] = useState<SortField>('difference');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Filter and sort mismatches
+  const filteredMismatches = useMemo(() => {
+    if (!staleWarning?.mismatches) return [];
+    
+    let filtered = staleWarning.mismatches;
+    
+    // Apply search filter
+    if (mismatchSearch) {
+      const search = mismatchSearch.toUpperCase();
+      filtered = filtered.filter(m => m.investorCode.toUpperCase().includes(search));
+    }
+    
+    // Apply sorting
+    filtered = [...filtered].sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case 'investorCode':
+          comparison = a.investorCode.localeCompare(b.investorCode);
+          break;
+        case 'storedBalance':
+          comparison = a.storedBalance - b.storedBalance;
+          break;
+        case 'expectedBalance':
+          comparison = a.expectedBalance - b.expectedBalance;
+          break;
+        case 'difference':
+          comparison = Math.abs(a.difference) - Math.abs(b.difference);
+          break;
+      }
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+    
+    return filtered;
+  }, [staleWarning?.mismatches, mismatchSearch, sortField, sortDirection]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const exportMismatchesToCsv = () => {
+    if (!staleWarning?.mismatches) return;
+    
+    const headers = ['Investor Code', 'Stored Balance', 'Expected Balance', 'Difference', 'Base Balance', 'Total Buys', 'Total Sells', 'Deposits', 'Withdrawals'];
+    const rows = staleWarning.mismatches.map(m => [
+      m.investorCode,
+      m.storedBalance.toFixed(2),
+      m.expectedBalance.toFixed(2),
+      m.difference.toFixed(2),
+      m.baseBalance.toFixed(2),
+      m.totalBuys.toFixed(2),
+      m.totalSells.toFixed(2),
+      m.deposits.toFixed(2),
+      m.withdrawals.toFixed(2),
+    ]);
+    
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `eod-mismatches-${staleWarning.date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('CSV exported successfully');
+  };
 
   // Verify previous day EOD when date changes
   const verifyPreviousDayEod = useCallback(async (dateToProcess: Date) => {
@@ -149,9 +255,6 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         .select("investor_code, amount, transaction_type")
         .eq("transaction_date", prevDay);
 
-      // Calculate expected EOD for each client
-      const expectedBalances = new Map<string, number>();
-
       // Process transactions
       const txMap = new Map<string, { deposits: number; withdrawals: number }>();
       prevDayTx?.forEach((tx) => {
@@ -185,30 +288,31 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         tradeMap.set(clientCode, current);
       });
 
-      // Calculate expected balance for each client
-      baseBalances.forEach((baseBalance, invCode) => {
-        const tx = txMap.get(invCode) || { deposits: 0, withdrawals: 0 };
-        const trades = tradeMap.get(invCode) || { grossBuys: 0, netSells: 0 };
-        const expectedBalance = baseBalance + tx.deposits - tx.withdrawals + trades.netSells - trades.grossBuys;
-        expectedBalances.set(invCode, expectedBalance);
-      });
-
-      // Compare stored vs expected
-      const mismatches: { code: string; stored: number; expected: number }[] = [];
+      // Compare stored vs expected and collect detailed mismatches
+      const mismatches: MismatchDetail[] = [];
       const TOLERANCE = 0.01; // Allow 1 paisa difference
 
       storedEod.forEach((row) => {
         const code = row.investor_code.toUpperCase();
-        const expected = expectedBalances.get(code);
-        if (expected !== undefined) {
-          const diff = Math.abs(row.ledger_balance - expected);
-          if (diff > TOLERANCE) {
-            mismatches.push({
-              code: row.investor_code,
-              stored: row.ledger_balance,
-              expected: expected,
-            });
-          }
+        const baseBalance = baseBalances.get(code) || 0;
+        const tx = txMap.get(code) || { deposits: 0, withdrawals: 0 };
+        const trades = tradeMap.get(code) || { grossBuys: 0, netSells: 0 };
+        
+        const expectedBalance = baseBalance + tx.deposits - tx.withdrawals + trades.netSells - trades.grossBuys;
+        const diff = row.ledger_balance - expectedBalance;
+        
+        if (Math.abs(diff) > TOLERANCE) {
+          mismatches.push({
+            investorCode: row.investor_code,
+            storedBalance: row.ledger_balance,
+            expectedBalance: expectedBalance,
+            difference: diff,
+            baseBalance: baseBalance,
+            totalBuys: trades.grossBuys,
+            totalSells: trades.netSells,
+            deposits: tx.deposits,
+            withdrawals: tx.withdrawals,
+          });
         }
       });
 
@@ -226,14 +330,15 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           suggestedStartDate = addDays(earliestDate, -1);
         }
 
-        const sample = mismatches[0];
+        // Calculate total difference
+        const totalDifference = mismatches.reduce((sum, m) => sum + m.difference, 0);
+
         setStaleWarning({
           date: prevDay,
           mismatchCount: mismatches.length,
-          sampleClient: sample.code,
-          storedValue: sample.stored,
-          expectedValue: sample.expected,
+          mismatches,
           suggestedStartDate,
+          totalDifference,
         });
       }
     } catch (error) {
@@ -291,8 +396,6 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
       setClearing(false);
     }
   };
-
-  const CHUNK_SIZE = 1; // Process 1 day at a time to prevent timeout
 
   const runEod = async () => {
     if (!selectedDate) {
@@ -353,164 +456,273 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
     }
   };
 
+  const formatCurrency = (value: number) => {
+    return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="gap-2">
-          <Play className="h-4 w-4" />
-          Run EOD
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[400px]">
-        <DialogHeader>
-          <DialogTitle>Run EOD for Single Day</DialogTitle>
-          <DialogDescription>
-            Calculate EOD balances for a specific date. Run one day at a time sequentially.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline" className="gap-2">
+            <Play className="h-4 w-4" />
+            Run EOD
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Run EOD for Single Day</DialogTitle>
+            <DialogDescription>
+              Calculate EOD balances for a specific date. Run one day at a time sequentially.
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          {/* Warning */}
-          <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-md">
-            <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5" />
-            <p className="text-sm text-amber-700">
-              This will delete existing EOD data for the selected date and recalculate.
-            </p>
-          </div>
-          {/* Stale Data Warning */}
-          {staleWarning && (
-            <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
-              <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
-              <div className="text-sm space-y-2">
-                <p className="font-medium text-destructive">Stale EOD Data Detected!</p>
-                <p className="text-destructive/80">
-                  Previous day ({staleWarning.date}) has <strong>{staleWarning.mismatchCount}</strong> clients 
-                  with mismatched balances.
-                </p>
-                <div className="text-xs text-muted-foreground bg-muted/50 p-2 rounded font-mono">
-                  Example: {staleWarning.sampleClient}<br />
-                  Stored: {staleWarning.storedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}<br />
-                  Expected: {staleWarning.expectedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-                <p className="text-amber-600 font-medium">
-                  Run from an earlier date to recalculate properly.
-                </p>
-                {staleWarning.suggestedStartDate && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleUseSafeStartDate}
-                    className="gap-2 mt-1"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    Use Safe Start: {format(staleWarning.suggestedStartDate, "dd MMM yyyy")}
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Verification Status */}
-          {verifying && (
-            <div className="flex items-center gap-2 p-3 bg-muted/50 border rounded-md">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Verifying previous day EOD data...</p>
-            </div>
-          )}
-
-          {/* Verified OK Status */}
-          {!verifying && !staleWarning && selectedDate && (
-            <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-md">
-              <ShieldCheck className="h-4 w-4 text-green-600" />
-              <p className="text-sm text-green-700">Previous day EOD data verified OK</p>
-            </div>
-          )}
-
-          {/* Date Picker */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Select Date</label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    "w-full justify-start text-left font-normal",
-                    !selectedDate && "text-muted-foreground"
-                  )}
-                  disabled={running}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {selectedDate ? format(selectedDate, "yyyy-MM-dd (EEEE)") : "Select date"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={setSelectedDate}
-                  initialFocus
-                  className="pointer-events-auto"
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {/* Date Confirmation */}
-          {selectedDate && !running && (
-            <div className="p-3 bg-primary/5 border border-primary/20 rounded-md">
-              <p className="text-sm font-medium text-center">
-                Running EOD for: <span className="text-primary font-mono">{format(selectedDate, "yyyy-MM-dd")}</span>
+          <div className="space-y-4 py-4">
+            {/* Warning */}
+            <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-md">
+              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5" />
+              <p className="text-sm text-amber-700">
+                This will delete existing EOD data for the selected date and recalculate.
               </p>
             </div>
-          )}
-
-          {running && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">{currentDateProcessing}</span>
+            {/* Stale Data Warning */}
+            {staleWarning && (
+              <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+                <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+                <div className="text-sm space-y-2">
+                  <p className="font-medium text-destructive">Stale EOD Data Detected!</p>
+                  <p className="text-destructive/80">
+                    Previous day ({staleWarning.date}) has <strong>{staleWarning.mismatchCount}</strong> clients 
+                    with mismatched balances.
+                  </p>
+                  <div className="text-xs text-muted-foreground bg-muted/50 p-2 rounded font-mono">
+                    Total Difference: {formatCurrency(staleWarning.totalDifference)}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowMismatchDetails(true)}
+                      className="gap-1"
+                    >
+                      <Eye className="h-3 w-3" />
+                      View Details
+                    </Button>
+                    {staleWarning.suggestedStartDate && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleUseSafeStartDate}
+                        className="gap-1"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Use Safe Start: {format(staleWarning.suggestedStartDate, "dd MMM yyyy")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
-              <Progress value={progress} className="h-2" />
-            </div>
-          )}
-        </div>
+            )}
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
-          <Button 
-            variant="destructive" 
-            onClick={handleClearAllEodData} 
-            disabled={running || clearing}
-            className="sm:mr-auto"
-          >
-            {clearing ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Clearing...
-              </>
-            ) : (
-              <>
-                <Trash2 className="h-4 w-4 mr-2" />
-                Clear All EOD Data
-              </>
+            {/* Verification Status */}
+            {verifying && (
+              <div className="flex items-center gap-2 p-3 bg-muted/50 border rounded-md">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Verifying previous day EOD data...</p>
+              </div>
             )}
-          </Button>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={running || clearing}>
-            Cancel
-          </Button>
-          <Button onClick={runEod} disabled={running || clearing || !selectedDate}>
-            {running ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Running...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 mr-2" />
-                Run EOD
-              </>
+
+            {/* Verified OK Status */}
+            {!verifying && !staleWarning && selectedDate && (
+              <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-md">
+                <ShieldCheck className="h-4 w-4 text-green-600" />
+                <p className="text-sm text-green-700">Previous day EOD data verified OK</p>
+              </div>
             )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+            {/* Date Picker */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Select Date</label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !selectedDate && "text-muted-foreground"
+                    )}
+                    disabled={running}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {selectedDate ? format(selectedDate, "yyyy-MM-dd (EEEE)") : "Select date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={setSelectedDate}
+                    initialFocus
+                    className="pointer-events-auto"
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {/* Date Confirmation */}
+            {selectedDate && !running && (
+              <div className="p-3 bg-primary/5 border border-primary/20 rounded-md">
+                <p className="text-sm font-medium text-center">
+                  Running EOD for: <span className="text-primary font-mono">{format(selectedDate, "yyyy-MM-dd")}</span>
+                </p>
+              </div>
+            )}
+
+            {running && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{currentDateProcessing}</span>
+                </div>
+                <Progress value={progress} className="h-2" />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button 
+              variant="destructive" 
+              onClick={handleClearAllEodData} 
+              disabled={running || clearing}
+              className="sm:mr-auto"
+            >
+              {clearing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Clearing...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Clear All EOD Data
+                </>
+              )}
+            </Button>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={running || clearing}>
+              Cancel
+            </Button>
+            <Button onClick={runEod} disabled={running || clearing || !selectedDate}>
+              {running ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Running...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-2" />
+                  Run EOD
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mismatch Details Sheet */}
+      <Sheet open={showMismatchDetails} onOpenChange={setShowMismatchDetails}>
+        <SheetContent className="sm:max-w-[900px] w-full">
+          <SheetHeader>
+            <SheetTitle>Mismatched Balances for {staleWarning?.date}</SheetTitle>
+            <SheetDescription>
+              {staleWarning?.mismatchCount} clients with discrepancies • Total Difference: {formatCurrency(staleWarning?.totalDifference || 0)}
+            </SheetDescription>
+          </SheetHeader>
+          
+          <div className="mt-4 space-y-4">
+            {/* Search and Export */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search investor code..."
+                  value={mismatchSearch}
+                  onChange={(e) => setMismatchSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Button variant="outline" onClick={exportMismatchesToCsv} className="gap-2">
+                <Download className="h-4 w-4" />
+                Export CSV
+              </Button>
+            </div>
+
+            {/* Mismatch Table */}
+            <ScrollArea className="h-[calc(100vh-220px)]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>
+                      <Button variant="ghost" size="sm" className="gap-1 -ml-3" onClick={() => handleSort('investorCode')}>
+                        Investor Code
+                        <ArrowUpDown className="h-3 w-3" />
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <Button variant="ghost" size="sm" className="gap-1" onClick={() => handleSort('storedBalance')}>
+                        Stored
+                        <ArrowUpDown className="h-3 w-3" />
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <Button variant="ghost" size="sm" className="gap-1" onClick={() => handleSort('expectedBalance')}>
+                        Expected
+                        <ArrowUpDown className="h-3 w-3" />
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <Button variant="ghost" size="sm" className="gap-1" onClick={() => handleSort('difference')}>
+                        Difference
+                        <ArrowUpDown className="h-3 w-3" />
+                      </Button>
+                    </TableHead>
+                    <TableHead className="text-right">Base</TableHead>
+                    <TableHead className="text-right">Buys</TableHead>
+                    <TableHead className="text-right">Sells</TableHead>
+                    <TableHead className="text-right">Deposits</TableHead>
+                    <TableHead className="text-right">Withdrawals</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredMismatches.map((m) => (
+                    <TableRow key={m.investorCode}>
+                      <TableCell className="font-mono text-sm">{m.investorCode}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{formatCurrency(m.storedBalance)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{formatCurrency(m.expectedBalance)}</TableCell>
+                      <TableCell className={cn(
+                        "text-right font-mono text-sm font-medium",
+                        m.difference > 0 ? "text-green-600" : "text-destructive"
+                      )}>
+                        {m.difference > 0 ? '+' : ''}{formatCurrency(m.difference)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(m.baseBalance)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(m.totalBuys)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(m.totalSells)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(m.deposits)}</TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">{formatCurrency(m.withdrawals)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {filteredMismatches.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                        {mismatchSearch ? 'No matching investor codes found' : 'No mismatches to display'}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 };
