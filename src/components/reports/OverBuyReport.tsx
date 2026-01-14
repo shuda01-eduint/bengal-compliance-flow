@@ -335,21 +335,23 @@ export function OverBuyReport() {
       setLatestTradeDate(fetchedLatestTradeDate);
 
       // Fetch accounting data - cash accounts only (server-side filter)
-      const { data: accountingData, error: accountingError } = await supabase.rpc('get_accounting_data', {
-        _search_term: null,
-        _from_trade_date: fetchedLatestTradeDate,
-        _to_trade_date: fetchedLatestTradeDate,
-        _page_size: 10000, // Get all matching records
-        _page_offset: 0,
+      const { data: accountingData, error: accountingError } = await supabase.rpc('get_accounting_data_v2', {
+        _search: '',
+        _from_trade_date: fetchedLatestTradeDate || '',
+        _to_trade_date: fetchedLatestTradeDate || '',
+        _from_tx_date: '',
+        _to_tx_date: '',
         _account_type_filter: 'cash', // Only cash accounts
-        _has_trades_filter: 'with_trades', // Only those with trades
+        _has_activity_filter: 'with_activity', // Only those with activity
+        _limit: 10000,
+        _offset: 0,
       });
 
       if (accountingError) throw accountingError;
 
-      // Filter for negative closing balance (final_balance after trades)
-      const negativeBalanceAccounts = (accountingData || []).filter(
-        (acc: any) => Number(acc.final_balance) < 0
+      // Filter for negative closing balance (closing_balance after trades)
+      const negativeBalanceAccounts = ((accountingData || []) as any[]).filter(
+        (acc: any) => Number(acc.closing_balance) < 0
       );
 
       // Get investor codes for additional data

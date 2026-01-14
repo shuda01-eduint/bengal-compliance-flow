@@ -297,19 +297,21 @@ class AccountingServiceClass {
     const pageSize = params?.pagination?.pageSize ?? 100;
     const offset = (page - 1) * pageSize;
 
-    const { data, error } = await supabase.rpc("get_accounting_data", {
-      _from_trade_date: params?.fromTradeDate || null,
-      _to_trade_date: params?.toTradeDate || null,
-      _from_tx_date: params?.fromTxDate || null,
-      _to_tx_date: params?.toTxDate || null,
-      _search: params?.search || null,
+    const { data, error } = await supabase.rpc("get_accounting_data_v2", {
+      _search: params?.search || '',
+      _from_trade_date: params?.fromTradeDate || '',
+      _to_trade_date: params?.toTradeDate || '',
+      _from_tx_date: params?.fromTxDate || '',
+      _to_tx_date: params?.toTxDate || '',
+      _account_type_filter: 'all',
+      _has_activity_filter: 'all',
       _limit: pageSize,
       _offset: offset,
     });
 
     if (error) throw error;
 
-    return (data as AccountingDataRow[]) || [];
+    return (data as unknown as AccountingDataRow[]) || [];
   }
 
   /**
