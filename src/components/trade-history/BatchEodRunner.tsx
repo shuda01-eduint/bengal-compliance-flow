@@ -51,8 +51,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
-  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentDateProcessing, setCurrentDateProcessing] = useState<string>("");
@@ -62,15 +61,15 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const [staleWarning, setStaleWarning] = useState<StaleWarning | null>(null);
   const [clearing, setClearing] = useState(false);
 
-  // Verify previous day EOD when start date changes
-  const verifyPreviousDayEod = useCallback(async (selectedStartDate: Date) => {
+  // Verify previous day EOD when date changes
+  const verifyPreviousDayEod = useCallback(async (dateToProcess: Date) => {
     setVerifying(true);
     setStaleWarning(null);
 
     try {
-      const prevDay = format(addDays(selectedStartDate, -1), "yyyy-MM-dd");
-      const twoDaysBefore = format(addDays(selectedStartDate, -2), "yyyy-MM-dd");
-      const prevDayTradeFormat = format(addDays(selectedStartDate, -1), "yyyyMMdd");
+      const prevDay = format(addDays(dateToProcess, -1), "yyyy-MM-dd");
+      const twoDaysBefore = format(addDays(dateToProcess, -2), "yyyy-MM-dd");
+      const prevDayTradeFormat = format(addDays(dateToProcess, -1), "yyyyMMdd");
 
       // Fetch stored EOD for previous day
       const storedEod = await fetchAllRows<{
@@ -244,18 +243,18 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
     }
   }, []);
 
-  // Trigger verification when start date changes
+  // Trigger verification when date changes
   useEffect(() => {
-    if (startDate && open) {
-      verifyPreviousDayEod(startDate);
+    if (selectedDate && open) {
+      verifyPreviousDayEod(selectedDate);
     } else {
       setStaleWarning(null);
     }
-  }, [startDate, open, verifyPreviousDayEod]);
+  }, [selectedDate, open, verifyPreviousDayEod]);
 
   const handleUseSafeStartDate = () => {
     if (staleWarning?.suggestedStartDate) {
-      setStartDate(staleWarning.suggestedStartDate);
+      setSelectedDate(staleWarning.suggestedStartDate);
     }
   };
 
@@ -295,94 +294,58 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
 
   const CHUNK_SIZE = 1; // Process 1 day at a time to prevent timeout
 
-  const runBatchEod = async () => {
-    if (!startDate || !endDate) {
-      toast.error("Please select both start and end dates");
+  const runEod = async () => {
+    if (!selectedDate) {
+      toast.error("Please select a date");
       return;
     }
 
-    if (startDate > endDate) {
-      toast.error("Start date must be before end date");
-      return;
-    }
-
-    const dayCount = differenceInDays(endDate, startDate) + 1;
-    setTotalDays(dayCount);
+    setTotalDays(1);
     setProcessedDays(0);
     setProgress(0);
     setRunning(true);
 
-    // Build chunks of date ranges
-    const chunks: { start: Date; end: Date }[] = [];
-    let chunkStart = startDate;
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    setCurrentDateProcessing(`Processing ${dateStr}...`);
 
-    while (chunkStart <= endDate) {
-      const chunkEnd = min([addDays(chunkStart, CHUNK_SIZE - 1), endDate]);
-      chunks.push({ start: chunkStart, end: chunkEnd });
-      chunkStart = addDays(chunkEnd, 1);
-    }
-
-    toast.info(`Starting batch EOD: ${dayCount} days in ${chunks.length} chunks...`);
+    toast.info(`Running EOD for ${dateStr}...`);
 
     let totalClientsProcessed = 0;
-    let totalDaysProcessed = 0;
-    let hasError = false;
 
     try {
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        const chunkStartStr = format(chunk.start, "yyyy-MM-dd");
-        const chunkEndStr = format(chunk.end, "yyyy-MM-dd");
-        const chunkDays = differenceInDays(chunk.end, chunk.start) + 1;
+      const { data, error } = await supabase.rpc("run_batch_eod", {
+        p_start_date: dateStr,
+        p_end_date: dateStr,
+      });
 
-        setCurrentDateProcessing(`Chunk ${i + 1}/${chunks.length}: ${format(chunk.start, "dd MMM")} - ${format(chunk.end, "dd MMM")}`);
-
-        const { data, error } = await supabase.rpc("run_batch_eod", {
-          p_start_date: chunkStartStr,
-          p_end_date: chunkEndStr,
-        });
-
-        if (error) {
-          toast.error(`Chunk ${i + 1} failed`, { description: error.message });
-          hasError = true;
-          break;
-        }
-
-        const result = data as unknown as BatchEodResult;
-
-        if (!result.success) {
-          toast.error(`Chunk ${i + 1} failed`, { description: result.error || "Unknown error" });
-          hasError = true;
-          break;
-        }
-
-        // Update progress
-        totalDaysProcessed += result.days_processed || chunkDays;
-        totalClientsProcessed += result.total_snapshots || 0;
-        setProcessedDays(totalDaysProcessed);
-        setProgress(((i + 1) / chunks.length) * 100);
-
-        // Small delay between chunks to prevent overwhelming the database
-        if (i < chunks.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
+      if (error) {
+        toast.error("EOD failed", { description: error.message });
+        return;
       }
 
-      if (!hasError) {
-        setProgress(100);
-        toast.success(`Batch EOD complete: ${totalDaysProcessed} days processed`, {
-          description: `${totalClientsProcessed.toLocaleString()} client-days from ${format(startDate, "yyyy-MM-dd")} to ${format(endDate, "yyyy-MM-dd")}`,
-        });
+      const result = data as unknown as BatchEodResult;
 
-        // Invalidate EOD history cache so the table refreshes immediately
-        queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
-
-        setOpen(false);
-        onComplete?.();
+      if (!result.success) {
+        toast.error("EOD failed", { description: result.error || "Unknown error" });
+        return;
       }
+
+      totalClientsProcessed = result.total_snapshots || 0;
+      setProcessedDays(1);
+      setProgress(100);
+
+      toast.success(`EOD complete for ${dateStr}`, {
+        description: `${totalClientsProcessed.toLocaleString()} clients processed`,
+      });
+
+      // Invalidate EOD history cache so the table refreshes immediately
+      queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
+
+      setOpen(false);
+      onComplete?.();
     } catch (error: any) {
-      console.error("Batch EOD error:", error);
-      toast.error("Batch EOD failed", { description: error.message });
+      console.error("EOD error:", error);
+      toast.error("EOD failed", { description: error.message });
     } finally {
       setRunning(false);
       setProgress(0);
@@ -395,15 +358,14 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="gap-2">
           <Play className="h-4 w-4" />
-          Batch EOD
+          Run EOD
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>Run Batch EOD</DialogTitle>
+          <DialogTitle>Run EOD for Single Day</DialogTitle>
           <DialogDescription>
-            Calculate EOD balances sequentially for a date range. This will delete and
-            recalculate all EOD snapshots from the start date onwards.
+            Calculate EOD balances for a specific date. Run one day at a time sequentially.
           </DialogDescription>
         </DialogHeader>
 
@@ -412,11 +374,9 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-md">
             <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5" />
             <p className="text-sm text-amber-700">
-              This will delete existing EOD data from the start date and recalculate using
-              commission-adjusted trades.
+              This will delete existing EOD data for the selected date and recalculate.
             </p>
           </div>
-
           {/* Stale Data Warning */}
           {staleWarning && (
             <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
@@ -459,91 +419,55 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           )}
 
           {/* Verified OK Status */}
-          {!verifying && !staleWarning && startDate && (
+          {!verifying && !staleWarning && selectedDate && (
             <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-md">
               <ShieldCheck className="h-4 w-4 text-green-600" />
               <p className="text-sm text-green-700">Previous day EOD data verified OK</p>
             </div>
           )}
 
-          {/* Date Pickers */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Start Date</label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !startDate && "text-muted-foreground"
-                    )}
-                    disabled={running}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {startDate ? format(startDate, "dd MMM yyyy") : "Select"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={startDate}
-                    onSelect={setStartDate}
-                    initialFocus
-                    className="pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">End Date</label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !endDate && "text-muted-foreground"
-                    )}
-                    disabled={running}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {endDate ? format(endDate, "dd MMM yyyy") : "Select"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={endDate}
-                    onSelect={setEndDate}
-                    disabled={(date) => startDate ? date < startDate : false}
-                    initialFocus
-                    className="pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
+          {/* Date Picker */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Select Date</label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-full justify-start text-left font-normal",
+                    !selectedDate && "text-muted-foreground"
+                  )}
+                  disabled={running}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {selectedDate ? format(selectedDate, "yyyy-MM-dd (EEEE)") : "Select date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={setSelectedDate}
+                  initialFocus
+                  className="pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
           </div>
 
           {/* Date Confirmation */}
-          {startDate && endDate && !running && (
+          {selectedDate && !running && (
             <div className="p-3 bg-primary/5 border border-primary/20 rounded-md">
               <p className="text-sm font-medium text-center">
-                You are about to run EOD for:<br />
-                <span className="text-primary font-mono">
-                  {format(startDate, "yyyy-MM-dd")} → {format(endDate, "yyyy-MM-dd")}
-                </span>
+                Running EOD for: <span className="text-primary font-mono">{format(selectedDate, "yyyy-MM-dd")}</span>
               </p>
             </div>
           )}
 
-          {/* Progress */}
           {running && (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">{currentDateProcessing}</span>
-                <span className="font-medium">{processedDays} / {totalDays} days</span>
               </div>
               <Progress value={progress} className="h-2" />
             </div>
@@ -572,7 +496,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           <Button variant="outline" onClick={() => setOpen(false)} disabled={running || clearing}>
             Cancel
           </Button>
-          <Button onClick={runBatchEod} disabled={running || clearing || !startDate || !endDate}>
+          <Button onClick={runEod} disabled={running || clearing || !selectedDate}>
             {running ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -581,7 +505,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
             ) : (
               <>
                 <Play className="h-4 w-4 mr-2" />
-                Run Batch EOD
+                Run EOD
               </>
             )}
           </Button>
