@@ -89,61 +89,131 @@ async function fetchFromExternalAPI(params?: Record<string, unknown>): Promise<u
 }
 
 // Map external API response to DSEPriceData format
+// Handles the external API structure: { success: true, data: { symbol, market: {...}, fundamentals: {...} } }
 function mapToDSEPriceData(data: unknown): DSEPriceData[] {
-  // Handle various response formats from the external API
+  if (!data || typeof data !== 'object') return [];
+  
+  const obj = data as Record<string, unknown>;
+  
+  // Handle external API single-stock response: { success: true, data: { symbol, market: {...} } }
+  if (obj.success && obj.data && typeof obj.data === 'object') {
+    const stockData = obj.data as Record<string, unknown>;
+    const market = (stockData.market || {}) as Record<string, unknown>;
+    
+    const tradingCode = String(stockData.symbol || '');
+    if (!tradingCode) {
+      console.log('No trading code found in response');
+      return [];
+    }
+    
+    // Parse numeric values
+    const ltp = parseFloat(String(market.ltp || 0)) || 0;
+    const closeFromAPI = parseFloat(String(market.close || market.previousClose || 0)) || 0;
+    
+    // Use LTP when close_price is 0, else use close_price
+    const finalClosePrice = closeFromAPI === 0 ? ltp : closeFromAPI;
+    
+    const highPrice = parseFloat(String(market.high || 0)) || 0;
+    const lowPrice = parseFloat(String(market.low || 0)) || 0;
+    const openPrice = parseFloat(String(market.open || 0)) || 0;
+    const volume = parseInt(String(market.volume || 0)) || 0;
+    const valueMn = parseFloat(String(market.valueMn || 0)) || 0;
+    const value = valueMn * 1000000; // Convert from millions
+    const tradeCount = parseInt(String(market.trade || 0)) || 0;
+    const change = parseFloat(String(market.change || 0)) || 0;
+    const changePercent = parseFloat(String(market.changePercent || 0)) || 0;
+    
+    console.log(`Mapped ${tradingCode}: LTP=${ltp}, closeFromAPI=${closeFromAPI}, finalClosePrice=${finalClosePrice}`);
+    
+    return [{
+      trading_code: tradingCode,
+      close_price: finalClosePrice,
+      last_trade_price: ltp,
+      high_price: highPrice || undefined,
+      low_price: lowPrice || undefined,
+      open_price: openPrice || undefined,
+      volume: volume || undefined,
+      value: value || undefined,
+      trade_count: tradeCount || undefined,
+      change: change || undefined,
+      change_percent: changePercent || undefined,
+    }];
+  }
+  
+  // Fallback: Handle array response formats
   let items: unknown[] = [];
   
   if (Array.isArray(data)) {
     items = data;
-  } else if (data && typeof data === 'object') {
-    const obj = data as Record<string, unknown>;
-    // Check common response structures
-    if (Array.isArray(obj.data)) {
-      items = obj.data;
-    } else if (Array.isArray(obj.prices)) {
-      items = obj.prices;
-    } else if (Array.isArray(obj.stocks)) {
-      items = obj.stocks;
-    } else if (Array.isArray(obj.results)) {
-      items = obj.results;
-    } else {
-      // Single item or different structure - log for debugging
-      console.log('Unexpected response structure:', JSON.stringify(data).substring(0, 200));
-      return [];
-    }
+  } else if (Array.isArray(obj.data)) {
+    items = obj.data;
+  } else if (Array.isArray(obj.prices)) {
+    items = obj.prices;
+  } else if (Array.isArray(obj.stocks)) {
+    items = obj.stocks;
+  } else if (Array.isArray(obj.results)) {
+    items = obj.results;
+  } else {
+    console.log('Unexpected response structure:', JSON.stringify(data).substring(0, 200));
+    return [];
   }
 
   return items.map((item: unknown) => {
     const row = item as Record<string, unknown>;
+    const ltp = parseFloat(String(row.ltp || row.lastPrice || 0)) || 0;
+    const closeFromRow = parseFloat(String(row.close_price || row.closePrice || row.close || 0)) || 0;
+    const finalClosePrice = closeFromRow === 0 ? ltp : closeFromRow;
+    
     return {
       trading_code: String(row.trading_code || row.tradingCode || row.symbol || row.code || ''),
-      close_price: parseFloat(String(row.close_price || row.closePrice || row.close || row.ltp || row.lastPrice || 0)) || 0,
+      close_price: finalClosePrice,
+      last_trade_price: ltp || undefined,
       high_price: parseFloat(String(row.high_price || row.highPrice || row.high || 0)) || undefined,
       low_price: parseFloat(String(row.low_price || row.lowPrice || row.low || 0)) || undefined,
       open_price: parseFloat(String(row.open_price || row.openPrice || row.open || 0)) || undefined,
       volume: parseInt(String(row.volume || row.qty || row.quantity || 0)) || undefined,
       value: parseFloat(String(row.value || row.turnover || 0)) || undefined,
       trade_count: parseInt(String(row.trade_count || row.tradeCount || row.trades || 0)) || undefined,
-      last_trade_price: parseFloat(String(row.last_trade_price || row.lastTradePrice || row.ltp || 0)) || undefined,
       change: parseFloat(String(row.change || row.priceChange || 0)) || undefined,
       change_percent: parseFloat(String(row.change_percent || row.changePercent || row.pchange || 0)) || undefined,
     };
-  }).filter(item => item.trading_code); // Only include items with valid trading codes
+  }).filter(item => item.trading_code);
 }
 
 // Map external API response to DSEFundamentalData format
 function mapToDSEFundamentalData(data: unknown): DSEFundamentalData[] {
+  if (!data || typeof data !== 'object') return [];
+  
+  const obj = data as Record<string, unknown>;
+  
+  // Handle external API single-stock response: { success: true, data: { symbol, fundamentals: {...} } }
+  if (obj.success && obj.data && typeof obj.data === 'object') {
+    const stockData = obj.data as Record<string, unknown>;
+    const fundamentals = (stockData.fundamentals || {}) as Record<string, unknown>;
+    
+    const tradingCode = String(stockData.symbol || '');
+    if (!tradingCode) return [];
+    
+    return [{
+      trading_code: tradingCode,
+      sector: String(stockData.sector || '') || undefined,
+      category: String(stockData.category || '') || undefined,
+      eps: parseFloat(String(fundamentals.eps || 0)) || undefined,
+      audited_pe: parseFloat(String(fundamentals.pe || 0)) || undefined,
+      market_cap: parseFloat(String(fundamentals.marketCap || 0)) || undefined,
+      total_securities: parseInt(String(fundamentals.totalShares || 0)) || undefined,
+    }];
+  }
+  
+  // Fallback: Handle array response formats
   let items: unknown[] = [];
   
   if (Array.isArray(data)) {
     items = data;
-  } else if (data && typeof data === 'object') {
-    const obj = data as Record<string, unknown>;
-    if (Array.isArray(obj.data)) {
-      items = obj.data;
-    } else if (Array.isArray(obj.fundamentals)) {
-      items = obj.fundamentals;
-    }
+  } else if (Array.isArray(obj.data)) {
+    items = obj.data;
+  } else if (Array.isArray(obj.fundamentals)) {
+    items = obj.fundamentals;
   }
 
   return items.map((item: unknown) => {
@@ -177,14 +247,11 @@ async function fetchRealTimePrices(tradingCodes?: string[]): Promise<DSEPriceDat
   try {
     const allPrices: DSEPriceData[] = [];
     
-    // The external API requires a symbol parameter for each request
-    // If no trading codes specified, we can't fetch all - need symbols
     if (!tradingCodes?.length) {
       console.log('No trading codes specified - cannot fetch without symbols');
       return [];
     }
     
-    // Fetch prices for each symbol
     for (const symbol of tradingCodes) {
       try {
         const response = await fetchFromExternalAPI({ symbol });
@@ -300,6 +367,92 @@ async function syncFundamentalsToDatabase(fundamentals: DSEFundamentalData[]): P
   return { updated, errors };
 }
 
+// Bulk sync: fetch all trading codes from securities table and sync each one
+async function bulkSyncFromExternalAPI(): Promise<{
+  total: number;
+  synced: number;
+  failed: number;
+  errors: string[];
+  synced_at: string;
+}> {
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  
+  // Fetch all trading codes from securities table
+  const { data: allSecurities, error: fetchError } = await supabase
+    .from('securities')
+    .select('trading_code')
+    .not('trading_code', 'is', null);
+  
+  if (fetchError) {
+    throw new Error(`Failed to fetch securities: ${fetchError.message}`);
+  }
+  
+  const tradingCodes = allSecurities?.map(s => s.trading_code).filter(Boolean) || [];
+  console.log(`Starting bulk sync for ${tradingCodes.length} symbols`);
+  
+  let synced = 0;
+  let failed = 0;
+  const errors: string[] = [];
+  const batchSize = 10; // Process 10 at a time
+  
+  for (let i = 0; i < tradingCodes.length; i += batchSize) {
+    const batch = tradingCodes.slice(i, i + batchSize);
+    console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(tradingCodes.length / batchSize)}: ${batch.join(', ')}`);
+    
+    // Process batch in parallel
+    const promises = batch.map(async (symbol) => {
+      try {
+        const response = await fetchFromExternalAPI({ symbol });
+        const prices = mapToDSEPriceData(response);
+        const fundamentals = mapToDSEFundamentalData(response);
+        
+        if (prices.length > 0) {
+          const priceResult = await syncPricesToDatabase(prices);
+          if (priceResult.errors.length > 0) {
+            return { success: false, symbol, error: priceResult.errors.join(', ') };
+          }
+        }
+        
+        if (fundamentals.length > 0) {
+          await syncFundamentalsToDatabase(fundamentals);
+        }
+        
+        return { success: prices.length > 0, symbol, error: prices.length === 0 ? 'No data returned' : undefined };
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        return { success: false, symbol, error: errorMessage };
+      }
+    });
+    
+    const results = await Promise.all(promises);
+    results.forEach(r => {
+      if (r.success) {
+        synced++;
+      } else {
+        failed++;
+        if (errors.length < 50) {
+          errors.push(`${r.symbol}: ${r.error || 'No data'}`);
+        }
+      }
+    });
+    
+    // Small delay between batches to avoid rate limiting
+    if (i + batchSize < tradingCodes.length) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  
+  console.log(`Bulk sync complete: ${synced} synced, ${failed} failed out of ${tradingCodes.length} total`);
+  
+  return {
+    total: tradingCodes.length,
+    synced,
+    failed,
+    errors: errors.slice(0, 50),
+    synced_at: new Date().toISOString()
+  };
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -353,6 +506,12 @@ serve(async (req) => {
         };
         break;
 
+      case 'bulk_sync':
+        // Bulk sync: fetch all trading codes from DB and sync each from external API
+        console.log('Starting bulk_sync action...');
+        result = await bulkSyncFromExternalAPI();
+        break;
+
       case 'check_status':
         // Check configuration status
         const connectionInfo = getConnectionInfo();
@@ -383,7 +542,7 @@ serve(async (req) => {
         break;
 
       default:
-        throw new Error(`Unknown action: ${action}. Valid actions: get_realtime_prices, get_fundamentals, sync_all, check_status, test_connection`);
+        throw new Error(`Unknown action: ${action}. Valid actions: get_realtime_prices, get_fundamentals, sync_all, bulk_sync, check_status, test_connection`);
     }
 
     return new Response(JSON.stringify({ success: true, data: result }), {

@@ -43,6 +43,11 @@ interface SyncStatus {
     database?: string;
     username?: string;
   };
+  syncResult?: {
+    total: number;
+    synced: number;
+    failed: number;
+  };
 }
 
 const SECTORS = [
@@ -441,7 +446,61 @@ export function SecuritiesTable() {
     }
   };
 
-  const getSyncStatusIcon = () => {
+  const handleBulkSync = async () => {
+    setSyncStatus({ 
+      status: 'syncing', 
+      message: 'Syncing all securities from external API... This may take a few minutes.' 
+    });
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('dse-market-data', {
+        body: { action: 'bulk_sync' }
+      });
+      
+      if (error) throw error;
+      
+      const result = data?.data;
+      
+      if (!result) {
+        throw new Error('No result returned from bulk sync');
+      }
+      
+      setSyncStatus({
+        status: 'success',
+        message: `Synced ${result.synced} of ${result.total} securities. ${result.failed} failed.`,
+        configured: true,
+        lastSynced: result.synced_at,
+        syncResult: {
+          total: result.total,
+          synced: result.synced,
+          failed: result.failed
+        }
+      });
+      
+      toast({
+        title: "Bulk Sync Complete",
+        description: `Updated ${result.synced} securities. ${result.failed > 0 ? `${result.failed} failed.` : ''}`,
+      });
+      
+      // Refresh the table
+      fetchSecurities();
+    } catch (error: any) {
+      console.error('Bulk sync error:', error);
+      
+      setSyncStatus({
+        status: 'error',
+        message: error.message || 'Bulk sync failed',
+        configured: false
+      });
+      
+      toast({
+        title: "Bulk Sync Failed",
+        description: error.message || "Failed to sync securities",
+        variant: "destructive",
+      });
+    }
+  };
+
     switch (syncStatus.status) {
       case 'syncing':
         return <Loader2 className="h-4 w-4 animate-spin" />;
@@ -538,34 +597,67 @@ export function SecuritiesTable() {
 
                   {/* Info Note */}
                   <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded">
-                    <strong>Note:</strong> DSE MDS uses SQL Server which requires a proxy service or scheduled ETL job for data sync. Credentials are configured but direct connection is not available from Edge Functions.
+                    <strong>Note:</strong> Click "Sync All Prices" to fetch current market prices for all securities from the external API. Uses LTP when close price is unavailable.
                   </div>
 
+                  {/* Sync Results */}
+                  {syncStatus.syncResult && (
+                    <div className="text-xs space-y-1 bg-muted/50 p-2 rounded">
+                      <div className="flex justify-between">
+                        <span>Total Securities:</span>
+                        <span className="font-medium">{syncStatus.syncResult.total}</span>
+                      </div>
+                      <div className="flex justify-between text-green-600">
+                        <span>Successfully Synced:</span>
+                        <span className="font-medium">{syncStatus.syncResult.synced}</span>
+                      </div>
+                      {syncStatus.syncResult.failed > 0 && (
+                        <div className="flex justify-between text-amber-600">
+                          <span>Failed:</span>
+                          <span className="font-medium">{syncStatus.syncResult.failed}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Actions */}
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2">
                     <Button 
-                      onClick={handleDSESync} 
+                      onClick={handleBulkSync} 
                       disabled={syncStatus.status === 'syncing'}
-                      className="flex-1"
+                      className="w-full"
                     >
                       {syncStatus.status === 'syncing' ? (
                         <>
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Checking...
+                          Syncing All Prices...
                         </>
                       ) : (
                         <>
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                          Check Connection
+                          <CloudDownload className="h-4 w-4 mr-2" />
+                          Sync All Prices
                         </>
                       )}
                     </Button>
-                    <Button 
-                      variant="outline" 
-                      onClick={() => setIsSyncDialogOpen(false)}
-                    >
-                      Close
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline"
+                        onClick={handleDSESync} 
+                        disabled={syncStatus.status === 'syncing'}
+                        className="flex-1"
+                        size="sm"
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Check Status
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setIsSyncDialogOpen(false)}
+                        size="sm"
+                      >
+                        Close
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </DialogContent>
