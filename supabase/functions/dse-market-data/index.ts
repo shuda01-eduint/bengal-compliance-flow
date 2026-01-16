@@ -7,11 +7,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// DSE MDS Configuration from secrets
-const DSE_MDS_IP = Deno.env.get('DSE_MDS_IP') || '';
-const DSE_MDS_DATABASE = Deno.env.get('DSE_MDS_DATABASE') || '';
-const DSE_MDS_USERNAME = Deno.env.get('DSE_MDS_USERNAME') || '';
-const DSE_MDS_PASSWORD = Deno.env.get('DSE_MDS_PASSWORD') || '';
+// External Stock Data API Configuration
+const EXTERNAL_STOCK_URL = 'https://osglgpafsqthqolqbnwu.supabase.co/functions/v1/stock-data';
+const EXTERNAL_API_KEY = Deno.env.get('EXTERNAL_STOCK_API_KEY') || '';
 
 // Supabase client for storing data
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -38,9 +36,6 @@ interface DSEFundamentalData {
   sector?: string;
   category?: string;
   market_cap?: number;
-  authorized_capital?: number;
-  paid_up_capital?: number;
-  face_value?: number;
   total_securities?: number;
   director_percent?: number;
   govt_percent?: number;
@@ -49,199 +44,184 @@ interface DSEFundamentalData {
   public_percent?: number;
 }
 
-// Check if DSE MDS is configured
-function isDSEConfigured(): boolean {
-  return !!(DSE_MDS_IP && DSE_MDS_DATABASE && DSE_MDS_USERNAME && DSE_MDS_PASSWORD);
+// Check if External API is configured
+function isExternalAPIConfigured(): boolean {
+  return !!EXTERNAL_API_KEY;
 }
 
-// Get DSE MDS connection info (masked for security)
-function getConnectionInfo(): { configured: boolean; ip: string; database: string; username: string } {
+// Get connection info (masked for security)
+function getConnectionInfo(): { configured: boolean; endpoint: string } {
   return {
-    configured: isDSEConfigured(),
-    ip: DSE_MDS_IP ? `${DSE_MDS_IP.split('.').slice(0, 2).join('.')}.*.*` : 'Not configured',
-    database: DSE_MDS_DATABASE || 'Not configured',
-    username: DSE_MDS_USERNAME || 'Not configured',
+    configured: isExternalAPIConfigured(),
+    endpoint: EXTERNAL_STOCK_URL,
   };
 }
 
-// Note: Deno doesn't have native SQL Server support, so we'll use a REST API proxy approach
-// or direct TDS protocol. For now, we'll set up the structure for when a SQL Server 
-// connection library becomes available or an API proxy is set up.
-
-// Helper function to query DSE MDS database
-// This requires either:
-// 1. A REST API proxy service that connects to SQL Server
-// 2. A native SQL Server library for Deno (limited options)
-// 3. An external API service that exposes the MDS data
-async function queryDSEMDS(query: string): Promise<any[]> {
-  if (!isDSEConfigured()) {
-    throw new Error('DSE MDS credentials are not fully configured');
+// Fetch data from external stock-data API
+async function fetchFromExternalAPI(params?: Record<string, unknown>): Promise<unknown> {
+  if (!isExternalAPIConfigured()) {
+    throw new Error('External Stock API key not configured. Please add EXTERNAL_STOCK_API_KEY secret.');
   }
 
-  console.log(`Attempting to query DSE MDS at ${DSE_MDS_IP}...`);
-  console.log(`Database: ${DSE_MDS_DATABASE}, User: ${DSE_MDS_USERNAME}`);
-  
-  // For SQL Server connectivity in Deno Edge Functions, we have options:
-  // 1. Use an HTTP proxy service that connects to SQL Server
-  // 2. Use a cloud-based SQL Server connector service
-  
-  // For now, we'll prepare the query structure but note that direct MSSQL
-  // connectivity requires additional infrastructure
-  
-  throw new Error(
-    'Direct SQL Server connection not available in Edge Functions. ' +
-    'Options: 1) Set up an API proxy service, 2) Use Azure SQL Data Sync, ' +
-    '3) Use a scheduled job to export data to a compatible format.'
-  );
+  console.log(`Fetching data from external API: ${EXTERNAL_STOCK_URL}`);
+  console.log(`Request params:`, JSON.stringify(params || {}));
+
+  const response = await fetch(EXTERNAL_STOCK_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': EXTERNAL_API_KEY,
+    },
+    body: JSON.stringify(params || {}),
+  });
+
+  console.log(`External API response status: ${response.status}`);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`External API error: ${response.status} - ${errorText}`);
+    throw new Error(`External API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  console.log(`External API full response:`, JSON.stringify(data));
+  return data;
 }
 
-// Fetch real-time/latest market prices from DSE MDS
-async function fetchRealTimePrices(tradingCodes?: string[]): Promise<DSEPriceData[]> {
-  console.log('Fetching real-time prices from DSE MDS...');
+// Map external API response to DSEPriceData format
+function mapToDSEPriceData(data: unknown): DSEPriceData[] {
+  // Handle various response formats from the external API
+  let items: unknown[] = [];
   
-  if (!isDSEConfigured()) {
-    console.log('DSE MDS not configured - returning empty array');
+  if (Array.isArray(data)) {
+    items = data;
+  } else if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    // Check common response structures
+    if (Array.isArray(obj.data)) {
+      items = obj.data;
+    } else if (Array.isArray(obj.prices)) {
+      items = obj.prices;
+    } else if (Array.isArray(obj.stocks)) {
+      items = obj.stocks;
+    } else if (Array.isArray(obj.results)) {
+      items = obj.results;
+    } else {
+      // Single item or different structure - log for debugging
+      console.log('Unexpected response structure:', JSON.stringify(data).substring(0, 200));
+      return [];
+    }
+  }
+
+  return items.map((item: unknown) => {
+    const row = item as Record<string, unknown>;
+    return {
+      trading_code: String(row.trading_code || row.tradingCode || row.symbol || row.code || ''),
+      close_price: parseFloat(String(row.close_price || row.closePrice || row.close || row.ltp || row.lastPrice || 0)) || 0,
+      high_price: parseFloat(String(row.high_price || row.highPrice || row.high || 0)) || undefined,
+      low_price: parseFloat(String(row.low_price || row.lowPrice || row.low || 0)) || undefined,
+      open_price: parseFloat(String(row.open_price || row.openPrice || row.open || 0)) || undefined,
+      volume: parseInt(String(row.volume || row.qty || row.quantity || 0)) || undefined,
+      value: parseFloat(String(row.value || row.turnover || 0)) || undefined,
+      trade_count: parseInt(String(row.trade_count || row.tradeCount || row.trades || 0)) || undefined,
+      last_trade_price: parseFloat(String(row.last_trade_price || row.lastTradePrice || row.ltp || 0)) || undefined,
+      change: parseFloat(String(row.change || row.priceChange || 0)) || undefined,
+      change_percent: parseFloat(String(row.change_percent || row.changePercent || row.pchange || 0)) || undefined,
+    };
+  }).filter(item => item.trading_code); // Only include items with valid trading codes
+}
+
+// Map external API response to DSEFundamentalData format
+function mapToDSEFundamentalData(data: unknown): DSEFundamentalData[] {
+  let items: unknown[] = [];
+  
+  if (Array.isArray(data)) {
+    items = data;
+  } else if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj.data)) {
+      items = obj.data;
+    } else if (Array.isArray(obj.fundamentals)) {
+      items = obj.fundamentals;
+    }
+  }
+
+  return items.map((item: unknown) => {
+    const row = item as Record<string, unknown>;
+    return {
+      trading_code: String(row.trading_code || row.tradingCode || row.symbol || ''),
+      eps: parseFloat(String(row.eps || 0)) || undefined,
+      audited_pe: parseFloat(String(row.audited_pe || row.pe || row.peRatio || 0)) || undefined,
+      sector: String(row.sector || '') || undefined,
+      category: String(row.category || '') || undefined,
+      market_cap: parseFloat(String(row.market_cap || row.marketCap || 0)) || undefined,
+      total_securities: parseInt(String(row.total_securities || row.totalSecurities || row.shares || 0)) || undefined,
+      director_percent: parseFloat(String(row.director_percent || row.directorPercent || 0)) || undefined,
+      govt_percent: parseFloat(String(row.govt_percent || row.govtPercent || 0)) || undefined,
+      institute_percent: parseFloat(String(row.institute_percent || row.institutePercent || 0)) || undefined,
+      foreign_percent: parseFloat(String(row.foreign_percent || row.foreignPercent || 0)) || undefined,
+      public_percent: parseFloat(String(row.public_percent || row.publicPercent || 0)) || undefined,
+    };
+  }).filter(item => item.trading_code);
+}
+
+// Fetch real-time/latest market prices from external API
+async function fetchRealTimePrices(tradingCodes?: string[]): Promise<DSEPriceData[]> {
+  console.log('Fetching real-time prices from external API...');
+  
+  if (!isExternalAPIConfigured()) {
+    console.log('External API not configured - returning empty array');
     return [];
   }
 
-  // Example SQL query structure for DSE MDS
-  // Adjust based on actual MDS database schema
-  const whereClause = tradingCodes?.length 
-    ? `WHERE trading_code IN ('${tradingCodes.join("','")}')`
-    : '';
-  
-  const query = `
-    SELECT 
-      trading_code,
-      close_price,
-      high_price,
-      low_price,
-      open_price,
-      volume,
-      value,
-      trade_count,
-      last_trade_price,
-      change,
-      change_percent
-    FROM market_prices
-    ${whereClause}
-  `;
-  
   try {
-    const results = await queryDSEMDS(query);
-    return results.map((row: any) => ({
-      trading_code: row.trading_code,
-      close_price: parseFloat(row.close_price) || 0,
-      high_price: parseFloat(row.high_price) || undefined,
-      low_price: parseFloat(row.low_price) || undefined,
-      open_price: parseFloat(row.open_price) || undefined,
-      volume: parseInt(row.volume) || undefined,
-      value: parseFloat(row.value) || undefined,
-      trade_count: parseInt(row.trade_count) || undefined,
-      last_trade_price: parseFloat(row.last_trade_price) || undefined,
-      change: parseFloat(row.change) || undefined,
-      change_percent: parseFloat(row.change_percent) || undefined,
-    }));
+    const allPrices: DSEPriceData[] = [];
+    
+    // The external API requires a symbol parameter for each request
+    // If no trading codes specified, we can't fetch all - need symbols
+    if (!tradingCodes?.length) {
+      console.log('No trading codes specified - cannot fetch without symbols');
+      return [];
+    }
+    
+    // Fetch prices for each symbol
+    for (const symbol of tradingCodes) {
+      try {
+        const response = await fetchFromExternalAPI({ symbol });
+        const prices = mapToDSEPriceData(response);
+        allPrices.push(...prices);
+      } catch (err) {
+        console.error(`Error fetching ${symbol}:`, err);
+      }
+    }
+    
+    console.log(`Mapped ${allPrices.length} price records`);
+    return allPrices;
   } catch (error) {
     console.error('Error fetching prices:', error);
     throw error;
   }
 }
 
-// Fetch end-of-day (EOD) historical data
-async function fetchEODData(tradingCode: string, fromDate?: string, toDate?: string): Promise<any[]> {
-  console.log(`Fetching EOD data for ${tradingCode}...`);
-  
-  if (!isDSEConfigured()) {
-    console.log('DSE MDS not configured - returning empty array');
-    return [];
-  }
-
-  // Example SQL query structure
-  const dateFilter = [];
-  if (fromDate) dateFilter.push(`trade_date >= '${fromDate}'`);
-  if (toDate) dateFilter.push(`trade_date <= '${toDate}'`);
-  
-  const whereClause = `WHERE trading_code = '${tradingCode}'${dateFilter.length ? ' AND ' + dateFilter.join(' AND ') : ''}`;
-  
-  const query = `
-    SELECT 
-      trade_date,
-      trading_code,
-      open_price,
-      high_price,
-      low_price,
-      close_price,
-      volume,
-      value
-    FROM eod_prices
-    ${whereClause}
-    ORDER BY trade_date DESC
-  `;
-  
-  try {
-    const results = await queryDSEMDS(query);
-    return results.map((row: any) => ({
-      date: row.trade_date,
-      trading_code: row.trading_code,
-      open: parseFloat(row.open_price) || 0,
-      high: parseFloat(row.high_price) || 0,
-      low: parseFloat(row.low_price) || 0,
-      close: parseFloat(row.close_price) || 0,
-      volume: parseInt(row.volume) || 0,
-      value: parseFloat(row.value) || 0,
-    }));
-  } catch (error) {
-    console.error('Error fetching EOD data:', error);
-    throw error;
-  }
-}
-
-// Fetch company fundamentals
+// Fetch company fundamentals from external API
 async function fetchFundamentals(tradingCode?: string): Promise<DSEFundamentalData[]> {
-  console.log('Fetching fundamentals from DSE MDS...');
+  console.log('Fetching fundamentals from external API...');
   
-  if (!isDSEConfigured()) {
-    console.log('DSE MDS not configured - returning empty array');
+  if (!isExternalAPIConfigured()) {
+    console.log('External API not configured - returning empty array');
     return [];
   }
 
-  const whereClause = tradingCode ? `WHERE trading_code = '${tradingCode}'` : '';
-  
-  const query = `
-    SELECT 
-      trading_code,
-      eps,
-      audited_pe,
-      sector,
-      category,
-      market_cap,
-      total_securities,
-      director_percent,
-      govt_percent,
-      institute_percent,
-      foreign_percent,
-      public_percent
-    FROM company_fundamentals
-    ${whereClause}
-  `;
-  
   try {
-    const results = await queryDSEMDS(query);
-    return results.map((row: any) => ({
-      trading_code: row.trading_code,
-      eps: parseFloat(row.eps) || undefined,
-      audited_pe: parseFloat(row.audited_pe) || undefined,
-      sector: row.sector || undefined,
-      category: row.category || undefined,
-      market_cap: parseFloat(row.market_cap) || undefined,
-      total_securities: parseInt(row.total_securities) || undefined,
-      director_percent: parseFloat(row.director_percent) || undefined,
-      govt_percent: parseFloat(row.govt_percent) || undefined,
-      institute_percent: parseFloat(row.institute_percent) || undefined,
-      foreign_percent: parseFloat(row.foreign_percent) || undefined,
-      public_percent: parseFloat(row.public_percent) || undefined,
-    }));
+    const params: Record<string, unknown> = { action: 'get_fundamentals' };
+    if (tradingCode) {
+      params.trading_code = tradingCode;
+    }
+    
+    const response = await fetchFromExternalAPI(params);
+    const fundamentals = mapToDSEFundamentalData(response);
+    console.log(`Mapped ${fundamentals.length} fundamental records`);
+    return fundamentals;
   } catch (error) {
     console.error('Error fetching fundamentals:', error);
     throw error;
@@ -327,11 +307,11 @@ serve(async (req) => {
   }
 
   try {
-    const { action, trading_code, trading_codes, from_date, to_date, sync_to_db } = await req.json();
+    const { action, trading_code, trading_codes, sync_to_db } = await req.json();
 
     console.log(`DSE Market Data - Action: ${action}`);
 
-    let result: any;
+    let result: unknown;
 
     switch (action) {
       case 'get_realtime_prices':
@@ -343,15 +323,6 @@ serve(async (req) => {
         } else {
           result = { prices };
         }
-        break;
-
-      case 'get_eod_data':
-        // Fetch end-of-day historical data for a specific security
-        if (!trading_code) {
-          throw new Error('trading_code is required for EOD data');
-        }
-        const eodData = await fetchEODData(trading_code, from_date, to_date);
-        result = { eod_data: eodData };
         break;
 
       case 'get_fundamentals':
@@ -387,20 +358,32 @@ serve(async (req) => {
         const connectionInfo = getConnectionInfo();
         result = {
           configured: connectionInfo.configured,
-          connection: {
-            ip: connectionInfo.ip,
-            database: connectionInfo.database,
-            username: connectionInfo.username,
-          },
+          endpoint: connectionInfo.endpoint,
           message: connectionInfo.configured 
-            ? 'DSE MDS credentials are configured. Note: Direct SQL Server connection requires additional infrastructure (API proxy or scheduled sync job).' 
-            : 'DSE MDS credentials not fully configured. Required: DSE_MDS_IP, DSE_MDS_DATABASE, DSE_MDS_USERNAME, DSE_MDS_PASSWORD',
-          note: 'Edge Functions cannot directly connect to SQL Server. Consider: 1) API proxy service, 2) Scheduled ETL job, 3) Azure Data Sync'
+            ? 'External Stock API is configured and ready to fetch data.' 
+            : 'External Stock API key not configured. Please add EXTERNAL_STOCK_API_KEY secret.',
         };
         break;
 
+      case 'test_connection':
+        // Test the external API connection
+        try {
+          const testResponse = await fetchFromExternalAPI({ action: 'test' });
+          result = {
+            success: true,
+            message: 'Successfully connected to external stock data API',
+            sample_response: testResponse,
+          };
+        } catch (testError) {
+          result = {
+            success: false,
+            message: testError instanceof Error ? testError.message : 'Connection test failed',
+          };
+        }
+        break;
+
       default:
-        throw new Error(`Unknown action: ${action}. Valid actions: get_realtime_prices, get_eod_data, get_fundamentals, sync_all, check_status`);
+        throw new Error(`Unknown action: ${action}. Valid actions: get_realtime_prices, get_fundamentals, sync_all, check_status, test_connection`);
     }
 
     return new Response(JSON.stringify({ success: true, data: result }), {
