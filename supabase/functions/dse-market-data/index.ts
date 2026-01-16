@@ -302,25 +302,32 @@ async function syncPricesToDatabase(prices: DSEPriceData[]): Promise<{ updated: 
   const errors: string[] = [];
 
   for (const price of prices) {
-    const { error } = await supabase
+    console.log(`Updating price for ${price.trading_code}: close=${price.close_price}, volume=${price.volume}`);
+    
+    // Use update instead of upsert to only update existing records
+    const { data, error, count } = await supabase
       .from('securities')
-      .upsert({
-        trading_code: price.trading_code,
+      .update({
         close_price: price.close_price,
-        high_price: price.high_price,
-        low_price: price.low_price,
-        open_price: price.open_price,
-        volume: price.volume,
+        high_price: price.high_price || null,
+        low_price: price.low_price || null,
+        open_price: price.open_price || null,
+        volume: price.volume || null,
         last_synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'trading_code',
-      });
+      })
+      .eq('trading_code', price.trading_code)
+      .select('trading_code');
 
     if (error) {
+      console.error(`Error updating ${price.trading_code}:`, error.message);
       errors.push(`${price.trading_code}: ${error.message}`);
-    } else {
+    } else if (data && data.length > 0) {
+      console.log(`Successfully updated ${price.trading_code}`);
       updated++;
+    } else {
+      console.log(`No matching record found for ${price.trading_code}`);
+      errors.push(`${price.trading_code}: No matching record in database`);
     }
   }
 
@@ -406,9 +413,12 @@ async function bulkSyncFromExternalAPI(): Promise<{
         const prices = mapToDSEPriceData(response);
         const fundamentals = mapToDSEFundamentalData(response);
         
+        let priceUpdateSuccess = false;
+        
         if (prices.length > 0) {
           const priceResult = await syncPricesToDatabase(prices);
-          if (priceResult.errors.length > 0) {
+          priceUpdateSuccess = priceResult.updated > 0;
+          if (priceResult.errors.length > 0 && priceResult.updated === 0) {
             return { success: false, symbol, error: priceResult.errors.join(', ') };
           }
         }
@@ -417,7 +427,12 @@ async function bulkSyncFromExternalAPI(): Promise<{
           await syncFundamentalsToDatabase(fundamentals);
         }
         
-        return { success: prices.length > 0, symbol, error: prices.length === 0 ? 'No data returned' : undefined };
+        // Success if we got prices AND successfully updated the database
+        return { 
+          success: priceUpdateSuccess, 
+          symbol, 
+          error: prices.length === 0 ? 'No data from API' : (!priceUpdateSuccess ? 'No matching record in DB' : undefined) 
+        };
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
         return { success: false, symbol, error: errorMessage };
