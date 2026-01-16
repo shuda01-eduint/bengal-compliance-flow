@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImportBalancesRawDialog } from "@/components/admin/ImportBalancesRawDialog";
 import { CopyBalancesDialog } from "@/components/admin/CopyBalancesDialog";
+import { ImportAdminBalanceDialog } from "@/components/admin/ImportAdminBalanceDialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, parseISO } from "date-fns";
@@ -572,7 +573,8 @@ const AdminBalancesPage = () => {
             )}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <ImportAdminBalanceDialog onSuccess={handleImportComplete} />
             <CopyBalancesDialog 
               availableDates={availableDates || []} 
               onCopyComplete={handleImportComplete} 
