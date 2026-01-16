@@ -23,7 +23,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Upload, CalendarIcon, AlertTriangle, Loader2, FileSpreadsheet, Database, Users, Trash2 } from "lucide-react";
+import { Upload, CalendarIcon, AlertTriangle, Loader2, FileSpreadsheet, Database, Users, Trash2, Package } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -39,11 +39,20 @@ interface ParsedAdminBalance {
   rm_name?: string;
   rm_email?: string;
   department?: string;
+  // Holdings data
+  instrument?: string;
+  boid?: string;
+  total_stock?: number;
+  saleable?: number;
+  avg_cost?: number;
+  total_cost?: number;
+  market_value?: number;
 }
 
 interface ImportResults {
   snapshots_imported: number;
   investors_updated: number;
+  holdings_imported: number;
   eod_cleared_after: number;
   errors: string[];
 }
@@ -58,6 +67,14 @@ const COLUMN_MAPPINGS: Record<string, string[]> = {
   rm_name: ['RM', 'RM Name', 'rm_name', 'rm', 'Relationship Manager', 'Manager'],
   rm_email: ['RM Email', 'rm_email', 'RMEmail', 'RM ID'],
   department: ['Department', 'Dept', 'department', 'Branch', 'Outlet'],
+  // Holdings columns
+  instrument: ['Instrument', 'Trading Code', 'Script', 'Security', 'Symbol', 'Stock', 'Scrip'],
+  total_stock: ['TotalStock', 'Total Stock', 'Total Qty', 'Qty', 'Quantity', 'Holdings', 'Total Quantity'],
+  saleable: ['Saleable', 'Saleable Qty', 'SaleableQty', 'Sellable', 'Available', 'Free Qty'],
+  avg_cost: ['AvgCost', 'Avg Cost', 'Average Cost', 'Avg. Cost', 'Unit Cost', 'Avg Price'],
+  total_cost: ['Total Cost', 'TotalCost', 'Cost', 'Cost Value', 'Total Purchase'],
+  market_value: ['Total M.V.', 'Total MV', 'Market Value', 'M.V.', 'MV', 'TotalMV', 'Current Value'],
+  boid: ['BOID', 'BO ID', 'Beneficiary ID', 'BO Account', 'BO'],
 };
 
 export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void }) => {
@@ -75,6 +92,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
   
   // Options
   const [updateInvestors, setUpdateInvestors] = useState(true);
+  const [updateHoldings, setUpdateHoldings] = useState(true);
   const [clearAfterDate, setClearAfterDate] = useState(true);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
@@ -239,6 +257,15 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
           const rmNameRaw = findColumnValue(row, 'rm_name');
           const rmEmailRaw = findColumnValue(row, 'rm_email');
           const departmentRaw = findColumnValue(row, 'department');
+          
+          // Holdings data
+          const instrumentRaw = findColumnValue(row, 'instrument');
+          const boidRaw = findColumnValue(row, 'boid');
+          const totalStockRaw = findColumnValue(row, 'total_stock');
+          const saleableRaw = findColumnValue(row, 'saleable');
+          const avgCostRaw = findColumnValue(row, 'avg_cost');
+          const totalCostRaw = findColumnValue(row, 'total_cost');
+          const marketValueRaw = findColumnValue(row, 'market_value');
 
           parsed.push({
             investor_code: investorCode,
@@ -249,6 +276,14 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
             rm_name: rmNameRaw ? String(rmNameRaw).trim() : undefined,
             rm_email: rmEmailRaw ? String(rmEmailRaw).trim() : undefined,
             department: departmentRaw ? String(departmentRaw).trim() : undefined,
+            // Holdings
+            instrument: instrumentRaw ? String(instrumentRaw).trim() : undefined,
+            boid: boidRaw ? String(boidRaw).trim() : undefined,
+            total_stock: parseNumber(totalStockRaw) ?? undefined,
+            saleable: parseNumber(saleableRaw) ?? undefined,
+            avg_cost: parseNumber(avgCostRaw) ?? undefined,
+            total_cost: parseNumber(totalCostRaw) ?? undefined,
+            market_value: parseNumber(marketValueRaw) ?? undefined,
           });
         });
 
@@ -300,9 +335,19 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
     const importResults: ImportResults = {
       snapshots_imported: 0,
       investors_updated: 0,
+      holdings_imported: 0,
       eod_cleared_after: 0,
       errors: [],
     };
+
+    // Deduplicate investors for ledger snapshots (multiple rows per investor due to holdings)
+    const uniqueInvestors = new Map<string, ParsedAdminBalance>();
+    parsedData.forEach(item => {
+      if (!uniqueInvestors.has(item.investor_code)) {
+        uniqueInvestors.set(item.investor_code, item);
+      }
+    });
+    const snapshotData = Array.from(uniqueInvestors.values());
 
     try {
       // STEP 1: Clear existing EOD snapshots for this date
@@ -347,10 +392,10 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       }
       setProgress(15);
 
-      // STEP 3: Import EOD ledger snapshots
-      setProgressStage("Importing ledger snapshots...");
-      for (let i = 0; i < parsedData.length; i += batchSize) {
-        const batch = parsedData.slice(i, i + batchSize);
+      // STEP 3: Import EOD ledger snapshots (deduplicated - one per investor)
+      setProgressStage(`Importing ${snapshotData.length} unique investor balances...`);
+      for (let i = 0; i < snapshotData.length; i += batchSize) {
+        const batch = snapshotData.slice(i, i + batchSize);
         
         const records = batch.map((item) => ({
           eod_date: dateStr,
@@ -366,12 +411,12 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
 
         if (error) {
           console.error("Snapshot insert error:", error);
-          importResults.errors.push(`Batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
+          importResults.errors.push(`Snapshot batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
         } else {
           importResults.snapshots_imported += batch.length;
         }
 
-        const snapshotProgress = 15 + ((i + batch.length) / parsedData.length) * 40;
+        const snapshotProgress = 15 + ((i + batch.length) / snapshotData.length) * 25;
         setProgress(Math.round(snapshotProgress));
       }
 
@@ -379,7 +424,8 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       if (updateInvestors) {
         setProgressStage("Updating investor commission rates...");
         
-        const investorsToUpdate = parsedData.filter(
+        // Use deduplicated data for investor updates
+        const investorsToUpdate = Array.from(uniqueInvestors.values()).filter(
           (item) => item.commission_rate !== undefined || item.account_type !== undefined
         );
 
@@ -416,8 +462,65 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
             }
           }
 
-          const investorProgress = 55 + ((i + batch.length) / investorsToUpdate.length) * 40;
+          const investorProgress = 40 + ((i + batch.length) / investorsToUpdate.length) * 20;
           setProgress(Math.round(investorProgress));
+        }
+      }
+
+      // STEP 5: Import Holdings (if enabled)
+      if (updateHoldings) {
+        // Filter rows that have instrument data
+        const holdingsToImport = parsedData.filter(item => 
+          item.instrument && item.instrument.trim() !== '' && item.total_stock !== undefined
+        );
+
+        if (holdingsToImport.length > 0) {
+          setProgressStage(`Clearing and importing ${holdingsToImport.length} stock holdings...`);
+          
+          // Clear ALL existing holdings
+          const { error: holdingsClearError } = await supabase
+            .from("holdings")
+            .delete()
+            .neq("id", "00000000-0000-0000-0000-000000000000");
+          
+          if (holdingsClearError) {
+            importResults.errors.push(`Failed to clear holdings: ${holdingsClearError.message}`);
+          }
+
+          setProgress(65);
+
+          // Batch insert new holdings
+          for (let i = 0; i < holdingsToImport.length; i += batchSize) {
+            const batch = holdingsToImport.slice(i, i + batchSize);
+            
+            const records = batch.map(item => ({
+              trading_code: item.instrument!,
+              investor_code: item.investor_code,
+              investor_name: item.investor_name || null,
+              boid: item.boid || null,
+              total_stock: item.total_stock || 0,
+              saleable: item.saleable || 0,
+              avg_cost: item.avg_cost || 0,
+              total_cost: item.total_cost || 0,
+              market_value: item.market_value || 0,
+              ledger_balance: item.ledger_balance,
+              rm_email: item.rm_email || null,
+            }));
+
+            const { error } = await supabase
+              .from("holdings")
+              .insert(records);
+
+            if (error) {
+              console.error("Holdings insert error:", error);
+              importResults.errors.push(`Holdings batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
+            } else {
+              importResults.holdings_imported += batch.length;
+            }
+
+            const holdingsProgress = 65 + ((i + batch.length) / holdingsToImport.length) * 30;
+            setProgress(Math.round(holdingsProgress));
+          }
         }
       }
 
@@ -426,9 +529,14 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       setResults(importResults);
 
       if (importResults.errors.length === 0) {
-        toast.success(
-          `Baseline import complete: ${importResults.snapshots_imported} snapshots, ${importResults.investors_updated} investors updated`
-        );
+        const parts = [
+          `${importResults.snapshots_imported} snapshots`,
+          `${importResults.investors_updated} investors`,
+        ];
+        if (importResults.holdings_imported > 0) {
+          parts.push(`${importResults.holdings_imported} holdings`);
+        }
+        toast.success(`Baseline import complete: ${parts.join(', ')}`);
         onSuccess?.();
       } else {
         toast.warning(`Import completed with ${importResults.errors.length} errors`);
@@ -443,12 +551,26 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
   };
 
   // Stats for preview
+  const uniqueInvestorCount = new Set(parsedData.map(i => i.investor_code)).size;
+  const holdingsRows = parsedData.filter(i => i.instrument && i.instrument.trim() !== '' && i.total_stock !== undefined);
+  const uniqueInstruments = new Set(holdingsRows.map(i => i.instrument));
+  
   const stats = {
-    totalBalance: parsedData.reduce((sum, item) => sum + item.ledger_balance, 0),
+    totalRows: parsedData.length,
+    uniqueInvestors: uniqueInvestorCount,
+    totalBalance: parsedData.reduce((sum, item, index, arr) => {
+      // Only count balance once per investor
+      const firstIndex = arr.findIndex(i => i.investor_code === item.investor_code);
+      return index === firstIndex ? sum + item.ledger_balance : sum;
+    }, 0),
     withCommission: parsedData.filter((item) => item.commission_rate !== undefined).length,
     withAccountType: parsedData.filter((item) => item.account_type !== undefined).length,
-    marginAccounts: parsedData.filter((item) => item.account_type?.toLowerCase().includes('margin')).length,
-    cashAccounts: parsedData.filter((item) => item.account_type?.toLowerCase().includes('cash')).length,
+    marginAccounts: new Set(parsedData.filter((item) => item.account_type?.toLowerCase().includes('margin')).map(i => i.investor_code)).size,
+    cashAccounts: new Set(parsedData.filter((item) => item.account_type?.toLowerCase().includes('cash')).map(i => i.investor_code)).size,
+    // Holdings stats
+    holdingsCount: holdingsRows.length,
+    uniqueInstrumentsCount: uniqueInstruments.size,
+    totalMarketValue: holdingsRows.reduce((sum, i) => sum + (i.market_value || 0), 0),
   };
 
   return (
@@ -568,13 +690,28 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
                   Parsed Data Summary
                 </h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>Total Records: <span className="font-medium">{parsedData.length.toLocaleString()}</span></div>
-                  <div>Total Balance: <span className="font-medium">{stats.totalBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+                  <div>Total Rows: <span className="font-medium">{stats.totalRows.toLocaleString()}</span></div>
+                  <div>Unique Investors: <span className="font-medium">{stats.uniqueInvestors.toLocaleString()}</span></div>
+                  <div>Total Ledger Balance: <span className="font-medium">{stats.totalBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
                   <div>With Commission Rate: <span className="font-medium">{stats.withCommission.toLocaleString()}</span></div>
-                  <div>With Account Type: <span className="font-medium">{stats.withAccountType.toLocaleString()}</span></div>
                   <div>Margin Accounts: <span className="font-medium">{stats.marginAccounts.toLocaleString()}</span></div>
                   <div>Cash Accounts: <span className="font-medium">{stats.cashAccounts.toLocaleString()}</span></div>
                 </div>
+                
+                {/* Holdings Stats */}
+                {stats.holdingsCount > 0 && (
+                  <div className="border-t pt-3 mt-3">
+                    <h5 className="font-medium text-sm flex items-center gap-2 mb-2">
+                      <Package className="h-4 w-4" />
+                      Stock Holdings
+                    </h5>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>Holdings Rows: <span className="font-medium">{stats.holdingsCount.toLocaleString()}</span></div>
+                      <div>Unique Instruments: <span className="font-medium">{stats.uniqueInstrumentsCount.toLocaleString()}</span></div>
+                      <div className="col-span-2">Total Market Value: <span className="font-medium">{stats.totalMarketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -591,6 +728,18 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
                   />
                   <label htmlFor="update-investors" className="text-sm cursor-pointer">
                     Update investor commission rates and account types
+                  </label>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="update-holdings"
+                    checked={updateHoldings}
+                    onCheckedChange={(checked) => setUpdateHoldings(checked === true)}
+                  />
+                  <label htmlFor="update-holdings" className="text-sm cursor-pointer flex items-center gap-1">
+                    <Package className="h-3 w-3 text-primary" />
+                    Replace all holdings with {stats.holdingsCount.toLocaleString()} stock positions
                   </label>
                 </div>
                 
@@ -639,6 +788,12 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
                   <div className="font-medium">{results.snapshots_imported.toLocaleString()}</div>
                   <div>Investors Updated:</div>
                   <div className="font-medium">{results.investors_updated.toLocaleString()}</div>
+                  {results.holdings_imported > 0 && (
+                    <>
+                      <div>Holdings Imported:</div>
+                      <div className="font-medium">{results.holdings_imported.toLocaleString()}</div>
+                    </>
+                  )}
                   {results.eod_cleared_after > 0 && (
                     <>
                       <div>Future EOD Cleared:</div>
