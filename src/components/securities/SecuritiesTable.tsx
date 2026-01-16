@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import * as XLSX from "xlsx";
 import { SecurityRecordSchema, sanitizeString } from "@/lib/validation-schemas";
 
@@ -48,6 +49,7 @@ interface SyncStatus {
     synced: number;
     failed: number;
   };
+  progress?: number;
 }
 
 const SECTORS = [
@@ -449,13 +451,24 @@ export function SecuritiesTable() {
   const handleBulkSync = async () => {
     setSyncStatus({ 
       status: 'syncing', 
-      message: 'Syncing all securities from external API... This may take a few minutes.' 
+      message: 'Starting bulk sync... Fetching all securities.',
+      progress: 0
     });
     
     try {
+      // Start a progress simulation while the edge function runs
+      const progressInterval = setInterval(() => {
+        setSyncStatus(prev => ({
+          ...prev,
+          progress: Math.min((prev.progress || 0) + 2, 95) // Cap at 95% until complete
+        }));
+      }, 1000);
+      
       const { data, error } = await supabase.functions.invoke('dse-market-data', {
         body: { action: 'bulk_sync' }
       });
+      
+      clearInterval(progressInterval);
       
       if (error) throw error;
       
@@ -467,9 +480,10 @@ export function SecuritiesTable() {
       
       setSyncStatus({
         status: 'success',
-        message: `Synced ${result.synced} of ${result.total} securities. ${result.failed} failed.`,
+        message: `Successfully synced ${result.synced} of ${result.total} securities.`,
         configured: true,
         lastSynced: result.synced_at,
+        progress: 100,
         syncResult: {
           total: result.total,
           synced: result.synced,
@@ -490,7 +504,8 @@ export function SecuritiesTable() {
       setSyncStatus({
         status: 'error',
         message: error.message || 'Bulk sync failed',
-        configured: false
+        configured: false,
+        progress: 0
       });
       
       toast({
@@ -501,6 +516,7 @@ export function SecuritiesTable() {
     }
   };
 
+  const getSyncStatusIcon = () => {
     switch (syncStatus.status) {
       case 'syncing':
         return <Loader2 className="h-4 w-4 animate-spin" />;
@@ -584,12 +600,24 @@ export function SecuritiesTable() {
                            syncStatus.status === 'success' ? 'Completed' : 'Attention Required'}
                         </span>
                       </div>
+                      
+                      {/* Progress Bar */}
+                      {syncStatus.status === 'syncing' && (
+                        <div className="mt-3 space-y-2">
+                          <Progress value={syncStatus.progress || 0} className="h-2" />
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Syncing all 426 securities...</span>
+                            <span>{syncStatus.progress || 0}%</span>
+                          </div>
+                        </div>
+                      )}
+                      
                       {syncStatus.message && (
                         <p className="text-xs text-muted-foreground mt-2">{syncStatus.message}</p>
                       )}
                       {syncStatus.lastSynced && (
                         <p className="text-xs text-muted-foreground mt-1">
-                          Last checked: {new Date(syncStatus.lastSynced).toLocaleString()}
+                          Last synced: {new Date(syncStatus.lastSynced).toLocaleString()}
                         </p>
                       )}
                     </div>
@@ -602,19 +630,40 @@ export function SecuritiesTable() {
 
                   {/* Sync Results */}
                   {syncStatus.syncResult && (
-                    <div className="text-xs space-y-1 bg-muted/50 p-2 rounded">
-                      <div className="flex justify-between">
-                        <span>Total Securities:</span>
-                        <span className="font-medium">{syncStatus.syncResult.total}</span>
+                    <div className="space-y-2 bg-muted/50 p-3 rounded border">
+                      <div className="text-sm font-medium flex items-center gap-2">
+                        {syncStatus.status === 'success' ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4 text-amber-500" />
+                        )}
+                        Sync Results
                       </div>
-                      <div className="flex justify-between text-green-600">
-                        <span>Successfully Synced:</span>
-                        <span className="font-medium">{syncStatus.syncResult.synced}</span>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-background/50 p-2 rounded">
+                          <div className="text-lg font-bold">{syncStatus.syncResult.total}</div>
+                          <div className="text-xs text-muted-foreground">Total</div>
+                        </div>
+                        <div className="bg-green-500/10 p-2 rounded">
+                          <div className="text-lg font-bold text-green-600">{syncStatus.syncResult.synced}</div>
+                          <div className="text-xs text-muted-foreground">Success</div>
+                        </div>
+                        <div className={`p-2 rounded ${syncStatus.syncResult.failed > 0 ? 'bg-amber-500/10' : 'bg-background/50'}`}>
+                          <div className={`text-lg font-bold ${syncStatus.syncResult.failed > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                            {syncStatus.syncResult.failed}
+                          </div>
+                          <div className="text-xs text-muted-foreground">Failed</div>
+                        </div>
                       </div>
-                      {syncStatus.syncResult.failed > 0 && (
-                        <div className="flex justify-between text-amber-600">
-                          <span>Failed:</span>
-                          <span className="font-medium">{syncStatus.syncResult.failed}</span>
+                      {syncStatus.syncResult.synced > 0 && (
+                        <div className="mt-2">
+                          <Progress 
+                            value={(syncStatus.syncResult.synced / syncStatus.syncResult.total) * 100} 
+                            className="h-1.5"
+                          />
+                          <div className="text-xs text-muted-foreground text-center mt-1">
+                            {((syncStatus.syncResult.synced / syncStatus.syncResult.total) * 100).toFixed(1)}% success rate
+                          </div>
                         </div>
                       )}
                     </div>
