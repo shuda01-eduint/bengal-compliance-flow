@@ -63,7 +63,7 @@ const COLUMN_MAPPINGS: Record<string, string[]> = {
   ledger_balance: ['Ledger Balance', 'Ledger Balar', 'Ledger Bal', 'Ledger', 'ledger_balance', 'Balance', 'Cash Balance'],
   investor_name: ['Investor Name', 'Name', 'Client Name', 'investor_name', 'InvestorName'],
   commission_rate: ['Commission Rate', 'CommissionRate', 'Commission', 'Brokerage Commission', 'Brokerage', 'commission_rate', 'Comm Rate', 'Comm. Rate'],
-  account_type: ['ChargeRate', 'Charge Rate', 'Account Type', 'A/C Type', 'Type', 'account_type', 'AccType', 'Acc Type', 'Cash/Margin'],
+  account_type: ['Account Type', 'A/C Type', 'AccType', 'Acc Type', 'account_type', 'Cash/Margin', 'Type', 'ChargeRate', 'Charge Rate'],
   rm_name: ['RM', 'RM Name', 'rm_name', 'rm', 'Relationship Manager', 'Manager'],
   rm_email: ['RM Email', 'rm_email', 'RMEmail', 'RM ID'],
   department: ['Department', 'Dept', 'department', 'Branch', 'Outlet'],
