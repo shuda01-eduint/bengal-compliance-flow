@@ -501,14 +501,14 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         if (holdingsToImport.length > 0) {
           setProgressStage(`Clearing and importing ${holdingsToImport.length} stock holdings...`);
           
-          // Clear ALL existing holdings
-          const { error: holdingsClearError } = await supabase
-            .from("holdings")
-            .delete()
-            .neq("id", "00000000-0000-0000-0000-000000000000");
+          // Clear ALL existing holdings using batched RPC to avoid timeout
+          setProgressStage("Clearing existing holdings (this may take a moment)...");
+          const { data: deletedCount, error: holdingsClearError } = await supabase.rpc('delete_all_holdings');
           
           if (holdingsClearError) {
             importResults.errors.push(`Failed to clear holdings: ${holdingsClearError.message}`);
+          } else {
+            console.log(`Cleared ${deletedCount} existing holdings`);
           }
 
           setProgress(65);
