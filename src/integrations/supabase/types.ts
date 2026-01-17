@@ -380,6 +380,63 @@ export type Database = {
         }
         Relationships: []
       }
+      charge_rate_scheme: {
+        Row: {
+          basis: string | null
+          charge_code: string
+          charge_type: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          effective_from: string
+          effective_to: string | null
+          id: string
+          investor_group: string | null
+          is_active: boolean
+          max_base_amount: number | null
+          max_charge: number | null
+          min_base_amount: number | null
+          min_charge: number | null
+          rate: number
+        }
+        Insert: {
+          basis?: string | null
+          charge_code: string
+          charge_type: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          investor_group?: string | null
+          is_active?: boolean
+          max_base_amount?: number | null
+          max_charge?: number | null
+          min_base_amount?: number | null
+          min_charge?: number | null
+          rate: number
+        }
+        Update: {
+          basis?: string | null
+          charge_code?: string
+          charge_type?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          investor_group?: string | null
+          is_active?: boolean
+          max_base_amount?: number | null
+          max_charge?: number | null
+          min_base_amount?: number | null
+          min_charge?: number | null
+          rate?: number
+        }
+        Relationships: []
+      }
       clients: {
         Row: {
           accrued_interest: number
@@ -497,6 +554,66 @@ export type Database = {
           requested_commission?: number
           status?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      commission_rate_scheme: {
+        Row: {
+          commission_rate: number
+          commission_type: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          effective_from: string
+          effective_to: string | null
+          id: string
+          instrument_group: string | null
+          investor_group: string | null
+          is_active: boolean
+          max_commission: number | null
+          max_trade_value: number | null
+          min_commission: number | null
+          min_trade_value: number | null
+          rm_id: string | null
+          scheme_code: string
+        }
+        Insert: {
+          commission_rate: number
+          commission_type: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          instrument_group?: string | null
+          investor_group?: string | null
+          is_active?: boolean
+          max_commission?: number | null
+          max_trade_value?: number | null
+          min_commission?: number | null
+          min_trade_value?: number | null
+          rm_id?: string | null
+          scheme_code: string
+        }
+        Update: {
+          commission_rate?: number
+          commission_type?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          instrument_group?: string | null
+          investor_group?: string | null
+          is_active?: boolean
+          max_commission?: number | null
+          max_trade_value?: number | null
+          min_commission?: number | null
+          min_trade_value?: number | null
+          rm_id?: string | null
+          scheme_code?: string
         }
         Relationships: []
       }
@@ -973,6 +1090,41 @@ export type Database = {
         }
         Relationships: []
       }
+      investor_rm_mapping_v2: {
+        Row: {
+          created_at: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          investor_code: string
+          rm_id: string
+        }
+        Insert: {
+          created_at?: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          investor_code: string
+          rm_id: string
+        }
+        Update: {
+          created_at?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          investor_code?: string
+          rm_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investor_rm_mapping_v2_rm_id_fkey"
+            columns: ["rm_id"]
+            isOneToOne: false
+            referencedRelation: "relationship_manager"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       investors: {
         Row: {
           account_open_date: string | null
@@ -1299,6 +1451,51 @@ export type Database = {
           status?: string
           total_buy_value?: number | null
           total_sell_value?: number | null
+        }
+        Relationships: []
+      }
+      relationship_manager: {
+        Row: {
+          branch_code: string | null
+          created_at: string
+          default_commission_scheme_code: string | null
+          department: string | null
+          hire_date: string | null
+          id: string
+          resign_date: string | null
+          rm_code: string
+          rm_email: string | null
+          rm_name: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          branch_code?: string | null
+          created_at?: string
+          default_commission_scheme_code?: string | null
+          department?: string | null
+          hire_date?: string | null
+          id?: string
+          resign_date?: string | null
+          rm_code: string
+          rm_email?: string | null
+          rm_name: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          branch_code?: string | null
+          created_at?: string
+          default_commission_scheme_code?: string | null
+          department?: string | null
+          hire_date?: string | null
+          id?: string
+          resign_date?: string | null
+          rm_code?: string
+          rm_email?: string | null
+          rm_name?: string
+          status?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -1777,6 +1974,22 @@ export type Database = {
           total_stock: number
         }[]
       }
+      get_charge_rate: {
+        Args: {
+          p_as_of_date?: string
+          p_base_amount?: number
+          p_charge_code: string
+          p_investor_group?: string
+        }
+        Returns: {
+          basis: string
+          charge_code: string
+          charge_type: string
+          max_charge: number
+          min_charge: number
+          rate: number
+        }[]
+      }
       get_commission_by_department: {
         Args: { _from_tx_date?: string; _to_tx_date?: string }
         Returns: {
@@ -1784,6 +1997,22 @@ export type Database = {
           total_commission: number
           total_turnover: number
           trade_count: number
+        }[]
+      }
+      get_commission_rate: {
+        Args: {
+          p_instrument_group?: string
+          p_investor_group?: string
+          p_rm_id?: string
+          p_trade_date: string
+          p_trade_value?: number
+        }
+        Returns: {
+          commission_rate: number
+          commission_type: string
+          max_commission: number
+          min_commission: number
+          scheme_code: string
         }[]
       }
       get_deposit_import_stats: {
@@ -1814,6 +2043,17 @@ export type Database = {
           account_types: string[]
           investor_types: string[]
           statuses: string[]
+        }[]
+      }
+      get_investor_rm: {
+        Args: { p_as_of_date?: string; p_investor_code: string }
+        Returns: {
+          default_commission_scheme_code: string
+          department: string
+          rm_code: string
+          rm_email: string
+          rm_id: string
+          rm_name: string
         }[]
       }
       get_margin_composition_by_department: {
