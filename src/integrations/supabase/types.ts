@@ -1753,6 +1753,7 @@ export type Database = {
         Args: { p_source_date: string; p_target_date: string }
         Returns: Json
       }
+      delete_all_holdings: { Args: never; Returns: number }
       get_accounting_data_v2: {
         Args: {
           _account_type_filter: string
