@@ -420,7 +420,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         setProgress(Math.round(snapshotProgress));
       }
 
-      // STEP 4: Update investors with commission rates and account types
+      // STEP 4: Update investors with commission rates and account types (BULK UPDATE)
       if (updateInvestors) {
         setProgressStage("Updating investor commission rates...");
         
@@ -429,41 +429,65 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
           (item) => item.commission_rate !== undefined || item.account_type !== undefined
         );
 
-        for (let i = 0; i < investorsToUpdate.length; i += batchSize) {
-          const batch = investorsToUpdate.slice(i, i + batchSize);
-
-          for (const item of batch) {
-            const updateData: Record<string, unknown> = {};
-            
-            if (item.commission_rate !== undefined) {
-              updateData.brokerage_commission = item.commission_rate;
-            }
-            if (item.account_type !== undefined) {
-              // Map ChargeRate values to account_type
-              const accType = item.account_type.toLowerCase();
-              if (accType.includes('margin')) {
-                updateData.account_type = 'Margin';
-              } else if (accType.includes('cash')) {
-                updateData.account_type = 'Cash';
-              } else {
-                updateData.account_type = item.account_type;
-              }
-            }
-
-            if (Object.keys(updateData).length > 0) {
-              const { error } = await supabase
-                .from("investors")
-                .update(updateData)
-                .eq("investor_code", item.investor_code);
-
-              if (!error) {
-                importResults.investors_updated++;
-              }
+        // Group investors by their update payload to enable bulk updates
+        const updateGroups = new Map<string, { updateData: Record<string, unknown>; investorCodes: string[] }>();
+        
+        for (const item of investorsToUpdate) {
+          const updateData: Record<string, unknown> = {};
+          
+          if (item.commission_rate !== undefined) {
+            updateData.brokerage_commission = item.commission_rate;
+          }
+          if (item.account_type !== undefined) {
+            // Map ChargeRate values to account_type
+            const accType = item.account_type.toLowerCase();
+            if (accType.includes('margin')) {
+              updateData.account_type = 'Margin';
+            } else if (accType.includes('cash')) {
+              updateData.account_type = 'Cash';
+            } else {
+              updateData.account_type = item.account_type;
             }
           }
 
-          const investorProgress = 40 + ((i + batch.length) / investorsToUpdate.length) * 20;
-          setProgress(Math.round(investorProgress));
+          if (Object.keys(updateData).length > 0) {
+            // Create a key based on the update payload
+            const groupKey = `${updateData.brokerage_commission ?? ''}|${updateData.account_type ?? ''}`;
+            
+            if (!updateGroups.has(groupKey)) {
+              updateGroups.set(groupKey, { updateData, investorCodes: [] });
+            }
+            updateGroups.get(groupKey)!.investorCodes.push(item.investor_code);
+          }
+        }
+
+        // Perform bulk updates per group with chunking to avoid URL length limits
+        const totalToUpdate = investorsToUpdate.length;
+        let processedCount = 0;
+        const bulkChunkSize = 100; // Safe chunk size for .in() to avoid URL length issues
+
+        for (const [, group] of updateGroups) {
+          const { updateData, investorCodes } = group;
+          
+          // Chunk the investor codes for this group
+          for (let i = 0; i < investorCodes.length; i += bulkChunkSize) {
+            const chunk = investorCodes.slice(i, i + bulkChunkSize);
+            
+            const { error, count } = await supabase
+              .from("investors")
+              .update(updateData)
+              .in("investor_code", chunk);
+
+            if (!error) {
+              importResults.investors_updated += chunk.length;
+            } else {
+              console.error(`Bulk update failed for chunk:`, error);
+            }
+            
+            processedCount += chunk.length;
+            const investorProgress = 40 + (processedCount / totalToUpdate) * 20;
+            setProgress(Math.round(investorProgress));
+          }
         }
       }
 
