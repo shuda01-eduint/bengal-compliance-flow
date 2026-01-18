@@ -26,6 +26,7 @@ interface LedgerTransaction {
   details: string;
   quantity: number | null;
   rate: number | null;
+  commission: number;
   debit: number;
   credit: number;
   balance: number;
@@ -172,7 +173,7 @@ export function InvestorLedgerTab() {
       const endStr = format(endDate, 'yyyyMMdd');
       const { data, error } = await supabase
         .from('trade_history')
-        .select('trade_date, side, security_code, quantity, price, value')
+        .select('trade_date, side, security_code, quantity, price, value, brokerage_commission')
         .eq('client_code', searchedCode)
         .gte('trade_date', startStr)
         .lte('trade_date', endStr)
@@ -219,9 +220,17 @@ export function InvestorLedgerTab() {
       details: string;
       quantity: number | null;
       rate: number | null;
+      commission: number;
       debit: number;
       credit: number;
     }> = [];
+
+    // Get investor's commission rate, normalize it (if >= 0.1, it's a percentage)
+    const rawRate = investor?.brokerage_commission;
+    const defaultRate = 0.004; // 0.4% default
+    const commissionRate = rawRate != null 
+      ? (rawRate >= 0.1 ? rawRate / 100 : rawRate) 
+      : defaultRate;
 
     const tradeAggregates: Record<string, {
       date: string;
@@ -230,12 +239,17 @@ export function InvestorLedgerTab() {
       security_code: string;
       totalQty: number;
       totalValue: number;
+      totalCommission: number;
     }> = {};
 
     trades?.forEach(trade => {
       const key = `${trade.trade_date}_${trade.security_code}_${trade.side}`;
       const qty = Number(trade.quantity) || 0;
       const value = Number(trade.value) || 0;
+      // Use trade-level commission if available, otherwise calculate from rate
+      const commission = trade.brokerage_commission != null 
+        ? Number(trade.brokerage_commission) 
+        : value * commissionRate;
       if (!tradeAggregates[key]) {
         tradeAggregates[key] = {
           date: trade.trade_date || '',
@@ -244,10 +258,12 @@ export function InvestorLedgerTab() {
           security_code: trade.security_code || 'Unknown',
           totalQty: 0,
           totalValue: 0,
+          totalCommission: 0,
         };
       }
       tradeAggregates[key].totalQty += qty;
       tradeAggregates[key].totalValue += value;
+      tradeAggregates[key].totalCommission += commission;
     });
 
     Object.values(tradeAggregates).forEach(agg => {
@@ -258,6 +274,8 @@ export function InvestorLedgerTab() {
         ? `${dateStr.slice(6, 8)}-${getMonthName(dateStr.slice(4, 6))}-${dateStr.slice(0, 4)}`
         : dateStr;
       const avgRate = agg.totalQty > 0 ? agg.totalValue / agg.totalQty : 0;
+      // BUY: debit = value + commission (you pay for shares + commission)
+      // SELL: credit = value - commission (you receive proceeds minus commission)
       allItems.push({
         date: formattedDate,
         sortDate: dateStr,
@@ -265,8 +283,9 @@ export function InvestorLedgerTab() {
         details: `${isBuy ? 'Bought' : 'Sold'} ${agg.security_code}`,
         quantity: agg.totalQty,
         rate: avgRate,
-        debit: isBuy ? agg.totalValue : 0,
-        credit: isSell ? agg.totalValue : 0,
+        commission: agg.totalCommission,
+        debit: isBuy ? agg.totalValue + agg.totalCommission : 0,
+        credit: isSell ? agg.totalValue - agg.totalCommission : 0,
       });
     });
 
@@ -282,6 +301,7 @@ export function InvestorLedgerTab() {
         details: tx.remarks || (isDeposit ? 'Cash Deposit' : 'Cash Withdrawal'),
         quantity: null,
         rate: null,
+        commission: 0,
         debit: isDeposit ? 0 : amount,
         credit: isDeposit ? amount : 0,
       });
@@ -302,7 +322,7 @@ export function InvestorLedgerTab() {
       totalCredit: allItems.reduce((sum, i) => sum + i.credit, 0),
       closingBalance: runningBalance,
     };
-  }, [trades, transactions, openingBalanceData]);
+  }, [trades, transactions, openingBalanceData, investor]);
 
   const handleSearch = () => {
     if (investorCode.trim()) {
@@ -312,11 +332,11 @@ export function InvestorLedgerTab() {
 
   const handleExport = () => {
     if (!ledgerData.items.length || !investor) return;
-    const headers = ['Date', 'Operation', 'Details', 'Quantity', 'Rate', 'Debit', 'Credit', 'Balance'];
+    const headers = ['Date', 'Operation', 'Details', 'Quantity', 'Rate', 'Commission', 'Debit', 'Credit', 'Balance'];
     const rows = ledgerData.items.map(item => [
       item.date, item.operation, item.details,
       item.quantity?.toString() || '', item.rate?.toString() || '',
-      item.debit.toFixed(2), item.credit.toFixed(2), item.balance.toFixed(2),
+      item.commission.toFixed(2), item.debit.toFixed(2), item.credit.toFixed(2), item.balance.toFixed(2),
     ]);
     const csvContent = [
       `Investor Ledger Statement - ${investor.investor_code}`,
@@ -438,6 +458,7 @@ export function InvestorLedgerTab() {
                     <TableHead className="text-foreground font-semibold">Details</TableHead>
                     <TableHead className="text-foreground font-semibold text-right">Quantity</TableHead>
                     <TableHead className="text-foreground font-semibold text-right">Rate</TableHead>
+                    <TableHead className="text-foreground font-semibold text-right">Com</TableHead>
                     <TableHead className="text-foreground font-semibold text-right">Debit</TableHead>
                     <TableHead className="text-foreground font-semibold text-right">Credit</TableHead>
                     <TableHead className="text-foreground font-semibold text-right">Balance</TableHead>
@@ -446,7 +467,7 @@ export function InvestorLedgerTab() {
                 <TableBody>
                   {ledgerData.items.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                         No transactions found for the selected period
                       </TableCell>
                     </TableRow>
@@ -466,13 +487,14 @@ export function InvestorLedgerTab() {
                           <TableCell>{item.details}</TableCell>
                           <TableCell className="text-right">{formatNumber(item.quantity)}</TableCell>
                           <TableCell className="text-right">{formatNumber(item.rate)}</TableCell>
+                          <TableCell className="text-right text-muted-foreground">{item.commission > 0 ? formatCurrency(item.commission) : '—'}</TableCell>
                           <TableCell className={cn("text-right", item.debit > 0 && "text-destructive")}>{item.debit > 0 ? formatCurrency(item.debit) : '0.00'}</TableCell>
                           <TableCell className={cn("text-right", item.credit > 0 && "text-success")}>{item.credit > 0 ? formatCurrency(item.credit) : '0.00'}</TableCell>
                           <TableCell className={cn("text-right font-medium", item.balance < 0 ? "text-destructive" : "")}>{formatCurrency(item.balance)}</TableCell>
                         </TableRow>
                       ))}
                       <TableRow className="border-t-2 border-border bg-muted/50 font-semibold">
-                        <TableCell colSpan={5} className="text-right">Closing Balance :</TableCell>
+                        <TableCell colSpan={6} className="text-right">Closing Balance :</TableCell>
                         <TableCell className="text-right text-destructive">{formatCurrency(ledgerData.totalDebit)}</TableCell>
                         <TableCell className="text-right text-success">{formatCurrency(ledgerData.totalCredit)}</TableCell>
                         <TableCell className={cn("text-right", ledgerData.closingBalance < 0 ? "text-destructive" : "")}>{formatCurrency(ledgerData.closingBalance)}</TableCell>
