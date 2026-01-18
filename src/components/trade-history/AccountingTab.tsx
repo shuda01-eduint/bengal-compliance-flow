@@ -289,12 +289,12 @@ const AccountingTab = () => {
   }, [columns]);
 
   // Format dates for queries
-  const txDateStr = format(fromDate, 'yyyy-MM-dd'); // Transaction date (the day we're calculating for)
-  const openingDateStr = format(subDays(fromDate, 1), 'yyyy-MM-dd'); // Opening balance date (previous day's EOD)
+  const endDateStr = format(toDate, 'yyyy-MM-dd'); // End date (inclusive)
+  const openingDateStr = format(subDays(fromDate, 1), 'yyyy-MM-dd'); // Opening balance date (start date - 1 day EOD)
 
   // Fetch accounting data using optimized RPC function v3
   const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
-    queryKey: ['accounting-data-v3', debouncedSearch, txDateStr, openingDateStr, accountTypeFilter, activityFilter],
+    queryKey: ['accounting-data-v3', debouncedSearch, endDateStr, openingDateStr, accountTypeFilter, activityFilter],
     queryFn: async () => {
       const PAGE_SIZE = 1000;
       let allData: any[] = [];
@@ -304,7 +304,7 @@ const AccountingTab = () => {
       while (hasMore) {
         const { data, error } = await rpcWithRetry<any[]>('get_accounting_data_v3', {
           _opening_date: openingDateStr,
-          _tx_date: txDateStr,
+          _tx_date: endDateStr,
           _search: debouncedSearch || '',
           _account_type_filter: accountTypeFilter || 'all',
           _has_activity_filter: activityFilter || 'all',
@@ -343,11 +343,11 @@ const AccountingTab = () => {
 
   // Fetch turnover by department
   const { data: departmentTurnover } = useQuery({
-    queryKey: ['accounting-turnover-by-department', txDateStr],
+    queryKey: ['accounting-turnover-by-department', openingDateStr, endDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_turnover_by_department', {
-        _from_tx_date: txDateStr,
-        _to_tx_date: txDateStr,
+        _from_tx_date: format(fromDate, 'yyyy-MM-dd'),
+        _to_tx_date: endDateStr,
       });
       if (error) throw error;
       return data || [];
@@ -356,11 +356,11 @@ const AccountingTab = () => {
 
   // Fetch balance comparison by department (period beginning vs ending)
   const { data: balanceComparison } = useQuery({
-    queryKey: ['accounting-balance-comparison', openingDateStr, txDateStr],
+    queryKey: ['accounting-balance-comparison', openingDateStr, endDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_margin_composition_by_department', {
         p_from_date: openingDateStr,
-        p_to_date: txDateStr,
+        p_to_date: endDateStr,
       });
       if (error) throw error;
       return data || [];
@@ -370,11 +370,11 @@ const AccountingTab = () => {
 
   // Fetch commission by department
   const { data: commissionByDept } = useQuery({
-    queryKey: ['accounting-commission-by-department', txDateStr],
+    queryKey: ['accounting-commission-by-department', openingDateStr, endDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_commission_by_department', {
-        _from_tx_date: txDateStr,
-        _to_tx_date: txDateStr,
+        _from_tx_date: format(fromDate, 'yyyy-MM-dd'),
+        _to_tx_date: endDateStr,
       });
       if (error) throw error;
       return data || [];
@@ -532,7 +532,9 @@ const AccountingTab = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `accounting_${txDateStr}.csv`;
+      a.download = dateRangeDays > 1
+        ? `accounting_${format(fromDate, 'yyyy-MM-dd')}_to_${endDateStr}.csv`
+        : `accounting_${endDateStr}.csv`;
       a.click();
       
       toast.dismiss(toastId);
