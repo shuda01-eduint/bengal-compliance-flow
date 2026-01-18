@@ -1,0 +1,98 @@
+-- Fix run_batch_eod to delete existing run history before inserting
+CREATE OR REPLACE FUNCTION public.run_batch_eod(p_eod_date DATE, p_skip_existing BOOLEAN DEFAULT TRUE)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET statement_timeout = '300s'
+AS $$
+DECLARE
+  v_clients_captured INTEGER := 0;
+  v_total_ledger NUMERIC := 0;
+  v_total_deposits NUMERIC := 0;
+  v_total_withdrawals NUMERIC := 0;
+  v_existing_count INTEGER;
+BEGIN
+  -- Check if EOD already exists for this date
+  SELECT COUNT(*) INTO v_existing_count 
+  FROM eod_run_history 
+  WHERE run_date = p_eod_date;
+  
+  -- If skip_existing is true and EOD exists, return early
+  IF p_skip_existing AND v_existing_count > 0 THEN
+    RETURN json_build_object(
+      'success', true,
+      'skipped', true,
+      'message', 'EOD already exists for ' || p_eod_date::text
+    );
+  END IF;
+  
+  -- If re-running, delete existing data (both snapshots AND run history)
+  IF v_existing_count > 0 THEN
+    DELETE FROM eod_ledger_snapshots WHERE eod_date = p_eod_date;
+    DELETE FROM eod_run_history WHERE run_date = p_eod_date;
+  END IF;
+  
+  -- Calculate and insert EOD snapshots for each investor
+  INSERT INTO eod_ledger_snapshots (eod_date, investor_code, investor_name, ledger_balance, rm_email)
+  SELECT 
+    p_eod_date,
+    i.investor_code,
+    i.investor_name,
+    COALESCE(
+      (SELECT ledger_balance FROM balances_raw 
+       WHERE investor_code = i.investor_code 
+       AND as_of_date <= p_eod_date 
+       ORDER BY as_of_date DESC LIMIT 1), 0
+    ) + COALESCE(deposit_balance, 0) + COALESCE(trade_balance, 0) as ledger_balance,
+    (SELECT rm_email FROM balances_raw 
+     WHERE investor_code = i.investor_code 
+     AND as_of_date <= p_eod_date 
+     ORDER BY as_of_date DESC LIMIT 1)
+  FROM investors i
+  LEFT JOIN (
+    SELECT investor_code,
+           SUM(CASE WHEN transaction_type = 'Deposit' THEN amount ELSE -amount END) as deposit_balance
+    FROM deposits_withdrawals
+    WHERE transaction_date = p_eod_date
+    GROUP BY investor_code
+  ) dw ON dw.investor_code = i.investor_code
+  LEFT JOIN (
+    SELECT client_code,
+           SUM(CASE WHEN side = 'Sell' THEN value ELSE -value END) as trade_balance
+    FROM trade_history
+    WHERE trade_date = p_eod_date::text
+    GROUP BY client_code
+  ) th ON th.client_code = i.investor_code;
+  
+  GET DIAGNOSTICS v_clients_captured = ROW_COUNT;
+  
+  -- Calculate totals
+  SELECT 
+    COALESCE(SUM(ledger_balance), 0),
+    COALESCE(SUM(CASE WHEN ledger_balance > 0 THEN ledger_balance ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN ledger_balance < 0 THEN ABS(ledger_balance) ELSE 0 END), 0)
+  INTO v_total_ledger, v_total_deposits, v_total_withdrawals
+  FROM eod_ledger_snapshots
+  WHERE eod_date = p_eod_date;
+  
+  -- Record the run
+  INSERT INTO eod_run_history (run_date, clients_captured, total_ledger_balance, total_deposits, total_withdrawals, status)
+  VALUES (p_eod_date, v_clients_captured, v_total_ledger, v_total_deposits, v_total_withdrawals, 'completed');
+  
+  RETURN json_build_object(
+    'success', true,
+    'skipped', false,
+    'clients_captured', v_clients_captured,
+    'total_ledger_balance', v_total_ledger,
+    'total_deposits', v_total_deposits,
+    'total_withdrawals', v_total_withdrawals,
+    'eod_date', p_eod_date
+  );
+  
+EXCEPTION WHEN OTHERS THEN
+  RETURN json_build_object(
+    'success', false,
+    'error', SQLERRM
+  );
+END;
+$$;

@@ -496,13 +496,15 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* Warning */}
-            <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-md">
-              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5" />
-              <p className="text-sm text-amber-700">
-                This will delete existing EOD data for the selected date and recalculate.
-              </p>
-            </div>
+            {/* Warning - only show when not skipping existing */}
+            {!skipExisting && (
+              <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-md">
+                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5" />
+                <p className="text-sm text-amber-700">
+                  This will delete existing EOD data for the selected date and recalculate.
+                </p>
+              </div>
+            )}
             {/* Stale Data Warning */}
             {staleWarning && (
               <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
