@@ -43,6 +43,7 @@ import { CalendarIcon, Loader2, Play, AlertTriangle, ShieldCheck, RefreshCw, Tra
 import { format, addDays, parse } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchAllRows } from "@/lib/supabase-utils";
+import { rpcWithRetry, formatRpcError } from "@/lib/rpc-utils";
 
 interface BatchEodRunnerProps {
   onComplete?: () => void;
@@ -425,20 +426,30 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
     let totalClientsProcessed = 0;
 
     try {
-      const { data, error } = await supabase.rpc("run_batch_eod", {
-        p_eod_date: dateStr,
-        p_skip_existing: skipExisting,
-      });
+      // Use rpcWithRetry for better error handling and retries
+      const { data, error } = await rpcWithRetry<BatchEodResult & { skipped?: boolean; message?: string; clients_captured?: number }>(
+        "run_batch_eod",
+        {
+          p_eod_date: dateStr,
+          p_skip_existing: skipExisting,
+        },
+        { maxRetries: 1 } // Only 1 retry for long-running EOD
+      );
 
       if (error) {
-        toast.error("EOD failed", { description: error.message });
+        const friendlyMessage = formatRpcError(error);
+        toast.error("EOD failed", { 
+          description: friendlyMessage,
+          duration: 10000,
+        });
+        console.error("EOD RPC error details:", error.message);
         return;
       }
 
-      const result = data as unknown as BatchEodResult & { skipped?: boolean; message?: string; clients_captured?: number };
+      const result = data;
 
-      if (!result.success) {
-        toast.error("EOD failed", { description: result.error || "Unknown error" });
+      if (!result?.success) {
+        toast.error("EOD failed", { description: result?.error || "Unknown error" });
         return;
       }
 
@@ -466,7 +477,11 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
       onComplete?.();
     } catch (error: any) {
       console.error("EOD error:", error);
-      toast.error("EOD failed", { description: error.message });
+      const friendlyMessage = formatRpcError(error);
+      toast.error("EOD failed", { 
+        description: friendlyMessage,
+        duration: 10000,
+      });
     } finally {
       setRunning(false);
       setProgress(0);
