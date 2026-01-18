@@ -289,14 +289,12 @@ const AccountingTab = () => {
   }, [columns]);
 
   // Format dates for queries
-  const fromDateStr = format(fromDate, 'yyyy-MM-dd');
-  const toDateStr = format(toDate, 'yyyy-MM-dd');
-  const fromTradeDateStr = format(fromDate, 'yyyyMMdd');
-  const toTradeDateStr = format(toDate, 'yyyyMMdd');
+  const txDateStr = format(fromDate, 'yyyy-MM-dd'); // Transaction date (the day we're calculating for)
+  const openingDateStr = format(subDays(fromDate, 1), 'yyyy-MM-dd'); // Opening balance date (previous day's EOD)
 
-  // Fetch all accounting data using RPC function with pagination and retry logic
+  // Fetch accounting data using optimized RPC function v3
   const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
-    queryKey: ['accounting-data', debouncedSearch, fromTradeDateStr, toTradeDateStr, fromDateStr, toDateStr, accountTypeFilter, activityFilter],
+    queryKey: ['accounting-data-v3', debouncedSearch, txDateStr, openingDateStr, accountTypeFilter, activityFilter],
     queryFn: async () => {
       const PAGE_SIZE = 1000;
       let allData: any[] = [];
@@ -304,12 +302,10 @@ const AccountingTab = () => {
       let hasMore = true;
 
       while (hasMore) {
-        const { data, error } = await rpcWithRetry<any[]>('get_accounting_data_v2', {
+        const { data, error } = await rpcWithRetry<any[]>('get_accounting_data_v3', {
+          _opening_date: openingDateStr,
+          _tx_date: txDateStr,
           _search: debouncedSearch || '',
-          _from_trade_date: fromTradeDateStr,
-          _to_trade_date: toTradeDateStr,
-          _from_tx_date: fromDateStr,
-          _to_tx_date: toDateStr,
           _account_type_filter: accountTypeFilter || 'all',
           _has_activity_filter: activityFilter || 'all',
           _limit: PAGE_SIZE,
@@ -322,7 +318,7 @@ const AccountingTab = () => {
         offset += PAGE_SIZE;
       }
 
-      console.log('[AccountingTab] Fetched total:', allData.length, 'rows');
+      console.log('[AccountingTab] Fetched total:', allData.length, 'rows via v3');
       return allData;
     },
     retry: (failureCount, error: Error) => {
@@ -347,11 +343,11 @@ const AccountingTab = () => {
 
   // Fetch turnover by department
   const { data: departmentTurnover } = useQuery({
-    queryKey: ['accounting-turnover-by-department', fromDateStr, toDateStr],
+    queryKey: ['accounting-turnover-by-department', txDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_turnover_by_department', {
-        _from_tx_date: fromDateStr,
-        _to_tx_date: toDateStr,
+        _from_tx_date: txDateStr,
+        _to_tx_date: txDateStr,
       });
       if (error) throw error;
       return data || [];
@@ -360,11 +356,11 @@ const AccountingTab = () => {
 
   // Fetch balance comparison by department (period beginning vs ending)
   const { data: balanceComparison } = useQuery({
-    queryKey: ['accounting-balance-comparison', fromDateStr, toDateStr],
+    queryKey: ['accounting-balance-comparison', openingDateStr, txDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_margin_composition_by_department', {
-        p_from_date: fromDateStr,
-        p_to_date: toDateStr,
+        p_from_date: openingDateStr,
+        p_to_date: txDateStr,
       });
       if (error) throw error;
       return data || [];
@@ -374,11 +370,11 @@ const AccountingTab = () => {
 
   // Fetch commission by department
   const { data: commissionByDept } = useQuery({
-    queryKey: ['accounting-commission-by-department', fromDateStr, toDateStr],
+    queryKey: ['accounting-commission-by-department', txDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_commission_by_department', {
-        _from_tx_date: fromDateStr,
-        _to_tx_date: toDateStr,
+        _from_tx_date: txDateStr,
+        _to_tx_date: txDateStr,
       });
       if (error) throw error;
       return data || [];
@@ -536,7 +532,7 @@ const AccountingTab = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `accounting_${fromDateStr}_to_${toDateStr}.csv`;
+      a.download = `accounting_${txDateStr}.csv`;
       a.click();
       
       toast.dismiss(toastId);
