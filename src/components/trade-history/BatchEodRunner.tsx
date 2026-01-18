@@ -70,6 +70,9 @@ interface BatchEodResult {
   success: boolean;
   days_processed?: number;
   total_snapshots?: number;
+  final_clients?: number;
+  total_ledger_balance?: number;
+  final_balance?: number;
   start_date?: string;
   end_date?: string;
   error?: string;
@@ -231,7 +234,10 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
 
       const commissionMap = new Map<string, number>();
       investorData?.forEach((inv) => {
-        commissionMap.set(inv.investor_code.toUpperCase(), inv.brokerage_commission || 0);
+        // Normalize commission rate: if >= 0.1, treat as percentage and divide by 100
+        const rawRate = inv.brokerage_commission || 0;
+        const normalizedRate = rawRate >= 0.1 ? rawRate / 100 : rawRate;
+        commissionMap.set(inv.investor_code.toUpperCase(), normalizedRate);
       });
 
       // Build base balance map
@@ -433,7 +439,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         return;
       }
 
-      totalClientsProcessed = result.total_snapshots || 0;
+      totalClientsProcessed = result.total_snapshots ?? result.final_clients ?? 0;
       setProcessedDays(1);
       setProgress(100);
 
