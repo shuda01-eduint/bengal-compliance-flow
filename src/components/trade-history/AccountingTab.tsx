@@ -291,6 +291,10 @@ const AccountingTab = () => {
   // Format dates for queries
   const endDateStr = format(toDate, 'yyyy-MM-dd'); // End date (inclusive)
   const openingDateStr = format(subDays(fromDate, 1), 'yyyy-MM-dd'); // Opening balance date (start date - 1 day EOD)
+  const startDateStr = format(fromDate, 'yyyy-MM-dd'); // Start date for trades
+  
+  // Debug logging
+  console.log('[AccountingTab] Date params:', { startDateStr, endDateStr, openingDateStr, fromDate: fromDate.toISOString(), toDate: toDate.toISOString() });
 
   // Fetch accounting data using optimized RPC function v3
   const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
