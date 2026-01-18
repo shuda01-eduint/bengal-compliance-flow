@@ -160,7 +160,7 @@ const AccountingTab = () => {
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const [dateRangeWarning, setDateRangeWarning] = useState<string | null>(null);
   const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
-  const [activityFilter, setActivityFilter] = useState<string>("all");
+  const [activityFilter, setActivityFilter] = useState<string>("with_trades");
 
   // Calculate date range in days for guardrails
   const dateRangeDays = useMemo(() => differenceInDays(toDate, fromDate) + 1, [fromDate, toDate]);
@@ -1391,9 +1391,9 @@ const AccountingTab = () => {
               <SelectValue placeholder="Activity" />
             </SelectTrigger>
             <SelectContent className="bg-popover border z-50">
-              <SelectItem value="all">All Activity</SelectItem>
-              <SelectItem value="with_activity">With Activity</SelectItem>
-              <SelectItem value="no_activity">No Activity</SelectItem>
+              <SelectItem value="all">All Accounts</SelectItem>
+              <SelectItem value="with_trades">With Trades</SelectItem>
+              <SelectItem value="no_trades">No Trades</SelectItem>
             </SelectContent>
           </Select>
 
