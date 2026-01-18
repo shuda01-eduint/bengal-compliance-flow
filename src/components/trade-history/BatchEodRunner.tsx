@@ -528,15 +528,23 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
                       <Eye className="h-3 w-3" />
                       View Details
                     </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => setSelectedDate(parse(staleWarning.date, 'yyyy-MM-dd', new Date()))}
+                      className="gap-1"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Re-run: {staleWarning.date}
+                    </Button>
                     {staleWarning.suggestedStartDate && (
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         onClick={handleUseSafeStartDate}
-                        className="gap-1"
+                        className="gap-1 text-xs"
                       >
-                        <RefreshCw className="h-3 w-3" />
-                        Use Safe Start: {format(staleWarning.suggestedStartDate, "dd MMM yyyy")}
+                        Rebuild From Scratch: {format(staleWarning.suggestedStartDate, "dd MMM yyyy")}
                       </Button>
                     )}
                   </div>
@@ -587,6 +595,9 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
                   />
                 </PopoverContent>
               </Popover>
+              <p className="text-xs text-muted-foreground">
+                💡 If you imported a baseline (e.g. Jan 12), run EOD starting from the <em>next</em> day (Jan 13). Running on the baseline date will overwrite it.
+              </p>
             </div>
 
             {/* Skip Existing Option */}
