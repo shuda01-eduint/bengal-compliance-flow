@@ -2134,10 +2134,12 @@ export type Database = {
       is_hr_or_ceo: { Args: never; Returns: boolean }
       is_mancom_of_rm: { Args: { _rm_email: string }; Returns: boolean }
       is_settlement_department: { Args: never; Returns: boolean }
-      run_batch_eod: {
-        Args: { p_end_date: string; p_start_date: string }
-        Returns: Json
-      }
+      run_batch_eod:
+        | {
+            Args: { p_eod_date: string; p_skip_existing?: boolean }
+            Returns: Json
+          }
+        | { Args: { p_end_date: string; p_start_date: string }; Returns: Json }
       sync_departments_from_employees: { Args: never; Returns: Json }
     }
     Enums: {

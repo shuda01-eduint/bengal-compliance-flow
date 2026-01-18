@@ -3,7 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -98,6 +100,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
   const [mismatchSearch, setMismatchSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>('difference');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [skipExisting, setSkipExisting] = useState(false);
 
   // Filter and sort mismatches
   const filteredMismatches = useMemo(() => {
@@ -423,8 +426,8 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
 
     try {
       const { data, error } = await supabase.rpc("run_batch_eod", {
-        p_start_date: dateStr,
-        p_end_date: dateStr,
+        p_eod_date: dateStr,
+        p_skip_existing: skipExisting,
       });
 
       if (error) {
@@ -432,14 +435,23 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         return;
       }
 
-      const result = data as unknown as BatchEodResult;
+      const result = data as unknown as BatchEodResult & { skipped?: boolean; message?: string; clients_captured?: number };
 
       if (!result.success) {
         toast.error("EOD failed", { description: result.error || "Unknown error" });
         return;
       }
 
-      totalClientsProcessed = result.total_snapshots ?? result.final_clients ?? 0;
+      // Handle skipped case
+      if (result.skipped) {
+        toast.info(result.message || `EOD for ${dateStr} already exists`, {
+          description: `${result.clients_captured?.toLocaleString() || 0} clients in existing snapshot`,
+        });
+        setOpen(false);
+        return;
+      }
+
+      totalClientsProcessed = result.clients_captured ?? 0;
       setProcessedDays(1);
       setProgress(100);
 
@@ -573,6 +585,19 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
                   />
                 </PopoverContent>
               </Popover>
+            </div>
+
+            {/* Skip Existing Option */}
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="skip-existing" 
+                checked={skipExisting}
+                onCheckedChange={(checked) => setSkipExisting(checked === true)}
+                disabled={running}
+              />
+              <Label htmlFor="skip-existing" className="text-sm cursor-pointer">
+                Skip if EOD already exists for this date
+              </Label>
             </div>
 
             {/* Date Confirmation */}
