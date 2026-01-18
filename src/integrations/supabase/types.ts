@@ -1780,56 +1780,31 @@ export type Database = {
           withdrawals: number
         }[]
       }
-      get_accounting_data_v3:
-        | {
-            Args: {
-              _account_type_filter?: string
-              _has_activity_filter?: string
-              _limit?: number
-              _offset?: number
-              _opening_date: string
-              _search?: string
-              _tx_date: string
-            }
-            Returns: {
-              account_type: string
-              brokerage_amount: number
-              closing_balance: number
-              department: string
-              deposits: number
-              gross_buy: number
-              gross_sell: number
-              investor_code: string
-              investor_name: string
-              opening_balance: number
-              rm: string
-              withdrawals: number
-            }[]
-          }
-        | {
-            Args: {
-              _account_type_filter?: string
-              _has_activity_filter?: string
-              _limit?: number
-              _offset?: number
-              _opening_date: string
-              _search?: string
-              _tx_date: string
-            }
-            Returns: {
-              account_type: string
-              closing_balance: number
-              department: string
-              deposits: number
-              gross_buy: number
-              gross_sell: number
-              investor_code: string
-              investor_name: string
-              opening_balance: number
-              rm: string
-              withdrawals: number
-            }[]
-          }
+      get_accounting_data_v3: {
+        Args: {
+          _account_type_filter?: string
+          _has_activity_filter?: string
+          _limit?: number
+          _offset?: number
+          _opening_date: string
+          _search?: string
+          _tx_date: string
+        }
+        Returns: {
+          account_type: string
+          brokerage_amount: number
+          closing_balance: number
+          department: string
+          deposits: number
+          gross_buy: number
+          gross_sell: number
+          investor_code: string
+          investor_name: string
+          opening_balance: number
+          rm: string
+          withdrawals: number
+        }[]
+      }
       get_accounting_summary: {
         Args: {
           _account_type_filter?: string
