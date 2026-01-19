@@ -222,21 +222,32 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       try {
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[];
+        
+        // Read ALL sheets, not just the first one
+        const allJsonData: Record<string, unknown>[] = [];
+        const sheetStats: { name: string; rows: number }[] = [];
+        
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          const sheetData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[];
+          console.log(`Sheet "${sheetName}": ${sheetData.length} rows`);
+          sheetStats.push({ name: sheetName, rows: sheetData.length });
+          allJsonData.push(...sheetData);
+        }
+        
+        console.log(`Total rows from ${workbook.SheetNames.length} sheets: ${allJsonData.length}`);
 
-        if (jsonData.length === 0) {
+        if (allJsonData.length === 0) {
           setParseError("File is empty or has no data rows");
           return;
         }
 
-        console.log("Excel columns found:", Object.keys(jsonData[0]));
+        console.log("Excel columns found:", Object.keys(allJsonData[0]));
 
         const parsed: ParsedAdminBalance[] = [];
         const errors: string[] = [];
 
-        jsonData.forEach((row, index) => {
+        allJsonData.forEach((row, index) => {
           const investorCodeRaw = findColumnValue(row, 'investor_code');
           const investorCode = investorCodeRaw ? String(investorCodeRaw).trim() : '';
 
@@ -297,7 +308,8 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         }
 
         setParsedData(parsed);
-        toast.success(`Parsed ${parsed.length} balance records`);
+        const sheetInfo = sheetStats.map(s => `${s.name}: ${s.rows}`).join(", ");
+        toast.success(`Parsed ${parsed.length} balance records from ${workbook.SheetNames.length} sheets (${sheetInfo})`);
       } catch (error) {
         console.error("Parse error:", error);
         setParseError("Failed to parse file. Please ensure it's a valid Excel file.");
