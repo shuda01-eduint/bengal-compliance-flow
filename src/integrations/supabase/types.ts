@@ -897,34 +897,58 @@ export type Database = {
       }
       eod_ledger_snapshots: {
         Row: {
+          closing_balance: number | null
           created_at: string
           created_by: string | null
           eod_date: string
+          gross_buy: number | null
+          gross_sell: number | null
           id: string
           investor_code: string
           investor_name: string | null
           ledger_balance: number
+          net_trade_value: number | null
+          opening_balance: number | null
           rm_email: string | null
+          total_commission: number | null
+          total_deposits: number | null
+          total_withdrawals: number | null
         }
         Insert: {
+          closing_balance?: number | null
           created_at?: string
           created_by?: string | null
           eod_date: string
+          gross_buy?: number | null
+          gross_sell?: number | null
           id?: string
           investor_code: string
           investor_name?: string | null
           ledger_balance?: number
+          net_trade_value?: number | null
+          opening_balance?: number | null
           rm_email?: string | null
+          total_commission?: number | null
+          total_deposits?: number | null
+          total_withdrawals?: number | null
         }
         Update: {
+          closing_balance?: number | null
           created_at?: string
           created_by?: string | null
           eod_date?: string
+          gross_buy?: number | null
+          gross_sell?: number | null
           id?: string
           investor_code?: string
           investor_name?: string | null
           ledger_balance?: number
+          net_trade_value?: number | null
+          opening_balance?: number | null
           rm_email?: string | null
+          total_commission?: number | null
+          total_deposits?: number | null
+          total_withdrawals?: number | null
         }
         Relationships: []
       }
