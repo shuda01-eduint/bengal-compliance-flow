@@ -956,6 +956,8 @@ export type Database = {
         Row: {
           clients_captured: number
           deposit_records_count: number | null
+          gross_buy: number | null
+          gross_sell: number | null
           id: string
           notes: string | null
           run_at: string
@@ -963,6 +965,7 @@ export type Database = {
           run_by_email: string | null
           run_date: string
           status: string
+          total_commission: number | null
           total_deposits: number | null
           total_ledger_balance: number
           total_withdrawals: number | null
@@ -971,6 +974,8 @@ export type Database = {
         Insert: {
           clients_captured?: number
           deposit_records_count?: number | null
+          gross_buy?: number | null
+          gross_sell?: number | null
           id?: string
           notes?: string | null
           run_at?: string
@@ -978,6 +983,7 @@ export type Database = {
           run_by_email?: string | null
           run_date: string
           status?: string
+          total_commission?: number | null
           total_deposits?: number | null
           total_ledger_balance?: number
           total_withdrawals?: number | null
@@ -986,6 +992,8 @@ export type Database = {
         Update: {
           clients_captured?: number
           deposit_records_count?: number | null
+          gross_buy?: number | null
+          gross_sell?: number | null
           id?: string
           notes?: string | null
           run_at?: string
@@ -993,6 +1001,7 @@ export type Database = {
           run_by_email?: string | null
           run_date?: string
           status?: string
+          total_commission?: number | null
           total_deposits?: number | null
           total_ledger_balance?: number
           total_withdrawals?: number | null
