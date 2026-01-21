@@ -434,12 +434,39 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         setProgress(Math.round(snapshotProgress));
       }
 
-      // STEP 4: Update investors with commission rates and account types (BULK UPDATE)
+      // STEP 4: Update investors with ledger_balance, commission rates and account types (BULK UPDATE)
+      // Always update ledger_balance to establish baseline in master table
+      setProgressStage("Updating investor baseline balances...");
+      
+      // Use deduplicated data for investor updates - always update ledger_balance
+      const investorsToUpdate = Array.from(uniqueInvestors.values());
+      const bulkChunkSize = 100; // Safe chunk size for .in() to avoid URL length issues
+      
+      // First, update ledger_balance for ALL investors (baseline balance)
+      for (let i = 0; i < investorsToUpdate.length; i += bulkChunkSize) {
+        const chunk = investorsToUpdate.slice(i, i + bulkChunkSize);
+        
+        // Update each investor's ledger_balance individually since values differ
+        for (const item of chunk) {
+          const { error } = await supabase
+            .from("investors")
+            .update({ ledger_balance: item.ledger_balance })
+            .eq("investor_code", item.investor_code);
+          
+          if (error) {
+            console.error(`Failed to update ledger_balance for ${item.investor_code}:`, error.message);
+          }
+        }
+        
+        const baselineProgress = 40 + ((i + chunk.length) / investorsToUpdate.length) * 10;
+        setProgress(Math.round(baselineProgress));
+      }
+      
+      // Then update commission rates and account types if enabled
       if (updateInvestors) {
         setProgressStage("Updating investor commission rates...");
         
-        // Use deduplicated data for investor updates
-        const investorsToUpdate = Array.from(uniqueInvestors.values()).filter(
+        const investorsWithRates = investorsToUpdate.filter(
           (item) => item.commission_rate !== undefined || item.account_type !== undefined
         );
 
@@ -449,7 +476,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         // Format the selected date as string for notes
         const effectiveDateStr = balanceDate ? format(balanceDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
         
-        for (const item of investorsToUpdate) {
+        for (const item of investorsWithRates) {
           const updateData: Record<string, unknown> = {};
           
           if (item.commission_rate !== undefined) {
@@ -482,9 +509,8 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         }
 
         // Perform bulk updates per group with chunking to avoid URL length limits
-        const totalToUpdate = investorsToUpdate.length;
+        const totalToUpdate = investorsWithRates.length;
         let processedCount = 0;
-        const bulkChunkSize = 100; // Safe chunk size for .in() to avoid URL length issues
 
         for (const [, group] of updateGroups) {
           const { updateData, investorCodes } = group;
@@ -505,7 +531,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
             }
             
             processedCount += chunk.length;
-            const investorProgress = 40 + (processedCount / totalToUpdate) * 20;
+            const investorProgress = 50 + (processedCount / totalToUpdate) * 10;
             setProgress(Math.round(investorProgress));
           }
         }
