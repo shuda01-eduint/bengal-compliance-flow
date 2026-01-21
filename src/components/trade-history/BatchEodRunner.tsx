@@ -242,7 +242,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           .range(from, to)
       );
 
-      // If no base EOD, use clients.ledger_balance
+      // Fetch base balances from clients table (ledger_balance snapshot)
       const clients = await fetchAllRows<{
         inv_code: string;
         ledger_balance: number;
@@ -253,7 +253,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           .range(from, to)
       );
 
-      // Fetch commission rates
+      // Fetch commission rates from investors table (single source of truth)
       const investorData = await fetchAllRows<{
         investor_code: string;
         brokerage_commission: number | null;
@@ -266,17 +266,20 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
 
       const commissionMap = new Map<string, number>();
       investorData?.forEach((inv) => {
-        // Normalize commission rate: if >= 0.1, treat as percentage and divide by 100
-        const rawRate = inv.brokerage_commission || 0;
-        const normalizedRate = rawRate >= 0.1 ? rawRate / 100 : rawRate;
-        commissionMap.set(inv.investor_code.toUpperCase(), normalizedRate);
+        if (inv.investor_code) {
+          // Normalize commission rate: if >= 0.1, treat as percentage and divide by 100
+          const rawRate = inv.brokerage_commission || 0;
+          const normalizedRate = rawRate >= 0.1 ? rawRate / 100 : rawRate;
+          commissionMap.set(inv.investor_code.toUpperCase(), normalizedRate);
+        }
       });
 
-      // Build base balance map
+      // Build base balance map from clients table
       const baseBalances = new Map<string, number>();
       clients?.forEach((c) => {
         baseBalances.set(c.inv_code.toUpperCase(), c.ledger_balance || 0);
       });
+      // Override with base EOD data if available (more recent snapshot)
       baseEod?.forEach((row) => {
         baseBalances.set(row.investor_code.toUpperCase(), row.ledger_balance || 0);
       });
