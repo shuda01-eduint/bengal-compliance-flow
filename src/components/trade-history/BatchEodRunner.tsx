@@ -86,6 +86,8 @@ interface BatchEodResult {
   total_deposits?: number;
   total_withdrawals?: number;
   error?: string;
+  error_detail?: string;
+  errors?: string[];
 }
 
 interface DayResult {
@@ -494,10 +496,16 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
       }
 
       if (!data?.success) {
+        // Build detailed error message from RPC response
+        const errorParts: string[] = [];
+        if (data?.error) errorParts.push(data.error);
+        if (data?.error_detail) errorParts.push(`(${data.error_detail})`);
+        if (data?.errors?.length) errorParts.push(...data.errors.slice(0, 3));
+        
         return {
           date: dateStr,
           success: false,
-          error: data?.error || "Unknown error",
+          error: errorParts.length > 0 ? errorParts.join(" ") : "Unknown error - check database logs",
         };
       }
 
