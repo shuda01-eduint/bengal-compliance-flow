@@ -413,6 +413,8 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
           eod_date: dateStr,
           investor_code: item.investor_code,
           ledger_balance: item.ledger_balance,
+          closing_balance: item.ledger_balance, // Set closing_balance for baseline
+          opening_balance: 0, // Baseline has no prior
           investor_name: item.investor_name || null,
           rm_email: item.rm_email || null,
         }));
