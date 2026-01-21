@@ -1773,6 +1773,7 @@ export type Database = {
         Returns: Json
       }
       bulk_assign_mancom_managers: { Args: { managers: Json }; Returns: Json }
+      clear_all_eod_data: { Args: never; Returns: Json }
       copy_balances_batch: {
         Args: {
           p_batch_size?: number

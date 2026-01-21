@@ -420,23 +420,14 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
 
     setClearing(true);
     try {
-      // Clear eod_ledger_snapshots
-      const { error: snapshotError } = await supabase
-        .from("eod_ledger_snapshots")
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000");
+      const { data, error } = await supabase.rpc("clear_all_eod_data");
 
-      if (snapshotError) throw snapshotError;
+      if (error) throw error;
 
-      // Clear eod_run_history
-      const { error: historyError } = await supabase
-        .from("eod_run_history")
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000");
-
-      if (historyError) throw historyError;
-
-      toast.success("All EOD data cleared successfully");
+      const result = data as { snapshots_deleted?: number; history_deleted?: number } | null;
+      toast.success(
+        `All EOD data cleared: ${result?.snapshots_deleted?.toLocaleString() ?? 0} snapshots, ${result?.history_deleted ?? 0} run records`
+      );
       setStaleWarning(null);
       onComplete?.();
     } catch (error: any) {
