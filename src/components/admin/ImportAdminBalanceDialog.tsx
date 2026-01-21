@@ -444,11 +444,17 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         // Group investors by their update payload to enable bulk updates
         const updateGroups = new Map<string, { updateData: Record<string, unknown>; investorCodes: string[] }>();
         
+        // Format the selected date as string for notes
+        const effectiveDateStr = balanceDate ? format(balanceDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+        
         for (const item of investorsToUpdate) {
           const updateData: Record<string, unknown> = {};
           
           if (item.commission_rate !== undefined) {
             updateData.brokerage_commission = item.commission_rate;
+            // Set commission effective date and notes when updating commission
+            updateData.commission_effective_date = effectiveDateStr;
+            updateData.commission_notes = `Imported from Admin Balance ${effectiveDateStr}`;
           }
           if (item.account_type !== undefined) {
             // Map ChargeRate values to account_type

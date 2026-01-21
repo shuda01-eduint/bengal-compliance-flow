@@ -1135,6 +1135,9 @@ export type Database = {
           bo_id: string | null
           brokerage_commission: number | null
           cell_no: string | null
+          commission_effective_date: string | null
+          commission_notes: string | null
+          commission_updated_by: string | null
           created_at: string
           date_of_birth: string | null
           email: string | null
@@ -1159,6 +1162,9 @@ export type Database = {
           bo_id?: string | null
           brokerage_commission?: number | null
           cell_no?: string | null
+          commission_effective_date?: string | null
+          commission_notes?: string | null
+          commission_updated_by?: string | null
           created_at?: string
           date_of_birth?: string | null
           email?: string | null
@@ -1183,6 +1189,9 @@ export type Database = {
           bo_id?: string | null
           brokerage_commission?: number | null
           cell_no?: string | null
+          commission_effective_date?: string | null
+          commission_notes?: string | null
+          commission_updated_by?: string | null
           created_at?: string
           date_of_birth?: string | null
           email?: string | null
