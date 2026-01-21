@@ -897,58 +897,106 @@ export type Database = {
       }
       eod_ledger_snapshots: {
         Row: {
+          account_type: string | null
+          accrued_interest: number | null
+          avg_cost: number | null
+          brokerage_rate: number | null
           closing_balance: number | null
+          cq_in_transit: number | null
           created_at: string
           created_by: string | null
+          cumulative_interest: number | null
           eod_date: string
           gross_buy: number | null
           gross_sell: number | null
           id: string
+          interest_rate: number | null
           investor_code: string
           investor_name: string | null
           ledger_balance: number
+          matured_balance: number | null
           net_trade_value: number | null
           opening_balance: number | null
+          pending_buy: number | null
+          pending_sell: number | null
+          receivable_sale: number | null
           rm_email: string | null
+          saleable: number | null
           total_commission: number | null
+          total_cost: number | null
           total_deposits: number | null
+          total_mv: number | null
+          total_stock: number | null
           total_withdrawals: number | null
+          unrealized_pnl: number | null
         }
         Insert: {
+          account_type?: string | null
+          accrued_interest?: number | null
+          avg_cost?: number | null
+          brokerage_rate?: number | null
           closing_balance?: number | null
+          cq_in_transit?: number | null
           created_at?: string
           created_by?: string | null
+          cumulative_interest?: number | null
           eod_date: string
           gross_buy?: number | null
           gross_sell?: number | null
           id?: string
+          interest_rate?: number | null
           investor_code: string
           investor_name?: string | null
           ledger_balance?: number
+          matured_balance?: number | null
           net_trade_value?: number | null
           opening_balance?: number | null
+          pending_buy?: number | null
+          pending_sell?: number | null
+          receivable_sale?: number | null
           rm_email?: string | null
+          saleable?: number | null
           total_commission?: number | null
+          total_cost?: number | null
           total_deposits?: number | null
+          total_mv?: number | null
+          total_stock?: number | null
           total_withdrawals?: number | null
+          unrealized_pnl?: number | null
         }
         Update: {
+          account_type?: string | null
+          accrued_interest?: number | null
+          avg_cost?: number | null
+          brokerage_rate?: number | null
           closing_balance?: number | null
+          cq_in_transit?: number | null
           created_at?: string
           created_by?: string | null
+          cumulative_interest?: number | null
           eod_date?: string
           gross_buy?: number | null
           gross_sell?: number | null
           id?: string
+          interest_rate?: number | null
           investor_code?: string
           investor_name?: string | null
           ledger_balance?: number
+          matured_balance?: number | null
           net_trade_value?: number | null
           opening_balance?: number | null
+          pending_buy?: number | null
+          pending_sell?: number | null
+          receivable_sale?: number | null
           rm_email?: string | null
+          saleable?: number | null
           total_commission?: number | null
+          total_cost?: number | null
           total_deposits?: number | null
+          total_mv?: number | null
+          total_stock?: number | null
           total_withdrawals?: number | null
+          unrealized_pnl?: number | null
         }
         Relationships: []
       }
