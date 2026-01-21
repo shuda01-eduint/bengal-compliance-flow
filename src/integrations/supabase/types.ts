@@ -1229,6 +1229,7 @@ export type Database = {
           investor_code: string
           investor_name: string
           investor_type: string | null
+          ledger_balance: number | null
           mother_name: string | null
           status: string | null
           trader: string | null
@@ -1256,6 +1257,7 @@ export type Database = {
           investor_code: string
           investor_name: string
           investor_type?: string | null
+          ledger_balance?: number | null
           mother_name?: string | null
           status?: string | null
           trader?: string | null
@@ -1283,6 +1285,7 @@ export type Database = {
           investor_code?: string
           investor_name?: string
           investor_type?: string | null
+          ledger_balance?: number | null
           mother_name?: string | null
           status?: string | null
           trader?: string | null
