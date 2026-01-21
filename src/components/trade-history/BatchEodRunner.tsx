@@ -413,22 +413,47 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
     }
   };
 
-  const handleClearAllEodData = async () => {
-    if (!confirm("Are you sure you want to clear ALL EOD data? This cannot be undone.")) {
+  const handleClearSelectedEodData = async () => {
+    // Determine date range based on mode
+    let fromDate: string, toDate: string, dateLabel: string;
+    
+    if (mode === 'single') {
+      if (!selectedDate) {
+        toast.error("Please select a date first");
+        return;
+      }
+      fromDate = toDate = format(selectedDate, "yyyy-MM-dd");
+      dateLabel = format(selectedDate, "MMM d, yyyy");
+    } else {
+      if (!dateRange?.from || !dateRange?.to) {
+        toast.error("Please select a date range first");
+        return;
+      }
+      fromDate = format(dateRange.from, "yyyy-MM-dd");
+      toDate = format(dateRange.to, "yyyy-MM-dd");
+      dateLabel = `${format(dateRange.from, "MMM d")} - ${format(dateRange.to, "MMM d, yyyy")}`;
+    }
+
+    if (!confirm(`Clear EOD data for ${dateLabel}? This will delete all snapshots and run history for this period. This cannot be undone.`)) {
       return;
     }
 
     setClearing(true);
     try {
-      const { data, error } = await supabase.rpc("clear_all_eod_data");
+      const { data, error } = await supabase.rpc("clear_eod_by_date_range", {
+        p_from_date: fromDate,
+        p_to_date: toDate,
+      });
 
       if (error) throw error;
 
       const result = data as { snapshots_deleted?: number; history_deleted?: number } | null;
       toast.success(
-        `All EOD data cleared: ${result?.snapshots_deleted?.toLocaleString() ?? 0} snapshots, ${result?.history_deleted ?? 0} run records`
+        `EOD cleared for ${dateLabel}`,
+        { description: `${result?.snapshots_deleted?.toLocaleString() ?? 0} snapshots, ${result?.history_deleted ?? 0} run records deleted` }
       );
       setStaleWarning(null);
+      queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
       onComplete?.();
     } catch (error: any) {
       console.error("Error clearing EOD data:", error);
@@ -844,8 +869,12 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button 
               variant="destructive" 
-              onClick={handleClearAllEodData} 
-              disabled={running || clearing}
+              onClick={handleClearSelectedEodData} 
+              disabled={
+                running || clearing ||
+                (mode === 'single' && !selectedDate) ||
+                (mode === 'range' && (!dateRange?.from || !dateRange?.to))
+              }
               className="sm:mr-auto"
             >
               {clearing ? (
@@ -856,7 +885,7 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
               ) : (
                 <>
                   <Trash2 className="h-4 w-4 mr-2" />
-                  Clear All EOD
+                  Clear Selected
                 </>
               )}
             </Button>

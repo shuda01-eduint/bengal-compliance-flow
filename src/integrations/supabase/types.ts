@@ -1783,6 +1783,10 @@ export type Database = {
       }
       bulk_assign_mancom_managers: { Args: { managers: Json }; Returns: Json }
       clear_all_eod_data: { Args: never; Returns: Json }
+      clear_eod_by_date_range: {
+        Args: { p_from_date: string; p_to_date: string }
+        Returns: Json
+      }
       copy_balances_batch: {
         Args: {
           p_batch_size?: number
