@@ -490,49 +490,56 @@ const AccountingTab = () => {
     const toastId = toast.loading('Preparing export...');
     
     try {
-      // Use already fetched data for export (no pagination)
-      const allData = accountingResult || [];
-      const error = null;
-
-      if (error) throw error;
-
-      // Process data with custom fields
-      const processedData = (allData || []).map((row: any) => {
-        const processed = { ...row } as AccountingRow;
-        customFields.forEach(field => {
-          processed[field.id] = evaluateFormula(field.formula, processed);
-        });
-        return processed;
-      });
-
-      const baseHeaders = ['Code', 'Name', 'Account Type', 'Interest Rate', 'Commission', 'Ledger Balance', 'Deposits', 'Withdrawals', 'Buy', 'Sell', 'Net Sell', 'Adjusted Ledger', 'Accrued Interest', 'Receivable (from Broker)', 'Payable (to Broker)', 'Brokerage Amt'];
+      // Use the already processed and sorted data (same as UI displays)
+      const exportData = sortedData;
+      
+      if (!exportData || exportData.length === 0) {
+        toast.dismiss(toastId);
+        toast.error('No data to export');
+        return;
+      }
+      
+      // Get visible columns (same as UI table)
+      const exportColumns = visibleColumns;
+      
+      // Build headers from visible column labels
+      const headers = exportColumns.map(col => col.label);
+      
+      // Add any custom field headers
       const customHeaders = customFields.map(f => f.name);
-      const headers = [...baseHeaders, ...customHeaders];
+      const allHeaders = [...headers, ...customHeaders];
       
-      const csvData = processedData.map(row => {
-        const baseData = [
-          row.investor_code,
-          row.investor_name,
-          row.account_type,
-          row.interest_rate,
-          row.brokerage_commission,
-          row.ledger_balance,
-          row.total_deposits,
-          row.total_withdrawals,
-          row.gross_buy,
-          row.gross_sell,
-          row.net_sell,
-          row.adjusted_ledger,
-          row.accrued_interest,
-          row.receivable,
-          row.payable,
-          row.brokerage_amount,
-        ];
-        const customData = customFields.map(f => row[f.id] || 0);
-        return [...baseData, ...customData];
+      // Build CSV rows using the same data as the UI
+      const csvData = exportData.map(row => {
+        const rowData = exportColumns.map(col => {
+          const value = row[col.id];
+          // Handle string columns - escape quotes and commas
+          if (col.id === 'investor_code' || col.id === 'investor_name' || 
+              col.id === 'account_type' || col.id === 'rm_name' || 
+              col.id === 'department') {
+            const strVal = String(value || '');
+            return strVal.includes(',') || strVal.includes('"') 
+              ? `"${strVal.replace(/"/g, '""')}"` 
+              : strVal;
+          }
+          // Handle numeric columns - export raw numbers
+          if (typeof value === 'number') {
+            return value.toFixed(2);
+          }
+          return value || '';
+        });
+        
+        // Add custom field values
+        const customData = customFields.map(f => {
+          const val = row[f.id];
+          return typeof val === 'number' ? val.toFixed(2) : (val || 0);
+        });
+        
+        return [...rowData, ...customData];
       });
       
-      const csv = [headers.join(','), ...csvData.map(row => row.join(','))].join('\n');
+      // Generate CSV content
+      const csv = [allHeaders.join(','), ...csvData.map(row => row.join(','))].join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -541,9 +548,10 @@ const AccountingTab = () => {
         ? `accounting_${format(fromDate, 'yyyy-MM-dd')}_to_${endDateStr}.csv`
         : `accounting_${endDateStr}.csv`;
       a.click();
+      URL.revokeObjectURL(url);
       
       toast.dismiss(toastId);
-      toast.success(`Exported ${processedData.length} records`);
+      toast.success(`Exported ${exportData.length} records`);
     } catch (err) {
       console.error('Export error:', err);
       toast.dismiss(toastId);
