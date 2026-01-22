@@ -1910,19 +1910,20 @@ export type Database = {
             Returns: {
               account_type: string
               accrued_interest: number
-              brokerage_amount: number
-              brokerage_commission: number
-              closing_balance: number
+              brokerage: number
+              closing_ledger_balance: number
               department: string
               deposits: number
-              gross_buy: number
-              gross_sell: number
-              interest_rate: number
+              equity: number
+              has_trades: boolean
               investor_code: string
               investor_name: string
-              opening_balance: number
+              margin_loan: number
+              net_buy: number
+              net_sell: number
+              opening_ledger_balance: number
               rm: string
-              total_count: number
+              rm_name: string
               withdrawals: number
             }[]
           }
