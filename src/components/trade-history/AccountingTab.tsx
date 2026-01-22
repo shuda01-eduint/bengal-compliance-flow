@@ -1386,8 +1386,8 @@ const AccountingTab = () => {
             </SelectTrigger>
             <SelectContent className="bg-popover border z-50">
               <SelectItem value="all">All Accounts</SelectItem>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="margin">Margin</SelectItem>
+              <SelectItem value="Cash">Cash</SelectItem>
+              <SelectItem value="Margin">Margin</SelectItem>
             </SelectContent>
           </Select>
 
