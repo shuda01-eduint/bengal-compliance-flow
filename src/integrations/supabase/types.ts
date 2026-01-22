@@ -1896,31 +1896,62 @@ export type Database = {
           withdrawals: number
         }[]
       }
-      get_accounting_data_v3: {
-        Args: {
-          _account_type_filter?: string
-          _has_activity_filter?: string
-          _limit?: number
-          _offset?: number
-          _opening_date: string
-          _search?: string
-          _tx_date: string
-        }
-        Returns: {
-          account_type: string
-          brokerage_amount: number
-          closing_balance: number
-          department: string
-          deposits: number
-          gross_buy: number
-          gross_sell: number
-          investor_code: string
-          investor_name: string
-          opening_balance: number
-          rm: string
-          withdrawals: number
-        }[]
-      }
+      get_accounting_data_v3:
+        | {
+            Args: {
+              _account_type_filter?: string
+              _has_activity_filter?: string
+              _limit?: number
+              _offset?: number
+              _opening_date: string
+              _search?: string
+              _tx_date: string
+            }
+            Returns: {
+              account_type: string
+              brokerage_amount: number
+              closing_balance: number
+              department: string
+              deposits: number
+              gross_buy: number
+              gross_sell: number
+              investor_code: string
+              investor_name: string
+              opening_balance: number
+              rm: string
+              withdrawals: number
+            }[]
+          }
+        | {
+            Args: {
+              _account_type_filter?: string
+              _from_trade_date?: string
+              _from_tx_date?: string
+              _has_activity_filter?: string
+              _limit?: number
+              _offset?: number
+              _search?: string
+              _to_trade_date?: string
+              _to_tx_date?: string
+            }
+            Returns: {
+              acc_type: string
+              accrued_interest: number
+              closing_balance: number
+              department: string
+              investor_code: string
+              investor_name: string
+              opening_balance: number
+              rm_id: string
+              rm_name: string
+              total_brokerage: number
+              total_buy: number
+              total_count: number
+              total_deposit: number
+              total_sell: number
+              total_withdrawal: number
+            }[]
+          }
       get_accounting_summary: {
         Args: {
           _account_type_filter?: string
