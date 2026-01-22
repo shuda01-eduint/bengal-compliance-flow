@@ -906,6 +906,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           cumulative_interest: number | null
+          department: string | null
           eod_date: string
           gross_buy: number | null
           gross_sell: number | null
@@ -921,6 +922,8 @@ export type Database = {
           pending_sell: number | null
           receivable_sale: number | null
           rm_email: string | null
+          rm_id: string | null
+          rm_name: string | null
           saleable: number | null
           total_commission: number | null
           total_cost: number | null
@@ -940,6 +943,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           cumulative_interest?: number | null
+          department?: string | null
           eod_date: string
           gross_buy?: number | null
           gross_sell?: number | null
@@ -955,6 +959,8 @@ export type Database = {
           pending_sell?: number | null
           receivable_sale?: number | null
           rm_email?: string | null
+          rm_id?: string | null
+          rm_name?: string | null
           saleable?: number | null
           total_commission?: number | null
           total_cost?: number | null
@@ -974,6 +980,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           cumulative_interest?: number | null
+          department?: string | null
           eod_date?: string
           gross_buy?: number | null
           gross_sell?: number | null
@@ -989,6 +996,8 @@ export type Database = {
           pending_sell?: number | null
           receivable_sale?: number | null
           rm_email?: string | null
+          rm_id?: string | null
+          rm_name?: string | null
           saleable?: number | null
           total_commission?: number | null
           total_cost?: number | null
@@ -1221,6 +1230,7 @@ export type Database = {
           commission_updated_by: string | null
           created_at: string
           date_of_birth: string | null
+          department: string | null
           email: string | null
           father_spouse_name: string | null
           home_address: string | null
@@ -1231,6 +1241,8 @@ export type Database = {
           investor_type: string | null
           ledger_balance: number | null
           mother_name: string | null
+          rm_id: string | null
+          rm_name: string | null
           status: string | null
           trader: string | null
           updated_at: string
@@ -1249,6 +1261,7 @@ export type Database = {
           commission_updated_by?: string | null
           created_at?: string
           date_of_birth?: string | null
+          department?: string | null
           email?: string | null
           father_spouse_name?: string | null
           home_address?: string | null
@@ -1259,6 +1272,8 @@ export type Database = {
           investor_type?: string | null
           ledger_balance?: number | null
           mother_name?: string | null
+          rm_id?: string | null
+          rm_name?: string | null
           status?: string | null
           trader?: string | null
           updated_at?: string
@@ -1277,6 +1292,7 @@ export type Database = {
           commission_updated_by?: string | null
           created_at?: string
           date_of_birth?: string | null
+          department?: string | null
           email?: string | null
           father_spouse_name?: string | null
           home_address?: string | null
@@ -1287,6 +1303,8 @@ export type Database = {
           investor_type?: string | null
           ledger_balance?: number | null
           mother_name?: string | null
+          rm_id?: string | null
+          rm_name?: string | null
           status?: string | null
           trader?: string | null
           updated_at?: string
