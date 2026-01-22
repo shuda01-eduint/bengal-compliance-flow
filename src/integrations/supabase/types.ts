@@ -1952,6 +1952,36 @@ export type Database = {
               total_withdrawal: number
             }[]
           }
+        | {
+            Args: {
+              _account_type_filter?: string
+              _end_date: string
+              _is_admin?: boolean
+              _is_dept_head?: boolean
+              _is_mancom?: boolean
+              _page_number?: number
+              _page_size?: number
+              _start_date: string
+              _user_email?: string
+            }
+            Returns: {
+              acc_type: string
+              accrued_interest: number
+              brokerage: number
+              buy_amount: number
+              closing_balance: number
+              department: string
+              deposits: number
+              investor_code: string
+              investor_name: string
+              opening_balance: number
+              rm_id: string
+              rm_name: string
+              sell_amount: number
+              total_count: number
+              withdrawals: number
+            }[]
+          }
       get_accounting_summary: {
         Args: {
           _account_type_filter?: string
