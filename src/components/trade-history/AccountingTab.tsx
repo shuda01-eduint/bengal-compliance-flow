@@ -400,7 +400,8 @@ const AccountingTab = () => {
         investor_code: row.investor_code || '',
         investor_name: row.investor_name || '',
         account_type: row.account_type || '',
-        rm_name: row.rm_name || '',
+        // Handle both 'rm' and 'rm_name' field names from different RPC overloads
+        rm_name: row.rm_name ?? row.rm ?? '',
         department: row.department || '',
         interest_rate: 0,
         brokerage_commission: 0,
