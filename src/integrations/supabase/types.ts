@@ -895,6 +895,45 @@ export type Database = {
         }
         Relationships: []
       }
+      eod_holding_snapshots: {
+        Row: {
+          avg_cost: number | null
+          created_at: string | null
+          eod_date: string
+          id: string
+          investor_code: string
+          market_value: number | null
+          security_code: string
+          total_cost: number | null
+          total_qty: number | null
+          total_qty_saleable: number | null
+        }
+        Insert: {
+          avg_cost?: number | null
+          created_at?: string | null
+          eod_date: string
+          id?: string
+          investor_code: string
+          market_value?: number | null
+          security_code: string
+          total_cost?: number | null
+          total_qty?: number | null
+          total_qty_saleable?: number | null
+        }
+        Update: {
+          avg_cost?: number | null
+          created_at?: string | null
+          eod_date?: string
+          id?: string
+          investor_code?: string
+          market_value?: number | null
+          security_code?: string
+          total_cost?: number | null
+          total_qty?: number | null
+          total_qty_saleable?: number | null
+        }
+        Relationships: []
+      }
       eod_ledger_snapshots: {
         Row: {
           account_type: string | null
@@ -2202,7 +2241,22 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      margin_equity_snapshots: {
+        Row: {
+          accrued_interest: number | null
+          department_name: string | null
+          eod_date: string | null
+          equity: number | null
+          investor_code: string | null
+          ledger_closing_balance: number | null
+          margin_interest_rate: number | null
+          marginable_after_haircut: number | null
+          non_marginable_holdings: number | null
+          previous_day_balance: number | null
+          rm_name: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       bulk_assign_department_heads: {
