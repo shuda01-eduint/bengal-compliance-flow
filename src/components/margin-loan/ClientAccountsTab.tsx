@@ -133,8 +133,10 @@ export function ClientAccountsTab() {
                     <TableHead>Investor Code</TableHead>
                     <TableHead>Investor Name</TableHead>
                     <TableHead>RM Name</TableHead>
-                    <TableHead className="text-right">Exposure</TableHead>
+                    <TableHead className="text-right">Margin Loan</TableHead>
+                    <TableHead className="text-right">Accrued Interest</TableHead>
                     <TableHead className="text-right">Portfolio Value</TableHead>
+                    <TableHead className="text-right">Equity</TableHead>
                     <TableHead className="text-right">Margin Ratio %</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-center">Actions</TableHead>
@@ -156,7 +158,13 @@ export function ClientAccountsTab() {
                         {formatCurrency(account.current_exposure || 0)}
                       </TableCell>
                       <TableCell className="text-right">
+                        {formatCurrency(account.accrued_interest || 0)}
+                      </TableCell>
+                      <TableCell className="text-right">
                         {formatCurrency(account.portfolio_value || 0)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(account.equity || 0)}
                       </TableCell>
                       <TableCell className={`text-right font-medium ${getUtilizationColor(Math.abs(account.margin_ratio || 0))}`}>
                         {(account.margin_ratio || 0).toFixed(2)}%
@@ -175,7 +183,7 @@ export function ClientAccountsTab() {
                     </TableRow>
                   )) : (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                         No margin accounts found
                       </TableCell>
                     </TableRow>
