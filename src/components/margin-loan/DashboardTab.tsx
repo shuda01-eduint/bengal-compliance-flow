@@ -478,98 +478,95 @@ export function DashboardTab() {
         </Card>
       </div>
 
-      {/* Charts and Tables Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Margin Health Distribution - Treemap */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Margin Health Distribution</CardTitle>
-              <div className="flex items-center gap-4 text-xs">
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.safe }} />
-                  <span className="text-muted-foreground">Safe (&gt;130%)</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.warning }} />
-                  <span className="text-muted-foreground">Warning (110-130%)</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.critical }} />
-                  <span className="text-muted-foreground">Critical (&lt;110%)</span>
-                </div>
+      {/* Full-width Treemap Row */}
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg">Margin Health Distribution</CardTitle>
+            <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.safe }} />
+                <span className="text-muted-foreground">Safe (&gt;130%)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.warning }} />
+                <span className="text-muted-foreground">Warning (110-130%)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.critical }} />
+                <span className="text-muted-foreground">Critical (&lt;110%)</span>
               </div>
             </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[400px]">
+            {isLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <Skeleton className="h-full w-full rounded" />
+              </div>
+            ) : treemapHierarchy && treemapHierarchy.children && treemapHierarchy.children.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <Treemap
+                  data={treemapHierarchy.children}
+                  dataKey="size"
+                  aspectRatio={4 / 3}
+                  stroke="hsl(var(--border))"
+                  content={<CustomTreemapContent />}
+                >
+                  <Tooltip content={<TreemapTooltip />} />
+                </Treemap>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                No margin account data available
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Large Metric Cards Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card className="bg-card border-border">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Equity
+            </CardTitle>
+            <DollarSign className={`h-5 w-5 ${metrics.total_equity < 0 ? 'text-destructive' : 'text-green-500'}`} />
           </CardHeader>
           <CardContent>
-            <div className="h-[350px]">
-              {isLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Skeleton className="h-full w-full rounded" />
-                </div>
-              ) : treemapHierarchy && treemapHierarchy.children && treemapHierarchy.children.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <Treemap
-                    data={treemapHierarchy.children}
-                    dataKey="size"
-                    aspectRatio={4 / 3}
-                    stroke="hsl(var(--border))"
-                    content={<CustomTreemapContent />}
-                  >
-                    <Tooltip content={<TreemapTooltip />} />
-                  </Treemap>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  No margin account data available
-                </div>
-              )}
-            </div>
+            {isLoading ? (
+              <Skeleton className="h-12 w-48" />
+            ) : (
+              <div className={`text-4xl font-bold ${metrics.total_equity < 0 ? 'text-destructive' : 'text-foreground'}`}>
+                {formatCurrency(metrics.total_equity)}
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground mt-2">
+              Sum of all equity values across margin accounts
+            </p>
           </CardContent>
         </Card>
 
-        {/* Top 10 Clients by Exposure */}
         <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-lg">Top 10 Clients by Exposure</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Average Loan Ratio
+            </CardTitle>
+            <Percent className="h-5 w-5 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              {isLoading ? (
-                <div className="space-y-2">
-                  {[...Array(5)].map((_, i) => (
-                    <Skeleton key={i} className="h-10 w-full" />
-                  ))}
-                </div>
-              ) : topClients && topClients.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Code</TableHead>
-                      <TableHead>RM</TableHead>
-                      <TableHead className="text-right">Exposure</TableHead>
-                      <TableHead className="text-right">Ratio</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {topClients.map((client) => (
-                      <TableRow key={client.investor_code}>
-                        <TableCell className="font-mono text-sm">{client.investor_code}</TableCell>
-                        <TableCell className="text-sm">{client.rm_name || '-'}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(client.exposure)}</TableCell>
-                        <TableCell className="text-right">{(client.margin_ratio || 0).toFixed(0)}%</TableCell>
-                        <TableCell>{getMarginRatioBadge(client.margin_ratio || 0)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <div className="flex items-center justify-center h-32 text-muted-foreground">
-                  No margin exposure data available
-                </div>
-              )}
-            </div>
+            {isLoading ? (
+              <Skeleton className="h-12 w-32" />
+            ) : (
+              <div className="text-4xl font-bold text-foreground">
+                {metrics.avgMarginRatio.toFixed(1)}%
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground mt-2">
+              Average margin ratio across all accounts
+            </p>
           </CardContent>
         </Card>
       </div>
