@@ -2254,6 +2254,7 @@ export type Database = {
           non_marginable_holdings: number | null
           previous_day_balance: number | null
           rm_name: string | null
+          total_portfolio_value: number | null
         }
         Relationships: []
       }

@@ -38,6 +38,7 @@ interface MarginEquitySnapshot {
   ledger_closing_balance: number;
   marginable_after_haircut: number;
   non_marginable_holdings: number;
+  total_portfolio_value: number;
   previous_day_balance: number;
   margin_interest_rate: number;
   accrued_interest: number;
@@ -119,6 +120,7 @@ export function DashboardTab() {
       return {
         totalEquity: 0,
         totalPortfolioValue: 0,
+        totalMarginOutstanding: 0,
         totalAccruedInterest: 0,
         highRiskCount: 0,
         warningCount: 0,
@@ -150,9 +152,14 @@ export function DashboardTab() {
     const warningCount = clientsWithRatio.filter(c => c.marginRatio >= 110 && c.marginRatio < 130).length;
     const highRiskCount = clientsWithRatio.filter(c => c.marginRatio < 110).length;
 
-    // Total portfolio value = marginable + non-marginable holdings
+    // Total portfolio value from view
     const totalPortfolioValue = latestSnapshots.reduce(
-      (sum, s) => sum + s.marginable_after_haircut + s.non_marginable_holdings, 0
+      (sum, s) => sum + (s.total_portfolio_value || 0), 0
+    );
+
+    // Total margin outstanding (sum of negative balances)
+    const totalMarginOutstanding = latestSnapshots.reduce(
+      (sum, s) => sum + Math.abs(Math.min(s.ledger_closing_balance, 0)), 0
     );
 
     // Total equity
@@ -178,6 +185,7 @@ export function DashboardTab() {
     return {
       totalEquity,
       totalPortfolioValue,
+      totalMarginOutstanding,
       totalAccruedInterest,
       highRiskCount,
       warningCount,
@@ -225,7 +233,7 @@ export function DashboardTab() {
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {formatCurrency(accountsSummary?.totalExposure || 0)}
+                {formatCurrency(snapshotMetrics.totalMarginOutstanding)}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
