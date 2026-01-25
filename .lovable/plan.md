@@ -1,132 +1,112 @@
 
-# Plan: Populate Holding Snapshots for Margin Dashboard
+# Plan: Fix Margin Dashboard Calculation Formulas
 
-## Problem Summary
-The `margin_equity_snapshots` view returns zeros for holdings-related fields because the `eod_holding_snapshots` table is empty. The current EOD process only captures ledger data, not portfolio holdings.
+## Problem Analysis
+The dashboard is showing incorrect values:
+- **Average Margin Ratio**: 843564% (should be reasonable percentage based on Total Margin Outstanding / Total Portfolio Value)
+- **Overall Utilization**: 0.0% (should be Total Margin Outstanding / Available Capacity)
 
-## Solution Overview
-Implement a two-part fix:
-1. **Immediate Data Population**: Copy current holdings to `eod_holding_snapshots` for the latest EOD date
-2. **EOD Function Enhancement**: Update `run_batch_eod` to capture holdings during future EOD runs
+## Root Cause
 
----
+### Current Flawed Calculations:
+1. **Average Margin Ratio** averages individual client ratios, which includes extreme outliers (clients with 999% or higher ratios)
+2. **Overall Utilization** pulls from empty `margin_accounts` table instead of using snapshot data
+3. **Available Capacity** is calculated as `totalEquity - totalExposure`, which doesn't align with the utilization formula
 
-## Implementation Steps
+## Corrected Formulas
 
-### Step 1: Immediate Holding Snapshot Population
-Create a database migration to populate `eod_holding_snapshots` from the current `holdings` table.
+| Metric | Corrected Formula |
+|--------|-------------------|
+| Average Margin Ratio | `(Total Margin Outstanding / Total Portfolio Value) * 100` |
+| Overall Utilization | `(Total Margin Outstanding / (Total Portfolio Value - Total Margin Outstanding)) * 100` or `(Total Margin Outstanding / Total Portfolio Value) * 100` depending on interpretation |
+| Available Capacity | `Total Portfolio Value - Total Margin Outstanding` (remaining collateral capacity) |
 
-```text
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                            Data Flow: Quick Fix                                   │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                   │
-│   holdings (74,877 rows)                                                          │
-│        │                                                                          │
-│        │  INSERT INTO eod_holding_snapshots                                       │
-│        │  SELECT investor_code, latest_eod_date, trading_code,                    │
-│        │         saleable, total_stock, avg_cost, total_cost, market_value        │
-│        ▼                                                                          │
-│   eod_holding_snapshots (populated for latest EOD date)                           │
-│        │                                                                          │
-│        │  View now calculates correctly                                           │
-│        ▼                                                                          │
-│   margin_equity_snapshots (shows real marginable holdings)                        │
-│                                                                                   │
-└──────────────────────────────────────────────────────────────────────────────────┘
+### Expected Results Based on Current Data:
+- Total Margin Outstanding: ~35.53 Cr
+- Total Portfolio Value: ~198.36 Cr  
+- **Average Margin Ratio**: (35.53 / 198.36) * 100 = **17.9%**
+- **Available Capacity**: 198.36 - 35.53 = **162.83 Cr**
+- **Overall Utilization**: (35.53 / 198.36) * 100 = **17.9%** or (35.53 / 162.83) * 100 = **21.8%**
+
+## Implementation Changes
+
+### File: `src/components/margin-loan/DashboardTab.tsx`
+
+**1. Fix Average Margin Ratio Calculation (lines 171-174)**
+
+Replace:
+```typescript
+// Average margin ratio (only for margin clients)
+const avgMarginRatio = clientsWithRatio.length > 0
+  ? clientsWithRatio.reduce((sum, c) => sum + c.marginRatio, 0) / clientsWithRatio.length
+  : 0;
 ```
 
-**SQL Migration:**
-```sql
--- Populate eod_holding_snapshots from current holdings for the latest EOD date
-INSERT INTO eod_holding_snapshots (
-  investor_code, eod_date, security_code, 
-  total_qty_saleable, total_qty, avg_cost, total_cost, market_value
-)
-SELECT 
-  h.investor_code,
-  (SELECT MAX(eod_date) FROM eod_ledger_snapshots) AS eod_date,
-  h.trading_code AS security_code,
-  h.saleable AS total_qty_saleable,
-  h.total_stock AS total_qty,
-  h.avg_cost,
-  h.total_cost,
-  h.market_value
-FROM holdings h
-WHERE EXISTS (
-  SELECT 1 FROM eod_ledger_snapshots e 
-  WHERE e.investor_code = h.investor_code
-)
-ON CONFLICT (investor_code, eod_date, security_code) DO UPDATE SET
-  total_qty_saleable = EXCLUDED.total_qty_saleable,
-  total_qty = EXCLUDED.total_qty,
-  avg_cost = EXCLUDED.avg_cost,
-  total_cost = EXCLUDED.total_cost,
-  market_value = EXCLUDED.market_value;
+With:
+```typescript
+// Average Margin Ratio = (Total Margin Outstanding / Total Portfolio Value) * 100
+const avgMarginRatio = totalPortfolioValue > 0
+  ? (totalMarginOutstanding / totalPortfolioValue) * 100
+  : 0;
 ```
 
-### Step 2: Update run_batch_eod Function
-Enhance the EOD process to automatically capture holding snapshots during each run.
+**2. Fix Available Capacity Calculation (lines 181-183)**
 
-**Changes to `run_batch_eod`:**
-1. After processing ledger calculations, snapshot all holdings for investors in the EOD universe
-2. Delete and re-insert holdings for the EOD date to ensure accuracy
-3. Map `holdings.trading_code` to `eod_holding_snapshots.security_code`
-
-```sql
--- Add to run_batch_eod after ledger snapshot upsert:
-DELETE FROM eod_holding_snapshots WHERE eod_date = p_eod_date;
-
-INSERT INTO eod_holding_snapshots (
-  investor_code, eod_date, security_code,
-  total_qty_saleable, total_qty, avg_cost, total_cost, market_value
-)
-SELECT 
-  h.investor_code,
-  p_eod_date,
-  h.trading_code,
-  h.saleable,
-  h.total_stock,
-  h.avg_cost,
-  h.total_cost,
-  h.market_value
-FROM holdings h
-WHERE h.investor_code IN (SELECT inv_code FROM universe);
+Replace:
+```typescript
+// Available capacity = total equity - total exposure (simplified)
+const totalExposure = clientsWithRatio.reduce((sum, c) => sum + c.exposure, 0);
+const availableCapacity = Math.max(0, totalEquity - totalExposure);
 ```
 
-### Step 3: Verify Dashboard Data
-After migration:
-- The `margin_equity_snapshots` view will calculate real `marginable_after_haircut` values
-- Dashboard KPIs will show actual portfolio values and margin ratios
-- Pie chart will display accurate health distribution
+With:
+```typescript
+// Available Capacity = Total Portfolio Value - Total Margin Outstanding
+const availableCapacity = Math.max(0, totalPortfolioValue - totalMarginOutstanding);
+```
 
----
+**3. Add Overall Utilization to Snapshot Metrics (line 185-196)**
 
-## Technical Details
+Add new field:
+```typescript
+// Overall Utilization = (Total Margin Outstanding / Total Portfolio Value) * 100
+const overallUtilization = totalPortfolioValue > 0
+  ? (totalMarginOutstanding / totalPortfolioValue) * 100
+  : 0;
 
-### Data Mapping
-| holdings column | eod_holding_snapshots column |
-|-----------------|------------------------------|
-| investor_code   | investor_code                |
-| trading_code    | security_code                |
-| saleable        | total_qty_saleable           |
-| total_stock     | total_qty                    |
-| avg_cost        | avg_cost                     |
-| total_cost      | total_cost                   |
-| market_value    | market_value                 |
+return {
+  // ... existing fields
+  overallUtilization,
+};
+```
 
-### Files to Modify
-1. **Database Migration**: Create new migration for data population and function update
-2. **No frontend changes needed** - Dashboard already queries the view correctly
+**4. Update Overall Utilization Display (line 277-278)**
 
-### Expected Results After Implementation
-- `eod_holding_snapshots`: ~74,877 rows for the latest EOD date
-- `margin_equity_snapshots`: Holdings fields populated with real values
-- Dashboard: KPIs showing actual portfolio values, margin ratios, and health distribution
+Replace:
+```typescript
+{accountsSummary?.avgUtilization?.toFixed(1) || 0}%
+```
 
----
+With:
+```typescript
+{snapshotMetrics.overallUtilization.toFixed(1)}%
+```
 
-## Estimated Impact
-- **Portfolio Value KPI**: Will show actual collateral value
-- **Margin Health Distribution**: Pie chart will show real Safe/Warning/Critical distribution
-- **Top 10 Clients**: Table will show accurate margin ratios based on real holdings
+## Technical Notes
+
+- The `margin_accounts` table is currently empty, so we use the snapshot data directly
+- Currency formatting already handles Cr/L conversion correctly via `formatCurrency()`
+- Margin health distribution uses correct client-level calculations and should remain unchanged
+- The individual client margin ratios (Equity/Exposure) in the table are still correct for risk assessment
+
+## Expected Outcome After Fix
+
+| KPI | Before | After |
+|-----|--------|-------|
+| Total Margin Outstanding | ৳35.53 Cr | ৳35.53 Cr (unchanged) |
+| Total Portfolio Value | ৳198.36 Cr | ৳198.36 Cr (unchanged) |
+| Overall Utilization | 0.0% | ~17.9% |
+| Average Margin Ratio | 843564% | ~17.9% |
+| Available Capacity | ৳130.89 Cr | ~৳162.83 Cr |
+| High-Risk Clients | 28 | 28 (unchanged) |
+| Total Interest Accrued | ৳1.86 L | ৳1.86 L (unchanged) |
