@@ -22,6 +22,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recha
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useMemo } from "react";
 
 // Health distribution colors
 const COLORS = {
@@ -30,73 +31,58 @@ const COLORS = {
   critical: "#ef4444"
 };
 
-interface MarginEquitySnapshot {
-  investor_code: string;
-  eod_date: string;
-  rm_name: string | null;
-  department_name: string | null;
-  ledger_closing_balance: number;
-  marginable_after_haircut: number;
-  non_marginable_holdings: number;
+interface DashboardSummary {
+  eod_date: string | null;
+  total_margin_outstanding: number;
   total_portfolio_value: number;
-  previous_day_balance: number;
-  margin_interest_rate: number;
-  accrued_interest: number;
-  equity: number;
+  total_equity: number;
+  total_accrued_interest: number;
+  high_risk_count: number;
+  warning_count: number;
+  safe_count: number;
+  total_margin_clients: number;
 }
 
+interface TopClient {
+  investor_code: string;
+  rm_name: string | null;
+  department_name: string | null;
+  exposure: number;
+  margin_ratio: number;
+  equity: number;
+  portfolio_value: number;
+}
+
+const defaultSummary: DashboardSummary = {
+  eod_date: null,
+  total_margin_outstanding: 0,
+  total_portfolio_value: 0,
+  total_equity: 0,
+  total_accrued_interest: 0,
+  high_risk_count: 0,
+  warning_count: 0,
+  safe_count: 0,
+  total_margin_clients: 0
+};
+
 export function DashboardTab() {
-  // Fetch margin equity snapshots from the view - get latest date only
-  const { data: equitySnapshots, isLoading: loadingSnapshots } = useQuery({
-    queryKey: ['margin-equity-snapshots'],
+  // Fetch dashboard summary via RPC (server-side aggregation)
+  const { data: dashboardSummary, isLoading: loadingSummary } = useQuery({
+    queryKey: ['margin-dashboard-summary'],
     queryFn: async () => {
-      // First get the latest EOD date
-      const { data: latestDateData, error: dateError } = await supabase
-        .from('eod_ledger_snapshots')
-        .select('eod_date')
-        .order('eod_date', { ascending: false })
-        .limit(1);
-      
-      if (dateError) throw dateError;
-      if (!latestDateData || latestDateData.length === 0) return [];
-      
-      const latestDate = latestDateData[0].eod_date;
-      
-      // Query the view for the latest date only (using any to bypass type checking for view)
-      const { data, error } = await (supabase as any)
-        .from('margin_equity_snapshots')
-        .select('*')
-        .eq('eod_date', latestDate);
-      
+      const { data, error } = await supabase.rpc('get_margin_dashboard_summary' as any);
       if (error) throw error;
-      return (data as MarginEquitySnapshot[]) || [];
+      return (data as DashboardSummary) || defaultSummary;
     }
   });
 
-  // Fetch margin accounts summary
-  const { data: accountsSummary, isLoading: loadingSummary } = useQuery({
-    queryKey: ['margin-accounts-summary'],
+  // Fetch top clients via RPC
+  const { data: topClients, isLoading: loadingClients } = useQuery({
+    queryKey: ['margin-top-clients'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('margin_accounts')
-        .select('*');
-      
+      const { data, error } = await supabase.rpc('get_top_margin_clients' as any, { p_limit: 10 });
       if (error) throw error;
-      
-      // Calculate summary metrics
-      const totalExposure = data?.reduce((sum, acc) => sum + (acc.current_exposure || 0), 0) || 0;
-      const totalLimit = data?.reduce((sum, acc) => sum + (acc.approved_limit || 0), 0) || 0;
-      const avgUtilization = data?.length 
-        ? data.reduce((sum, acc) => sum + (acc.margin_utilization || 0), 0) / data.length 
-        : 0;
-      
-      return {
-        totalAccounts: data?.length || 0,
-        totalExposure,
-        totalLimit,
-        avgUtilization,
-        activeAccounts: data?.filter(a => a.status === 'active').length || 0
-      };
+      return (data as TopClient[]) || [];
     }
   });
 
@@ -114,100 +100,40 @@ export function DashboardTab() {
     }
   });
 
-  // Calculate metrics from equity snapshots
-  const snapshotMetrics = (() => {
-    if (!equitySnapshots || equitySnapshots.length === 0) {
-      return {
-        totalEquity: 0,
-        totalPortfolioValue: 0,
-        totalMarginOutstanding: 0,
-        totalAccruedInterest: 0,
-        highRiskCount: 0,
-        warningCount: 0,
-        safeCount: 0,
-        topClients: [],
-        avgMarginRatio: 0,
-        availableCapacity: 0,
-        overallUtilization: 0,
-      };
-    }
-
-    // Get unique latest records per investor
-    const latestDate = equitySnapshots[0]?.eod_date;
-    const latestSnapshots = equitySnapshots.filter(s => s.eod_date === latestDate);
+  // Calculate derived metrics from summary
+  const metrics = useMemo(() => {
+    const summary = dashboardSummary || defaultSummary;
+    const { total_margin_outstanding, total_portfolio_value } = summary;
     
-    // Calculate margin ratio for each client
-    // Margin Ratio = Equity / Negative Ledger Balance (exposure)
-    const clientsWithRatio = latestSnapshots.map(s => {
-      const exposure = Math.abs(Math.min(s.ledger_closing_balance, 0));
-      const marginRatio = exposure > 0 ? (s.equity / exposure) * 100 : 999;
-      return {
-        ...s,
-        exposure,
-        marginRatio
-      };
-    }).filter(c => c.exposure > 0); // Only margin clients (negative balance)
-
-    // Health distribution
-    const safeCount = clientsWithRatio.filter(c => c.marginRatio >= 130).length;
-    const warningCount = clientsWithRatio.filter(c => c.marginRatio >= 110 && c.marginRatio < 130).length;
-    const highRiskCount = clientsWithRatio.filter(c => c.marginRatio < 110).length;
-
-    // Total portfolio value from view
-    const totalPortfolioValue = latestSnapshots.reduce(
-      (sum, s) => sum + (s.total_portfolio_value || 0), 0
-    );
-
-    // Total margin outstanding (sum of negative balances)
-    const totalMarginOutstanding = latestSnapshots.reduce(
-      (sum, s) => sum + Math.abs(Math.min(s.ledger_closing_balance, 0)), 0
-    );
-
-    // Total equity
-    const totalEquity = latestSnapshots.reduce((sum, s) => sum + s.equity, 0);
-
-    // Total accrued interest
-    const totalAccruedInterest = latestSnapshots.reduce((sum, s) => sum + s.accrued_interest, 0);
-
     // Average Margin Ratio = (Total Margin Outstanding / Total Portfolio Value) * 100
-    const avgMarginRatio = totalPortfolioValue > 0
-      ? (totalMarginOutstanding / totalPortfolioValue) * 100
+    const avgMarginRatio = total_portfolio_value > 0
+      ? (total_margin_outstanding / total_portfolio_value) * 100
       : 0;
-
-    // Top 10 clients by exposure
-    const topClients = [...clientsWithRatio]
-      .sort((a, b) => b.exposure - a.exposure)
-      .slice(0, 10);
-
-    // Available Capacity = Total Portfolio Value - Total Margin Outstanding
-    const availableCapacity = Math.max(0, totalPortfolioValue - totalMarginOutstanding);
-
+    
     // Overall Utilization = (Total Margin Outstanding / Total Portfolio Value) * 100
-    const overallUtilization = totalPortfolioValue > 0
-      ? (totalMarginOutstanding / totalPortfolioValue) * 100
+    const overallUtilization = total_portfolio_value > 0
+      ? (total_margin_outstanding / total_portfolio_value) * 100
       : 0;
-
+    
+    // Available Capacity = Total Portfolio Value - Total Margin Outstanding
+    const availableCapacity = Math.max(0, total_portfolio_value - total_margin_outstanding);
+    
     return {
-      totalEquity,
-      totalPortfolioValue,
-      totalMarginOutstanding,
-      totalAccruedInterest,
-      highRiskCount,
-      warningCount,
-      safeCount,
-      topClients,
+      ...summary,
       avgMarginRatio,
-      availableCapacity,
       overallUtilization,
+      availableCapacity
     };
-  })();
+  }, [dashboardSummary]);
 
   // Build health distribution data for pie chart
-  const healthData = [
-    { name: "Safe (>130%)", value: snapshotMetrics.safeCount, color: COLORS.safe },
-    { name: "Warning (110-130%)", value: snapshotMetrics.warningCount, color: COLORS.warning },
-    { name: "Critical (<110%)", value: snapshotMetrics.highRiskCount, color: COLORS.critical }
-  ].filter(d => d.value > 0);
+  const healthData = useMemo(() => {
+    return [
+      { name: "Safe (>130%)", value: metrics.safe_count, color: COLORS.safe },
+      { name: "Warning (110-130%)", value: metrics.warning_count, color: COLORS.warning },
+      { name: "Critical (<110%)", value: metrics.high_risk_count, color: COLORS.critical }
+    ].filter(d => d.value > 0);
+  }, [metrics]);
 
   const formatCurrency = (value: number) => {
     if (value >= 10000000) return `৳${(value / 10000000).toFixed(2)} Cr`;
@@ -221,7 +147,7 @@ export function DashboardTab() {
     return <Badge className="bg-red-500/20 text-red-400">Critical</Badge>;
   };
 
-  const isLoading = loadingSummary || loadingCalls || loadingSnapshots;
+  const isLoading = loadingSummary || loadingCalls || loadingClients;
 
   return (
     <div className="space-y-6">
@@ -239,7 +165,7 @@ export function DashboardTab() {
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {formatCurrency(snapshotMetrics.totalMarginOutstanding)}
+                {formatCurrency(metrics.total_margin_outstanding)}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
@@ -260,7 +186,7 @@ export function DashboardTab() {
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {formatCurrency(snapshotMetrics.totalPortfolioValue)}
+                {formatCurrency(metrics.total_portfolio_value)}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
@@ -281,7 +207,7 @@ export function DashboardTab() {
               <Skeleton className="h-8 w-24" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {snapshotMetrics.overallUtilization.toFixed(1)}%
+                {metrics.overallUtilization.toFixed(1)}%
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
@@ -330,7 +256,7 @@ export function DashboardTab() {
             {isLoading ? (
               <Skeleton className="h-8 w-16" />
             ) : (
-              <div className="text-2xl font-bold text-foreground">{snapshotMetrics.highRiskCount}</div>
+              <div className="text-2xl font-bold text-foreground">{metrics.high_risk_count}</div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
               Below 110% margin ratio
@@ -350,7 +276,7 @@ export function DashboardTab() {
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {formatCurrency(snapshotMetrics.availableCapacity)}
+                {formatCurrency(metrics.availableCapacity)}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
@@ -371,7 +297,7 @@ export function DashboardTab() {
               <Skeleton className="h-8 w-24" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {snapshotMetrics.avgMarginRatio.toFixed(0)}%
+                {metrics.avgMarginRatio.toFixed(1)}%
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
@@ -392,7 +318,7 @@ export function DashboardTab() {
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {formatCurrency(snapshotMetrics.totalAccruedInterest)}
+                {formatCurrency(metrics.total_accrued_interest)}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
@@ -463,7 +389,7 @@ export function DashboardTab() {
                     <Skeleton key={i} className="h-10 w-full" />
                   ))}
                 </div>
-              ) : snapshotMetrics.topClients.length > 0 ? (
+              ) : topClients && topClients.length > 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -475,13 +401,13 @@ export function DashboardTab() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {snapshotMetrics.topClients.map((client) => (
+                    {topClients.map((client) => (
                       <TableRow key={client.investor_code}>
                         <TableCell className="font-mono text-sm">{client.investor_code}</TableCell>
                         <TableCell className="text-sm">{client.rm_name || '-'}</TableCell>
                         <TableCell className="text-right">{formatCurrency(client.exposure)}</TableCell>
-                        <TableCell className="text-right">{client.marginRatio.toFixed(0)}%</TableCell>
-                        <TableCell>{getMarginRatioBadge(client.marginRatio)}</TableCell>
+                        <TableCell className="text-right">{(client.margin_ratio || 0).toFixed(0)}%</TableCell>
+                        <TableCell>{getMarginRatioBadge(client.margin_ratio || 0)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
