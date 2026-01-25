@@ -2682,18 +2682,16 @@ export type Database = {
           p_limit?: number
           p_offset?: number
           p_search?: string
-          p_status?: string
+          p_statuses?: string[]
         }
         Returns: {
           account_type: string
           accrued_interest: number
           current_exposure: number
-          department_name: string
           equity: number
           investor_code: string
           investor_name: string
           margin_ratio: number
-          margin_utilization: number
           portfolio_value: number
           rm_name: string
           status: string
