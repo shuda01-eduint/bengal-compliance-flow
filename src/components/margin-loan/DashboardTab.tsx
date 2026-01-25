@@ -206,16 +206,22 @@ export function DashboardTab() {
   const treemapHierarchy = useMemo(() => {
     if (!treemapData || treemapData.length === 0) return null;
 
+    // Calculate equity for each RM if not provided: equity = portfolio_value - margin_outstanding
+    const dataWithEquity = treemapData.map(rm => ({
+      ...rm,
+      calculated_equity: (Number(rm.portfolio_value) || 0) - (Number(rm.margin_outstanding) || 0)
+    }));
+
     // Filter data based on filter selection
-    let filteredData = treemapData;
+    let filteredData = dataWithEquity;
     if (treemapFilter === "negative_equity") {
-      filteredData = treemapData.filter(rm => (Number(rm.equity) || 0) < 0);
+      filteredData = dataWithEquity.filter(rm => rm.calculated_equity < 0);
     }
 
     if (filteredData.length === 0) return null;
 
     // Group by department
-    const departmentMap = new Map<string, TreemapRMData[]>();
+    const departmentMap = new Map<string, (TreemapRMData & { calculated_equity: number })[]>();
     filteredData.forEach(rm => {
       const dept = rm.department_name || 'Unassigned';
       if (!departmentMap.has(dept)) {
@@ -233,7 +239,7 @@ export function DashboardTab() {
         color: getRiskColor(Number(rm.margin_ratio) || 0),
         margin_ratio: Number(rm.margin_ratio) || 0,
         client_count: Number(rm.client_count) || 0,
-        equity: Number(rm.equity) || 0
+        equity: rm.calculated_equity
       }))
     }));
 
@@ -286,8 +292,8 @@ export function DashboardTab() {
             width={width}
             height={height}
             style={{
-              fill: 'hsl(var(--muted))',
-              stroke: 'hsl(var(--border))',
+              fill: 'hsl(222 47% 12%)',
+              stroke: 'hsl(217 33% 25%)',
               strokeWidth: 2,
             }}
           />
@@ -295,7 +301,7 @@ export function DashboardTab() {
             <text
               x={x + 8}
               y={y + 18}
-              fill="hsl(var(--muted-foreground))"
+              fill="hsl(210 40% 75%)"
               fontSize={12}
               fontWeight="600"
               style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}
@@ -315,9 +321,14 @@ export function DashboardTab() {
         : (name.length > 8 ? name.substring(0, 6) + '..' : name);
       
       // Calculate text visibility based on box size
-      const showName = width > 50 && height > 35;
       const showRatio = width > 40 && height > 25;
       const showBothLines = width > 50 && height > 50;
+      
+      // Use darker text color with stronger shadow for better contrast
+      const textColor = "#ffffff";
+      const shadowStyle = { 
+        filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.8)) drop-shadow(0 0 4px rgba(0,0,0,0.5))'
+      };
       
       return (
         <g>
@@ -328,7 +339,7 @@ export function DashboardTab() {
             height={height}
             style={{
               fill: color,
-              stroke: 'rgba(0, 0, 0, 0.3)',
+              stroke: 'rgba(0, 0, 0, 0.4)',
               strokeWidth: 1,
             }}
           />
@@ -337,25 +348,25 @@ export function DashboardTab() {
             <>
               <text
                 x={x + width / 2}
-                y={y + height / 2 - 8}
+                y={y + height / 2 - 10}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                fill="#fff"
-                fontSize={width > 100 ? 13 : 11}
-                fontWeight="600"
-                style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+                fill={textColor}
+                fontSize={width > 100 ? 14 : 12}
+                fontWeight="700"
+                style={shadowStyle}
               >
                 {displayName}
               </text>
               <text
                 x={x + width / 2}
-                y={y + height / 2 + 10}
+                y={y + height / 2 + 12}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                fill="#fff"
-                fontSize={width > 100 ? 14 : 12}
-                fontWeight="700"
-                style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+                fill={textColor}
+                fontSize={width > 100 ? 16 : 14}
+                fontWeight="800"
+                style={shadowStyle}
               >
                 {ratioText}
               </text>
@@ -367,10 +378,10 @@ export function DashboardTab() {
               y={y + height / 2}
               textAnchor="middle"
               dominantBaseline="middle"
-              fill="#fff"
-              fontSize={11}
-              fontWeight="700"
-              style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+              fill={textColor}
+              fontSize={12}
+              fontWeight="800"
+              style={shadowStyle}
             >
               {ratioText}
             </text>
