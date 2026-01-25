@@ -18,11 +18,11 @@ import {
   Activity,
   Clock
 } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
+import { Treemap, ResponsiveContainer, Tooltip } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 
 // Health distribution colors
 const COLORS = {
@@ -51,6 +51,25 @@ interface TopClient {
   margin_ratio: number;
   equity: number;
   portfolio_value: number;
+}
+
+interface TreemapRMData {
+  department_name: string;
+  rm_name: string;
+  rm_id: string;
+  margin_outstanding: number;
+  portfolio_value: number;
+  margin_ratio: number;
+  client_count: number;
+}
+
+interface TreemapNode {
+  name: string;
+  size?: number;
+  children?: TreemapNode[];
+  color?: string;
+  margin_ratio?: number;
+  client_count?: number;
 }
 
 const defaultSummary: DashboardSummary = {
@@ -83,6 +102,16 @@ export function DashboardTab() {
       const { data, error } = await supabase.rpc('get_top_margin_clients' as any, { p_limit: 10 });
       if (error) throw error;
       return (data as TopClient[]) || [];
+    }
+  });
+
+  // Fetch treemap data via RPC
+  const { data: treemapData, isLoading: loadingTreemap } = useQuery({
+    queryKey: ['margin-treemap-data'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_margin_treemap_data' as any);
+      if (error) throw error;
+      return (data as TreemapRMData[]) || [];
     }
   });
 
@@ -126,18 +155,46 @@ export function DashboardTab() {
     };
   }, [dashboardSummary]);
 
-  // Build health distribution data for pie chart
-  const healthData = useMemo(() => {
-    return [
-      { name: "Safe (>130%)", value: metrics.safe_count, color: COLORS.safe },
-      { name: "Warning (110-130%)", value: metrics.warning_count, color: COLORS.warning },
-      { name: "Critical (<110%)", value: metrics.high_risk_count, color: COLORS.critical }
-    ].filter(d => d.value > 0);
-  }, [metrics]);
+  // Get risk color based on margin ratio
+  const getRiskColor = useCallback((marginRatio: number) => {
+    if (marginRatio >= 130) return COLORS.safe;
+    if (marginRatio >= 110) return COLORS.warning;
+    return COLORS.critical;
+  }, []);
+
+  // Build treemap data structure grouped by department
+  const treemapHierarchy = useMemo(() => {
+    if (!treemapData || treemapData.length === 0) return null;
+
+    // Group by department
+    const departmentMap = new Map<string, TreemapRMData[]>();
+    treemapData.forEach(rm => {
+      const dept = rm.department_name || 'Unassigned';
+      if (!departmentMap.has(dept)) {
+        departmentMap.set(dept, []);
+      }
+      departmentMap.get(dept)!.push(rm);
+    });
+
+    // Build hierarchical structure
+    const children: TreemapNode[] = Array.from(departmentMap.entries()).map(([deptName, rms]) => ({
+      name: deptName,
+      children: rms.map(rm => ({
+        name: rm.rm_name || 'Unknown',
+        size: Number(rm.margin_outstanding) || 1,
+        color: getRiskColor(Number(rm.margin_ratio) || 0),
+        margin_ratio: Number(rm.margin_ratio) || 0,
+        client_count: Number(rm.client_count) || 0
+      }))
+    }));
+
+    return { name: 'root', children };
+  }, [treemapData, getRiskColor]);
 
   const formatCurrency = (value: number) => {
-    if (value >= 10000000) return `৳${(value / 10000000).toFixed(2)} Cr`;
-    if (value >= 100000) return `৳${(value / 100000).toFixed(2)} L`;
+    const absValue = Math.abs(value);
+    if (absValue >= 10000000) return `৳${(value / 10000000).toFixed(2)} Cr`;
+    if (absValue >= 100000) return `৳${(value / 100000).toFixed(2)} L`;
     return `৳${value.toLocaleString()}`;
   };
 
@@ -147,7 +204,100 @@ export function DashboardTab() {
     return <Badge className="bg-red-500/20 text-red-400">Critical</Badge>;
   };
 
-  const isLoading = loadingSummary || loadingCalls || loadingClients;
+  // Custom content renderer for treemap cells
+  const CustomTreemapContent = (props: any) => {
+    const { x, y, width, height, name, color, depth } = props;
+    
+    if (depth === 1) {
+      // Department level - show label only
+      return (
+        <g>
+          <rect
+            x={x}
+            y={y}
+            width={width}
+            height={height}
+            style={{
+              fill: 'hsl(var(--muted))',
+              stroke: 'hsl(var(--border))',
+              strokeWidth: 2,
+            }}
+          />
+          {width > 60 && height > 20 && (
+            <text
+              x={x + 6}
+              y={y + 16}
+              fill="hsl(var(--muted-foreground))"
+              fontSize={11}
+              fontWeight="bold"
+            >
+              {name}
+            </text>
+          )}
+        </g>
+      );
+    }
+    
+    if (depth === 2) {
+      // RM level - colored box
+      return (
+        <g>
+          <rect
+            x={x}
+            y={y}
+            width={width}
+            height={height}
+            style={{
+              fill: color,
+              stroke: 'hsl(var(--background))',
+              strokeWidth: 1,
+              opacity: 0.85,
+            }}
+          />
+          {width > 40 && height > 25 && (
+            <text
+              x={x + width / 2}
+              y={y + height / 2}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill="#fff"
+              fontSize={10}
+              fontWeight="500"
+            >
+              {name.length > 12 ? name.substring(0, 10) + '...' : name}
+            </text>
+          )}
+        </g>
+      );
+    }
+    
+    return null;
+  };
+
+  // Custom tooltip for treemap
+  const TreemapTooltip = ({ active, payload }: any) => {
+    if (!active || !payload || !payload.length) return null;
+    
+    const data = payload[0].payload;
+    if (!data.size) return null; // Skip department-level tooltips
+    
+    return (
+      <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
+        <p className="font-semibold text-foreground">{data.name}</p>
+        <p className="text-sm text-muted-foreground">
+          Margin Outstanding: {formatCurrency(data.size)}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Margin Ratio: {(data.margin_ratio || 0).toFixed(0)}%
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Clients: {data.client_count || 0}
+        </p>
+      </div>
+    );
+  };
+
+  const isLoading = loadingSummary || loadingCalls || loadingClients || loadingTreemap;
 
   return (
     <div className="space-y-6">
@@ -330,42 +480,44 @@ export function DashboardTab() {
 
       {/* Charts and Tables Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Margin Health Distribution */}
+        {/* Margin Health Distribution - Treemap */}
         <Card className="bg-card border-border">
           <CardHeader>
-            <CardTitle className="text-lg">Margin Health Distribution</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Margin Health Distribution</CardTitle>
+              <div className="flex items-center gap-4 text-xs">
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.safe }} />
+                  <span className="text-muted-foreground">Safe (&gt;130%)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.warning }} />
+                  <span className="text-muted-foreground">Warning (110-130%)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.critical }} />
+                  <span className="text-muted-foreground">Critical (&lt;110%)</span>
+                </div>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="h-[300px]">
+            <div className="h-[350px]">
               {isLoading ? (
                 <div className="flex items-center justify-center h-full">
-                  <Skeleton className="h-48 w-48 rounded-full" />
+                  <Skeleton className="h-full w-full rounded" />
                 </div>
-              ) : healthData.length > 0 ? (
+              ) : treemapHierarchy && treemapHierarchy.children && treemapHierarchy.children.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={healthData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {healthData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'hsl(var(--card))', 
-                        borderColor: 'hsl(var(--border))',
-                        color: 'hsl(var(--foreground))'
-                      }}
-                    />
-                    <Legend />
-                  </PieChart>
+                  <Treemap
+                    data={treemapHierarchy.children}
+                    dataKey="size"
+                    aspectRatio={4 / 3}
+                    stroke="hsl(var(--border))"
+                    content={<CustomTreemapContent />}
+                  >
+                    <Tooltip content={<TreemapTooltip />} />
+                  </Treemap>
                 </ResponsiveContainer>
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground">

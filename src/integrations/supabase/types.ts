@@ -2728,6 +2728,18 @@ export type Database = {
         Args: { p_eod_date?: string }
         Returns: Json
       }
+      get_margin_treemap_data: {
+        Args: never
+        Returns: {
+          client_count: number
+          department_name: string
+          margin_outstanding: number
+          margin_ratio: number
+          portfolio_value: number
+          rm_id: string
+          rm_name: string
+        }[]
+      }
       get_negative_balance_codes: {
         Args: { p_from_date?: string; p_search?: string; p_to_date?: string }
         Returns: {
