@@ -128,6 +128,7 @@ export function DashboardTab() {
         topClients: [],
         avgMarginRatio: 0,
         availableCapacity: 0,
+        overallUtilization: 0,
       };
     }
 
@@ -168,9 +169,9 @@ export function DashboardTab() {
     // Total accrued interest
     const totalAccruedInterest = latestSnapshots.reduce((sum, s) => sum + s.accrued_interest, 0);
 
-    // Average margin ratio (only for margin clients)
-    const avgMarginRatio = clientsWithRatio.length > 0
-      ? clientsWithRatio.reduce((sum, c) => sum + c.marginRatio, 0) / clientsWithRatio.length
+    // Average Margin Ratio = (Total Margin Outstanding / Total Portfolio Value) * 100
+    const avgMarginRatio = totalPortfolioValue > 0
+      ? (totalMarginOutstanding / totalPortfolioValue) * 100
       : 0;
 
     // Top 10 clients by exposure
@@ -178,9 +179,13 @@ export function DashboardTab() {
       .sort((a, b) => b.exposure - a.exposure)
       .slice(0, 10);
 
-    // Available capacity = total equity - total exposure (simplified)
-    const totalExposure = clientsWithRatio.reduce((sum, c) => sum + c.exposure, 0);
-    const availableCapacity = Math.max(0, totalEquity - totalExposure);
+    // Available Capacity = Total Portfolio Value - Total Margin Outstanding
+    const availableCapacity = Math.max(0, totalPortfolioValue - totalMarginOutstanding);
+
+    // Overall Utilization = (Total Margin Outstanding / Total Portfolio Value) * 100
+    const overallUtilization = totalPortfolioValue > 0
+      ? (totalMarginOutstanding / totalPortfolioValue) * 100
+      : 0;
 
     return {
       totalEquity,
@@ -193,6 +198,7 @@ export function DashboardTab() {
       topClients,
       avgMarginRatio,
       availableCapacity,
+      overallUtilization,
     };
   })();
 
@@ -275,7 +281,7 @@ export function DashboardTab() {
               <Skeleton className="h-8 w-24" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {accountsSummary?.avgUtilization?.toFixed(1) || 0}%
+                {snapshotMetrics.overallUtilization.toFixed(1)}%
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
