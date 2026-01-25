@@ -1,70 +1,80 @@
 
-# Fix: Accounting Page Closing Balance Commission Calculation
+# Fix: Restore Opening Balance from eod_ledger_snapshots
 
-## Problem Identified
+## Problem
 
-The `get_accounting_data_v3` RPC function has a bug in the commission calculation. It's summing the `brokerage_commission` column from `trade_history`, but this column contains the **commission rate** (e.g., 0.3 meaning 0.3%), not the actual **commission amount**.
+The recent migration that fixed the commission calculation accidentally broke the opening balance. It reverted the data source from `eod_ledger_snapshots` back to `balances_raw`.
 
-**Example - Investor 10750 on Jan 22, 2026:**
-| Field | Value |
-|-------|-------|
-| Trade Value | 6,468 |
-| Commission Rate | 0.3 (stored in DB) |
-| Expected Commission | 6,468 × 0.3% = 19.40 |
-| Actual Commission Used | 0.3 (wrong!) |
-| Expected Closing Balance | 6,512.76 - 6,468 - 19.40 = **25.36** |
-| Actual Closing Balance | 6,512.76 - 6,468 - 0.3 = **44.46** |
+**Evidence:**
+- Investor 10750 has **no data** in `balances_raw` table
+- Investor 10750 **has correct data** in `eod_ledger_snapshots`:
+  - 2026-01-21: closing_balance = 6512.76
+  - 2026-01-22: closing_balance = 25.36 (correct after brokerage)
+
+## Root Cause
+
+In the migration `20260125115555_*.sql`, the `opening_balances` CTE incorrectly queries:
+
+```sql
+opening_balances AS (
+  SELECT
+    br.investor_code,
+    COALESCE(br.ledger_balance, 0) AS opening_balance
+  FROM public.balances_raw br                    -- WRONG: should be eod_ledger_snapshots
+  WHERE br.as_of_date = _opening_date
+    AND br.investor_code IN (SELECT ib.investor_code FROM investor_base ib)
+),
+```
 
 ## Solution
 
-Modify the `period_trades` CTE in the RPC to calculate the commission amount properly:
+Create a new migration to fix the `opening_balances` CTE to use `eod_ledger_snapshots`:
 
-**Current Code (Wrong):**
 ```sql
-COALESCE(SUM(COALESCE(th.brokerage_commission, 0)), 0) AS brokerage,
+opening_balances AS (
+  SELECT
+    els.investor_code,
+    COALESCE(els.closing_balance, els.ledger_balance, 0) AS opening_balance
+  FROM public.eod_ledger_snapshots els
+  WHERE els.eod_date = _opening_date
+    AND els.investor_code IN (SELECT ib.investor_code FROM investor_base ib)
+),
 ```
 
-**Fixed Code:**
-```sql
-COALESCE(SUM(
-  COALESCE(th.value, 0) * 
-  COALESCE(th.brokerage_commission, 0.3) / 100
-), 0) AS brokerage,
-```
+This uses `COALESCE(closing_balance, ledger_balance, 0)` as documented in the memory for the proper fallback chain.
+
+---
 
 ## Technical Details
 
-### File to Modify
-- New database migration to update the `get_accounting_data_v3` function
+### Changes
 
-### Changes in the Function
+**File to Create:** New database migration
 
-1. **Period Trades CTE** (line 67 of current function):
-   - Change from summing the rate directly to calculating: `value × rate / 100`
-   - Handle NULL rates by defaulting to 0.3%
-   - Handle rates stored as percentages (≥0.1) vs decimals (<0.1)
+**Scope:** Replace only the `opening_balances` CTE while keeping all other fixes intact (the commission calculation fix remains correct)
 
-2. **Commission Normalization Logic**:
-   ```sql
-   -- If rate >= 0.1, treat as percentage (e.g., 0.3 = 0.3%)
-   -- If rate < 0.1, treat as decimal (e.g., 0.003 = 0.3%)
-   CASE 
-     WHEN COALESCE(th.brokerage_commission, 0.3) >= 0.1 
-     THEN COALESCE(th.value, 0) * COALESCE(th.brokerage_commission, 0.3) / 100
-     ELSE COALESCE(th.value, 0) * COALESCE(th.brokerage_commission, 0.003)
-   END
-   ```
+### Updated CTE Logic
 
-## Expected Outcome
+| Field | Before (Wrong) | After (Correct) |
+|-------|----------------|-----------------|
+| Table | `balances_raw` | `eod_ledger_snapshots` |
+| Date Column | `as_of_date` | `eod_date` |
+| Value Column | `ledger_balance` | `COALESCE(closing_balance, ledger_balance, 0)` |
 
-After the fix:
-- Investor 10750's closing balance for Jan 22 will show **25.36** (matching the expected value of ~19, accounting for rounding)
-- All other investors' closing balances will also be corrected
-- The exported CSV will contain the correct values since it uses the same data source
+### Expected Result
 
-## Verification
+After this fix:
+- Investor 10750 on 2026-01-22 will show:
+  - **Opening Bal:** 6,512.76 (from 2026-01-21 snapshot)
+  - **Gross Buy:** 6,468.00
+  - **Brokerage:** 19.40
+  - **Closing Balance:** 25.36
 
-After deployment, verify by checking:
-1. Investor 10750 on Jan 22 should show closing balance ≈ 25.36
-2. The commission column (if visible) should show ≈ 19.40
-3. Cross-check with EOD snapshots which have the correct values
+### Verification Query
+
+```sql
+SELECT investor_code, opening_balance, gross_buy, brokerage, closing_balance
+FROM get_accounting_data_v3('2026-01-21', '2026-01-22', '10750', 'all', 'with_trades', 10, 0);
+```
+
+Expected: opening_balance = 6512.76, closing_balance ≈ 25.36
