@@ -2676,6 +2676,28 @@ export type Database = {
           rm_name: string
         }[]
       }
+      get_margin_client_accounts: {
+        Args: {
+          p_account_type?: string
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_status?: string
+        }
+        Returns: {
+          account_type: string
+          current_exposure: number
+          department_name: string
+          equity: number
+          investor_code: string
+          investor_name: string
+          margin_ratio: number
+          margin_utilization: number
+          portfolio_value: number
+          rm_name: string
+          status: string
+        }[]
+      }
       get_margin_composition_by_department: {
         Args: { p_from_date?: string; p_to_date?: string }
         Returns: {

@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Filter, Eye, RefreshCw } from "lucide-react";
+import { Search, Eye, RefreshCw } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,24 +31,13 @@ export function ClientAccountsTab() {
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
 
   const { data: accounts, isLoading, refetch } = useQuery({
-    queryKey: ['margin-accounts', statusFilter, accountTypeFilter, searchTerm],
+    queryKey: ['margin-client-accounts', statusFilter, accountTypeFilter, searchTerm],
     queryFn: async () => {
-      let query = supabase
-        .from('margin_accounts')
-        .select('*')
-        .order('current_exposure', { ascending: false });
-
-      if (statusFilter !== 'all') {
-        query = query.eq('status', statusFilter);
-      }
-      if (accountTypeFilter !== 'all') {
-        query = query.eq('account_type', accountTypeFilter);
-      }
-      if (searchTerm) {
-        query = query.ilike('investor_code', `%${searchTerm}%`);
-      }
-
-      const { data, error } = await query.limit(100);
+      const { data, error } = await supabase.rpc('get_margin_client_accounts', {
+        p_search: searchTerm,
+        p_account_type: accountTypeFilter,
+        p_limit: 100
+      });
       if (error) throw error;
       return data || [];
     }
@@ -79,16 +68,6 @@ export function ClientAccountsTab() {
     return "text-green-400";
   };
 
-  // Mock data for demonstration
-  const mockAccounts = [
-    { investor_code: "INV001", account_type: "margin", approved_limit: 30000000, current_exposure: 25000000, margin_utilization: 83.33, status: "active" },
-    { investor_code: "INV002", account_type: "margin", approved_limit: 25000000, current_exposure: 18500000, margin_utilization: 74.00, status: "active" },
-    { investor_code: "INV003", account_type: "margin", approved_limit: 20000000, current_exposure: 19000000, margin_utilization: 95.00, status: "active" },
-    { investor_code: "INV004", account_type: "margin", approved_limit: 15000000, current_exposure: 12800000, margin_utilization: 85.33, status: "suspended" },
-    { investor_code: "INV005", account_type: "cash", approved_limit: 12000000, current_exposure: 10500000, margin_utilization: 87.50, status: "active" },
-  ];
-
-  const displayData = accounts && accounts.length > 0 ? accounts : mockAccounts;
 
   return (
     <div className="space-y-4">
@@ -152,29 +131,35 @@ export function ClientAccountsTab() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Investor Code</TableHead>
-                    <TableHead>Account Type</TableHead>
-                    <TableHead className="text-right">Approved Limit</TableHead>
-                    <TableHead className="text-right">Current Exposure</TableHead>
-                    <TableHead className="text-right">Utilization %</TableHead>
+                    <TableHead>Investor Name</TableHead>
+                    <TableHead>RM Name</TableHead>
+                    <TableHead className="text-right">Exposure</TableHead>
+                    <TableHead className="text-right">Portfolio Value</TableHead>
+                    <TableHead className="text-right">Margin Ratio %</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-center">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {displayData.map((account) => (
+                  {accounts && accounts.length > 0 ? accounts.map((account: any) => (
                     <TableRow key={account.investor_code}>
                       <TableCell className="font-mono font-medium">
                         {account.investor_code}
                       </TableCell>
-                      <TableCell className="capitalize">{account.account_type}</TableCell>
-                      <TableCell className="text-right">
-                        {formatCurrency(account.approved_limit || 0)}
+                      <TableCell className="max-w-[200px] truncate">
+                        {account.investor_name || '-'}
+                      </TableCell>
+                      <TableCell className="max-w-[150px] truncate">
+                        {account.rm_name || '-'}
                       </TableCell>
                       <TableCell className="text-right">
                         {formatCurrency(account.current_exposure || 0)}
                       </TableCell>
-                      <TableCell className={`text-right font-medium ${getUtilizationColor(account.margin_utilization || 0)}`}>
-                        {(account.margin_utilization || 0).toFixed(2)}%
+                      <TableCell className="text-right">
+                        {formatCurrency(account.portfolio_value || 0)}
+                      </TableCell>
+                      <TableCell className={`text-right font-medium ${getUtilizationColor(Math.abs(account.margin_ratio || 0))}`}>
+                        {(account.margin_ratio || 0).toFixed(2)}%
                       </TableCell>
                       <TableCell>{getStatusBadge(account.status || 'active')}</TableCell>
                       <TableCell className="text-center">
@@ -188,7 +173,13 @@ export function ClientAccountsTab() {
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  )) : (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                        No margin accounts found
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
