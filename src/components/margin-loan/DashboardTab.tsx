@@ -30,22 +30,45 @@ const COLORS = {
   critical: "#ef4444"
 };
 
-// Mock data - replace with real queries when data exists
-const mockHealthData = [
-  { name: "Safe (>130%)", value: 45, color: COLORS.safe },
-  { name: "Warning (110-130%)", value: 35, color: COLORS.warning },
-  { name: "Critical (<110%)", value: 20, color: COLORS.critical }
-];
-
-const mockTopClients = [
-  { code: "INV001", name: "ABC Holdings Ltd", exposure: 25000000, limit: 30000000, ratio: 145 },
-  { code: "INV002", name: "XYZ Capital", exposure: 18500000, limit: 25000000, ratio: 128 },
-  { code: "INV003", name: "Global Traders", exposure: 15200000, limit: 20000000, ratio: 115 },
-  { code: "INV004", name: "Prime Investments", exposure: 12800000, limit: 15000000, ratio: 108 },
-  { code: "INV005", name: "Delta Finance", exposure: 10500000, limit: 12000000, ratio: 135 },
-];
+interface MarginEquitySnapshot {
+  investor_code: string;
+  eod_date: string;
+  rm_name: string | null;
+  department_name: string | null;
+  ledger_closing_balance: number;
+  marginable_after_haircut: number;
+  non_marginable_holdings: number;
+  previous_day_balance: number;
+  margin_interest_rate: number;
+  accrued_interest: number;
+  equity: number;
+}
 
 export function DashboardTab() {
+  // Fetch margin equity snapshots from the view
+  const { data: equitySnapshots, isLoading: loadingSnapshots } = useQuery({
+    queryKey: ['margin-equity-snapshots'],
+    queryFn: async () => {
+      // Get the latest date's snapshots using raw query for view
+      const { data, error } = await supabase
+        .rpc('get_margin_equity_snapshots' as any)
+        .limit(1000);
+      
+      if (error) {
+        // Fallback: try direct query if RPC doesn't exist
+        const result = await supabase
+          .from('margin_equity_snapshots')
+          .select('*')
+          .order('eod_date', { ascending: false })
+          .limit(1000);
+        
+        if (result.error) throw result.error;
+        return (result.data as unknown as MarginEquitySnapshot[]) || [];
+      }
+      return (data as unknown as MarginEquitySnapshot[]) || [];
+    }
+  });
+
   // Fetch margin accounts summary
   const { data: accountsSummary, isLoading: loadingSummary } = useQuery({
     queryKey: ['margin-accounts-summary'],
@@ -87,6 +110,88 @@ export function DashboardTab() {
     }
   });
 
+  // Calculate metrics from equity snapshots
+  const snapshotMetrics = (() => {
+    if (!equitySnapshots || equitySnapshots.length === 0) {
+      return {
+        totalEquity: 0,
+        totalPortfolioValue: 0,
+        totalAccruedInterest: 0,
+        highRiskCount: 0,
+        warningCount: 0,
+        safeCount: 0,
+        topClients: [],
+        avgMarginRatio: 0,
+        availableCapacity: 0,
+      };
+    }
+
+    // Get unique latest records per investor
+    const latestDate = equitySnapshots[0]?.eod_date;
+    const latestSnapshots = equitySnapshots.filter(s => s.eod_date === latestDate);
+    
+    // Calculate margin ratio for each client
+    // Margin Ratio = Equity / Negative Ledger Balance (exposure)
+    const clientsWithRatio = latestSnapshots.map(s => {
+      const exposure = Math.abs(Math.min(s.ledger_closing_balance, 0));
+      const marginRatio = exposure > 0 ? (s.equity / exposure) * 100 : 999;
+      return {
+        ...s,
+        exposure,
+        marginRatio
+      };
+    }).filter(c => c.exposure > 0); // Only margin clients (negative balance)
+
+    // Health distribution
+    const safeCount = clientsWithRatio.filter(c => c.marginRatio >= 130).length;
+    const warningCount = clientsWithRatio.filter(c => c.marginRatio >= 110 && c.marginRatio < 130).length;
+    const highRiskCount = clientsWithRatio.filter(c => c.marginRatio < 110).length;
+
+    // Total portfolio value = marginable + non-marginable holdings
+    const totalPortfolioValue = latestSnapshots.reduce(
+      (sum, s) => sum + s.marginable_after_haircut + s.non_marginable_holdings, 0
+    );
+
+    // Total equity
+    const totalEquity = latestSnapshots.reduce((sum, s) => sum + s.equity, 0);
+
+    // Total accrued interest
+    const totalAccruedInterest = latestSnapshots.reduce((sum, s) => sum + s.accrued_interest, 0);
+
+    // Average margin ratio (only for margin clients)
+    const avgMarginRatio = clientsWithRatio.length > 0
+      ? clientsWithRatio.reduce((sum, c) => sum + c.marginRatio, 0) / clientsWithRatio.length
+      : 0;
+
+    // Top 10 clients by exposure
+    const topClients = [...clientsWithRatio]
+      .sort((a, b) => b.exposure - a.exposure)
+      .slice(0, 10);
+
+    // Available capacity = total equity - total exposure (simplified)
+    const totalExposure = clientsWithRatio.reduce((sum, c) => sum + c.exposure, 0);
+    const availableCapacity = Math.max(0, totalEquity - totalExposure);
+
+    return {
+      totalEquity,
+      totalPortfolioValue,
+      totalAccruedInterest,
+      highRiskCount,
+      warningCount,
+      safeCount,
+      topClients,
+      avgMarginRatio,
+      availableCapacity,
+    };
+  })();
+
+  // Build health distribution data for pie chart
+  const healthData = [
+    { name: "Safe (>130%)", value: snapshotMetrics.safeCount, color: COLORS.safe },
+    { name: "Warning (110-130%)", value: snapshotMetrics.warningCount, color: COLORS.warning },
+    { name: "Critical (<110%)", value: snapshotMetrics.highRiskCount, color: COLORS.critical }
+  ].filter(d => d.value > 0);
+
   const formatCurrency = (value: number) => {
     if (value >= 10000000) return `৳${(value / 10000000).toFixed(2)} Cr`;
     if (value >= 100000) return `৳${(value / 100000).toFixed(2)} L`;
@@ -98,6 +203,8 @@ export function DashboardTab() {
     if (ratio >= 110) return <Badge className="bg-yellow-500/20 text-yellow-400">Warning</Badge>;
     return <Badge className="bg-red-500/20 text-red-400">Critical</Badge>;
   };
+
+  const isLoading = loadingSummary || loadingCalls || loadingSnapshots;
 
   return (
     <div className="space-y-6">
@@ -111,7 +218,7 @@ export function DashboardTab() {
             <TrendingUp className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            {loadingSummary ? (
+            {isLoading ? (
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
@@ -132,11 +239,11 @@ export function DashboardTab() {
             <Wallet className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            {loadingSummary ? (
+            {isLoading ? (
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
-                {formatCurrency(accountsSummary?.totalLimit || 0)}
+                {formatCurrency(snapshotMetrics.totalPortfolioValue)}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
@@ -153,7 +260,7 @@ export function DashboardTab() {
             <Percent className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            {loadingSummary ? (
+            {isLoading ? (
               <Skeleton className="h-8 w-24" />
             ) : (
               <div className="text-2xl font-bold text-foreground">
@@ -171,15 +278,15 @@ export function DashboardTab() {
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Clients in Margin Call
             </CardTitle>
-            <AlertTriangle className="h-4 w-4 text-red-500" />
+            <AlertTriangle className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            {loadingCalls ? (
+            {isLoading ? (
               <Skeleton className="h-8 w-16" />
             ) : (
               <div className="flex items-center gap-2">
                 <span className="text-2xl font-bold text-foreground">{marginCallsCount}</span>
-                {marginCallsCount > 0 && (
+                {(marginCallsCount ?? 0) > 0 && (
                   <Badge variant="destructive" className="animate-pulse">
                     Action Required
                   </Badge>
@@ -200,10 +307,14 @@ export function DashboardTab() {
             <CardTitle className="text-sm font-medium text-muted-foreground">
               High-Risk Clients
             </CardTitle>
-            <Users className="h-4 w-4 text-red-500" />
+            <Users className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">12</div>
+            {isLoading ? (
+              <Skeleton className="h-8 w-16" />
+            ) : (
+              <div className="text-2xl font-bold text-foreground">{snapshotMetrics.highRiskCount}</div>
+            )}
             <p className="text-xs text-muted-foreground mt-1">
               Below 110% margin ratio
             </p>
@@ -218,9 +329,13 @@ export function DashboardTab() {
             <DollarSign className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">
-              {formatCurrency(150000000)}
-            </div>
+            {isLoading ? (
+              <Skeleton className="h-8 w-32" />
+            ) : (
+              <div className="text-2xl font-bold text-foreground">
+                {formatCurrency(snapshotMetrics.availableCapacity)}
+              </div>
+            )}
             <p className="text-xs text-muted-foreground mt-1">
               Unused margin capacity
             </p>
@@ -235,7 +350,13 @@ export function DashboardTab() {
             <Activity className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">142%</div>
+            {isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <div className="text-2xl font-bold text-foreground">
+                {snapshotMetrics.avgMarginRatio.toFixed(0)}%
+              </div>
+            )}
             <p className="text-xs text-muted-foreground mt-1">
               Across all accounts
             </p>
@@ -250,11 +371,15 @@ export function DashboardTab() {
             <Clock className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">
-              {formatCurrency(2500000)}
-            </div>
+            {isLoading ? (
+              <Skeleton className="h-8 w-32" />
+            ) : (
+              <div className="text-2xl font-bold text-foreground">
+                {formatCurrency(snapshotMetrics.totalAccruedInterest)}
+              </div>
+            )}
             <p className="text-xs text-muted-foreground mt-1">
-              This month
+              From latest snapshot
             </p>
           </CardContent>
         </Card>
@@ -269,31 +394,41 @@ export function DashboardTab() {
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={mockHealthData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {mockHealthData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: 'hsl(var(--card))', 
-                      borderColor: 'hsl(var(--border))',
-                      color: 'hsl(var(--foreground))'
-                    }}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+              {isLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Skeleton className="h-48 w-48 rounded-full" />
+                </div>
+              ) : healthData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={healthData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {healthData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'hsl(var(--card))', 
+                        borderColor: 'hsl(var(--border))',
+                        color: 'hsl(var(--foreground))'
+                      }}
+                    />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-muted-foreground">
+                  No margin account data available
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -305,28 +440,40 @@ export function DashboardTab() {
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Code</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="text-right">Exposure</TableHead>
-                    <TableHead className="text-right">Ratio</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {mockTopClients.map((client) => (
-                    <TableRow key={client.code}>
-                      <TableCell className="font-mono text-sm">{client.code}</TableCell>
-                      <TableCell className="font-medium">{client.name}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(client.exposure)}</TableCell>
-                      <TableCell className="text-right">{client.ratio}%</TableCell>
-                      <TableCell>{getMarginRatioBadge(client.ratio)}</TableCell>
-                    </TableRow>
+              {isLoading ? (
+                <div className="space-y-2">
+                  {[...Array(5)].map((_, i) => (
+                    <Skeleton key={i} className="h-10 w-full" />
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+              ) : snapshotMetrics.topClients.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Code</TableHead>
+                      <TableHead>RM</TableHead>
+                      <TableHead className="text-right">Exposure</TableHead>
+                      <TableHead className="text-right">Ratio</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {snapshotMetrics.topClients.map((client) => (
+                      <TableRow key={client.investor_code}>
+                        <TableCell className="font-mono text-sm">{client.investor_code}</TableCell>
+                        <TableCell className="text-sm">{client.rm_name || '-'}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(client.exposure)}</TableCell>
+                        <TableCell className="text-right">{client.marginRatio.toFixed(0)}%</TableCell>
+                        <TableCell>{getMarginRatioBadge(client.marginRatio)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="flex items-center justify-center h-32 text-muted-foreground">
+                  No margin exposure data available
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
