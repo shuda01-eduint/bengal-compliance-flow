@@ -1066,6 +1066,56 @@ export type Database = {
         }
         Relationships: []
       }
+      forced_liquidations: {
+        Row: {
+          approved_by: string | null
+          created_at: string | null
+          id: string
+          investor_code: string
+          liquidation_date: string
+          margin_call_id: string | null
+          quantity_sold: number
+          reason: string | null
+          sale_price: number
+          total_proceeds: number
+          trading_code: string
+        }
+        Insert: {
+          approved_by?: string | null
+          created_at?: string | null
+          id?: string
+          investor_code: string
+          liquidation_date: string
+          margin_call_id?: string | null
+          quantity_sold: number
+          reason?: string | null
+          sale_price: number
+          total_proceeds: number
+          trading_code: string
+        }
+        Update: {
+          approved_by?: string | null
+          created_at?: string | null
+          id?: string
+          investor_code?: string
+          liquidation_date?: string
+          margin_call_id?: string | null
+          quantity_sold?: number
+          reason?: string | null
+          sale_price?: number
+          total_proceeds?: number
+          trading_code?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "forced_liquidations_margin_call_id_fkey"
+            columns: ["margin_call_id"]
+            isOneToOne: false
+            referencedRelation: "margin_calls"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       holdings: {
         Row: {
           avg_cost: number | null
@@ -1308,6 +1358,261 @@ export type Database = {
           status?: string | null
           trader?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      margin_accounts: {
+        Row: {
+          account_type: string | null
+          agreement_date: string | null
+          approved_limit: number | null
+          created_at: string | null
+          current_exposure: number | null
+          excess_shortfall: number | null
+          id: string
+          investor_code: string
+          maintenance_margin_required: number | null
+          margin_utilization: number | null
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          account_type?: string | null
+          agreement_date?: string | null
+          approved_limit?: number | null
+          created_at?: string | null
+          current_exposure?: number | null
+          excess_shortfall?: number | null
+          id?: string
+          investor_code: string
+          maintenance_margin_required?: number | null
+          margin_utilization?: number | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          account_type?: string | null
+          agreement_date?: string | null
+          approved_limit?: number | null
+          created_at?: string | null
+          current_exposure?: number | null
+          excess_shortfall?: number | null
+          id?: string
+          investor_code?: string
+          maintenance_margin_required?: number | null
+          margin_utilization?: number | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      margin_agreements: {
+        Row: {
+          agreement_date: string
+          agreement_number: string
+          approved_limit: number
+          collateral_requirements: Json | null
+          created_at: string | null
+          document_url: string | null
+          id: string
+          interest_rate: number | null
+          investor_code: string
+          signed_by: string | null
+          status: string | null
+          tenure_months: number | null
+          terms_accepted: boolean | null
+        }
+        Insert: {
+          agreement_date: string
+          agreement_number: string
+          approved_limit: number
+          collateral_requirements?: Json | null
+          created_at?: string | null
+          document_url?: string | null
+          id?: string
+          interest_rate?: number | null
+          investor_code: string
+          signed_by?: string | null
+          status?: string | null
+          tenure_months?: number | null
+          terms_accepted?: boolean | null
+        }
+        Update: {
+          agreement_date?: string
+          agreement_number?: string
+          approved_limit?: number
+          collateral_requirements?: Json | null
+          created_at?: string | null
+          document_url?: string | null
+          id?: string
+          interest_rate?: number | null
+          investor_code?: string
+          signed_by?: string | null
+          status?: string | null
+          tenure_months?: number | null
+          terms_accepted?: boolean | null
+        }
+        Relationships: []
+      }
+      margin_calls: {
+        Row: {
+          call_date: string
+          created_at: string | null
+          created_by: string | null
+          current_margin: number
+          due_date: string | null
+          email_sent: boolean | null
+          email_sent_at: string | null
+          id: string
+          investor_code: string
+          loan_outstanding: number | null
+          margin_ratio: number | null
+          margin_required: number
+          notes: string | null
+          portfolio_value: number | null
+          resolved_at: string | null
+          shortfall_amount: number
+          sms_sent: boolean | null
+          sms_sent_at: string | null
+          status: string | null
+        }
+        Insert: {
+          call_date?: string
+          created_at?: string | null
+          created_by?: string | null
+          current_margin: number
+          due_date?: string | null
+          email_sent?: boolean | null
+          email_sent_at?: string | null
+          id?: string
+          investor_code: string
+          loan_outstanding?: number | null
+          margin_ratio?: number | null
+          margin_required: number
+          notes?: string | null
+          portfolio_value?: number | null
+          resolved_at?: string | null
+          shortfall_amount: number
+          sms_sent?: boolean | null
+          sms_sent_at?: string | null
+          status?: string | null
+        }
+        Update: {
+          call_date?: string
+          created_at?: string | null
+          created_by?: string | null
+          current_margin?: number
+          due_date?: string | null
+          email_sent?: boolean | null
+          email_sent_at?: string | null
+          id?: string
+          investor_code?: string
+          loan_outstanding?: number | null
+          margin_ratio?: number | null
+          margin_required?: number
+          notes?: string | null
+          portfolio_value?: number | null
+          resolved_at?: string | null
+          shortfall_amount?: number
+          sms_sent?: boolean | null
+          sms_sent_at?: string | null
+          status?: string | null
+        }
+        Relationships: []
+      }
+      margin_collateral: {
+        Row: {
+          as_of_date: string | null
+          average_price: number | null
+          collateral_value: number | null
+          created_at: string | null
+          current_price: number | null
+          haircut_percentage: number | null
+          id: string
+          investor_code: string
+          lien_marked: boolean | null
+          market_value: number | null
+          quantity: number
+          trading_code: string
+          updated_at: string | null
+        }
+        Insert: {
+          as_of_date?: string | null
+          average_price?: number | null
+          collateral_value?: number | null
+          created_at?: string | null
+          current_price?: number | null
+          haircut_percentage?: number | null
+          id?: string
+          investor_code: string
+          lien_marked?: boolean | null
+          market_value?: number | null
+          quantity: number
+          trading_code: string
+          updated_at?: string | null
+        }
+        Update: {
+          as_of_date?: string | null
+          average_price?: number | null
+          collateral_value?: number | null
+          created_at?: string | null
+          current_price?: number | null
+          haircut_percentage?: number | null
+          id?: string
+          investor_code?: string
+          lien_marked?: boolean | null
+          market_value?: number | null
+          quantity?: number
+          trading_code?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      margin_transactions: {
+        Row: {
+          amount: number
+          created_at: string | null
+          created_by: string | null
+          id: string
+          interest_amount: number | null
+          interest_rate: number | null
+          investor_code: string
+          notes: string | null
+          outstanding_balance: number | null
+          principal_amount: number | null
+          reference_number: string | null
+          transaction_date: string | null
+          transaction_type: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          interest_amount?: number | null
+          interest_rate?: number | null
+          investor_code: string
+          notes?: string | null
+          outstanding_balance?: number | null
+          principal_amount?: number | null
+          reference_number?: string | null
+          transaction_date?: string | null
+          transaction_type: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          interest_amount?: number | null
+          interest_rate?: number | null
+          investor_code?: string
+          notes?: string | null
+          outstanding_balance?: number | null
+          principal_amount?: number | null
+          reference_number?: string | null
+          transaction_date?: string | null
+          transaction_type?: string
         }
         Relationships: []
       }
@@ -1619,19 +1924,24 @@ export type Database = {
           director_percent: number | null
           eps: number | null
           foreign_percent: number | null
+          free_float_mcap: number | null
           govt_percent: number | null
+          haircut_percentage: number | null
           high_price: number | null
           id: string
           institute_percent: number | null
           instrument_type: string | null
+          is_marginable: boolean | null
           last_synced_at: string | null
           low_price: number | null
+          margin_category: string | null
           market_cap: number | null
           open_price: number | null
           public_percent: number | null
           sector: string | null
           total_securities: number | null
           trading_code: string
+          trailing_pe: number | null
           updated_at: string
           volume: number | null
           week_52_high: number | null
@@ -1645,19 +1955,24 @@ export type Database = {
           director_percent?: number | null
           eps?: number | null
           foreign_percent?: number | null
+          free_float_mcap?: number | null
           govt_percent?: number | null
+          haircut_percentage?: number | null
           high_price?: number | null
           id?: string
           institute_percent?: number | null
           instrument_type?: string | null
+          is_marginable?: boolean | null
           last_synced_at?: string | null
           low_price?: number | null
+          margin_category?: string | null
           market_cap?: number | null
           open_price?: number | null
           public_percent?: number | null
           sector?: string | null
           total_securities?: number | null
           trading_code: string
+          trailing_pe?: number | null
           updated_at?: string
           volume?: number | null
           week_52_high?: number | null
@@ -1671,23 +1986,67 @@ export type Database = {
           director_percent?: number | null
           eps?: number | null
           foreign_percent?: number | null
+          free_float_mcap?: number | null
           govt_percent?: number | null
+          haircut_percentage?: number | null
           high_price?: number | null
           id?: string
           institute_percent?: number | null
           instrument_type?: string | null
+          is_marginable?: boolean | null
           last_synced_at?: string | null
           low_price?: number | null
+          margin_category?: string | null
           market_cap?: number | null
           open_price?: number | null
           public_percent?: number | null
           sector?: string | null
           total_securities?: number | null
           trading_code?: string
+          trailing_pe?: number | null
           updated_at?: string
           volume?: number | null
           week_52_high?: number | null
           week_52_low?: number | null
+        }
+        Relationships: []
+      }
+      security_margin_categories: {
+        Row: {
+          category: string
+          eligibility_notes: string | null
+          free_float_market_cap: number | null
+          haircut_percentage: number | null
+          id: string
+          is_marginable: boolean | null
+          last_eligibility_check: string | null
+          trading_code: string
+          trailing_pe_ratio: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          category: string
+          eligibility_notes?: string | null
+          free_float_market_cap?: number | null
+          haircut_percentage?: number | null
+          id?: string
+          is_marginable?: boolean | null
+          last_eligibility_check?: string | null
+          trading_code: string
+          trailing_pe_ratio?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string
+          eligibility_notes?: string | null
+          free_float_market_cap?: number | null
+          haircut_percentage?: number | null
+          id?: string
+          is_marginable?: boolean | null
+          last_eligibility_check?: string | null
+          trading_code?: string
+          trailing_pe_ratio?: number | null
+          updated_at?: string | null
         }
         Relationships: []
       }
