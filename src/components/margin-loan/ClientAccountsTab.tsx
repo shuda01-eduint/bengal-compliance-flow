@@ -51,12 +51,16 @@ export function ClientAccountsTab() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'active':
-        return <Badge className="bg-green-500/20 text-green-400">Active</Badge>;
+      case 'negative_equity':
+        return <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">Negative Equity</Badge>;
+      case 'critical':
+        return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Critical</Badge>;
       case 'suspended':
-        return <Badge className="bg-yellow-500/20 text-yellow-400">Suspended</Badge>;
+        return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">Suspended</Badge>;
+      case 'active':
+        return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Active</Badge>;
       case 'closed':
-        return <Badge className="bg-gray-500/20 text-gray-400">Closed</Badge>;
+        return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">Closed</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
