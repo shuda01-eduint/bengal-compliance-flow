@@ -2697,20 +2697,6 @@ export type Database = {
           status: string
         }[]
       }
-      get_margin_client_summary: {
-        Args: {
-          p_account_type?: string
-          p_search?: string
-          p_statuses?: string[]
-        }
-        Returns: {
-          total_accounts: number
-          total_accrued_interest: number
-          total_equity: number
-          total_margin_outstanding: number
-          total_portfolio_value: number
-        }[]
-      }
       get_margin_composition_by_department: {
         Args: { p_from_date?: string; p_to_date?: string }
         Returns: {
