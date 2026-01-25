@@ -82,6 +82,7 @@ interface TreemapNode {
   children?: TreemapNode[];
   color?: string;
   margin_ratio?: number;
+  size_percentage?: number;
   client_count?: number;
   equity?: number;
 }
@@ -220,6 +221,11 @@ export function DashboardTab() {
 
     if (filteredData.length === 0) return null;
 
+    // Calculate total margin outstanding for size percentage calculation
+    const totalMarginOutstanding = filteredData.reduce(
+      (sum, rm) => sum + (Number(rm.margin_outstanding) || 0), 0
+    );
+
     // Group by department
     const departmentMap = new Map<string, (TreemapRMData & { calculated_equity: number })[]>();
     filteredData.forEach(rm => {
@@ -230,17 +236,25 @@ export function DashboardTab() {
       departmentMap.get(dept)!.push(rm);
     });
 
-    // Build hierarchical structure
+    // Build hierarchical structure with size_percentage for each RM
     const children: TreemapNode[] = Array.from(departmentMap.entries()).map(([deptName, rms]) => ({
       name: deptName,
-      children: rms.map(rm => ({
-        name: rm.rm_name || 'Unknown',
-        size: Number(rm.margin_outstanding) || 1,
-        color: getRiskColor(Number(rm.margin_ratio) || 0),
-        margin_ratio: Number(rm.margin_ratio) || 0,
-        client_count: Number(rm.client_count) || 0,
-        equity: rm.calculated_equity
-      }))
+      children: rms.map(rm => {
+        const marginOutstanding = Number(rm.margin_outstanding) || 0;
+        const sizePercentage = totalMarginOutstanding > 0 
+          ? (marginOutstanding / totalMarginOutstanding) * 100 
+          : 0;
+        
+        return {
+          name: rm.rm_name || 'Unknown',
+          size: marginOutstanding || 1,
+          color: getRiskColor(Number(rm.margin_ratio) || 0),
+          margin_ratio: Number(rm.margin_ratio) || 0,
+          size_percentage: sizePercentage,
+          client_count: Number(rm.client_count) || 0,
+          equity: rm.calculated_equity
+        };
+      })
     }));
 
     return { name: 'root', children };
@@ -280,7 +294,7 @@ export function DashboardTab() {
 
   // Custom content renderer for treemap cells
   const CustomTreemapContent = (props: any) => {
-    const { x, y, width, height, name, color, depth, margin_ratio } = props;
+    const { x, y, width, height, name, color, depth, size_percentage } = props;
     
     if (depth === 1) {
       // Department level - show label only
@@ -314,14 +328,14 @@ export function DashboardTab() {
     }
     
     if (depth === 2) {
-      // RM level - colored box with name and ratio
-      const ratioText = `${(margin_ratio || 0).toFixed(0)}%`;
+      // RM level - colored box with name and size percentage (share of total)
+      const percentText = `${(size_percentage || 0).toFixed(1)}%`;
       const displayName = width > 80 
         ? (name.length > 15 ? name.substring(0, 13) + '...' : name)
         : (name.length > 8 ? name.substring(0, 6) + '..' : name);
       
       // Calculate text visibility based on box size
-      const showRatio = width > 40 && height > 25;
+      const showPercent = width > 40 && height > 25;
       const showBothLines = width > 50 && height > 50;
       
       // Use darker text color with stronger shadow for better contrast
@@ -344,7 +358,7 @@ export function DashboardTab() {
             }}
           />
           {showBothLines ? (
-            // Two lines: name on top, ratio below
+            // Two lines: name on top, percentage below
             <>
               <text
                 x={x + width / 2}
@@ -368,11 +382,11 @@ export function DashboardTab() {
                 fontWeight="800"
                 style={shadowStyle}
               >
-                {ratioText}
+                {percentText}
               </text>
             </>
-          ) : showRatio ? (
-            // Just ratio if space is limited
+          ) : showPercent ? (
+            // Just percentage if space is limited
             <text
               x={x + width / 2}
               y={y + height / 2}
@@ -383,7 +397,7 @@ export function DashboardTab() {
               fontWeight="800"
               style={shadowStyle}
             >
-              {ratioText}
+              {percentText}
             </text>
           ) : null}
         </g>
@@ -405,6 +419,9 @@ export function DashboardTab() {
         <p className="font-semibold text-foreground">{data.name}</p>
         <p className="text-sm text-muted-foreground">
           Margin Outstanding: {formatCurrency(data.size)}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Share of Total: {(data.size_percentage || 0).toFixed(1)}%
         </p>
         <p className="text-sm text-muted-foreground">
           Margin Ratio: {(data.margin_ratio || 0).toFixed(0)}%
