@@ -1,5 +1,7 @@
+import { useState, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { 
   Table, 
   TableBody, 
@@ -16,13 +18,16 @@ import {
   Users,
   DollarSign,
   Activity,
-  Clock
+  Clock,
+  Eye,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { Treemap, ResponsiveContainer, Tooltip } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useMemo, useCallback } from "react";
+import { ClientDetailSheet } from "./ClientDetailSheet";
 
 // Health distribution colors
 const COLORS = {
@@ -85,6 +90,10 @@ const defaultSummary: DashboardSummary = {
 };
 
 export function DashboardTab() {
+  const [currentPage, setCurrentPage] = useState(0);
+  const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const pageSize = 15;
+
   // Fetch dashboard summary via RPC (server-side aggregation)
   const { data: dashboardSummary, isLoading: loadingSummary } = useQuery({
     queryKey: ['margin-dashboard-summary'],
@@ -95,13 +104,35 @@ export function DashboardTab() {
     }
   });
 
-  // Fetch top clients via RPC
-  const { data: topClients, isLoading: loadingClients } = useQuery({
-    queryKey: ['margin-top-clients'],
+  // Fetch client accounts for table with pagination
+  const { data: clientAccounts, isLoading: loadingAccounts } = useQuery({
+    queryKey: ['margin-dashboard-clients', currentPage],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_top_margin_clients' as any, { p_limit: 10 });
+      const { data, error } = await supabase.rpc('get_margin_client_accounts', {
+        p_search: '',
+        p_account_type: 'all',
+        p_statuses: ['all'],
+        p_limit: pageSize,
+        p_offset: currentPage * pageSize
+      });
       if (error) throw error;
-      return (data as TopClient[]) || [];
+      return data || [];
+    }
+  });
+
+  // Fetch total count for pagination
+  const { data: totalCount } = useQuery({
+    queryKey: ['margin-dashboard-clients-count'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_margin_client_accounts', {
+        p_search: '',
+        p_account_type: 'all',
+        p_statuses: ['all'],
+        p_limit: 100000,
+        p_offset: 0
+      });
+      if (error) throw error;
+      return data?.length || 0;
     }
   });
 
@@ -128,7 +159,6 @@ export function DashboardTab() {
       return count || 0;
     }
   });
-
   // Calculate derived metrics from summary
   const metrics = useMemo(() => {
     const summary = dashboardSummary || defaultSummary;
@@ -203,6 +233,25 @@ export function DashboardTab() {
     if (ratio >= 110) return <Badge className="bg-yellow-500/20 text-yellow-400">Warning</Badge>;
     return <Badge className="bg-red-500/20 text-red-400">Critical</Badge>;
   };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'negative_equity':
+        return <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">Negative Equity</Badge>;
+      case 'critical':
+        return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Critical</Badge>;
+      case 'suspended':
+        return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">Suspended</Badge>;
+      case 'active':
+        return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Active</Badge>;
+      case 'closed':
+        return <Badge className="bg-gray-500/20 text-gray-400 border-gray-500/30">Closed</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  const totalPages = Math.ceil((totalCount || 0) / pageSize);
 
   // Custom content renderer for treemap cells
   const CustomTreemapContent = (props: any) => {
@@ -297,7 +346,7 @@ export function DashboardTab() {
     );
   };
 
-  const isLoading = loadingSummary || loadingCalls || loadingClients || loadingTreemap;
+  const isLoading = loadingSummary || loadingCalls || loadingTreemap || loadingAccounts;
 
   return (
     <div className="space-y-6">
@@ -526,50 +575,130 @@ export function DashboardTab() {
         </CardContent>
       </Card>
 
-      {/* Large Metric Cards Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="bg-card border-border">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Equity
-            </CardTitle>
-            <DollarSign className={`h-5 w-5 ${metrics.total_equity < 0 ? 'text-destructive' : 'text-green-500'}`} />
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <Skeleton className="h-12 w-48" />
-            ) : (
-              <div className={`text-4xl font-bold ${metrics.total_equity < 0 ? 'text-destructive' : 'text-foreground'}`}>
-                {formatCurrency(metrics.total_equity)}
+      {/* Client Margin Accounts Table */}
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg">Client Margin Accounts</CardTitle>
+            <div className="text-sm text-muted-foreground">
+              Showing {clientAccounts?.length || 0} of {totalCount || 0} accounts
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loadingAccounts ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Investor Code</TableHead>
+                      <TableHead>Investor Name</TableHead>
+                      <TableHead>RM Name</TableHead>
+                      <TableHead className="text-right">Margin Loan</TableHead>
+                      <TableHead className="text-right">Accrued Interest</TableHead>
+                      <TableHead className="text-right">Portfolio Value</TableHead>
+                      <TableHead className="text-right">Equity</TableHead>
+                      <TableHead className="text-right">Margin Ratio %</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-center">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {clientAccounts && clientAccounts.length > 0 ? clientAccounts.map((account: any) => (
+                      <TableRow key={account.investor_code}>
+                        <TableCell className="font-mono font-medium">
+                          {account.investor_code}
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate">
+                          {account.investor_name || '-'}
+                        </TableCell>
+                        <TableCell className="max-w-[150px] truncate">
+                          {account.rm_name || '-'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(account.current_exposure || 0)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(account.accrued_interest || 0)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(account.portfolio_value || 0)}
+                        </TableCell>
+                        <TableCell className={`text-right font-medium ${(account.equity || 0) < 0 ? 'text-red-400' : ''}`}>
+                          {formatCurrency(account.equity || 0)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {(account.margin_ratio || 0).toFixed(2)}%
+                        </TableCell>
+                        <TableCell>{getStatusBadge(account.status || 'active')}</TableCell>
+                        <TableCell className="text-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedClient(account.investor_code)}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )) : (
+                      <TableRow>
+                        <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                          No margin accounts found
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
               </div>
-            )}
-            <p className="text-sm text-muted-foreground mt-2">
-              Sum of all equity values across margin accounts
-            </p>
-          </CardContent>
-        </Card>
+              
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-4">
+                  <div className="text-sm text-muted-foreground">
+                    Page {currentPage + 1} of {totalPages}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                      disabled={currentPage === 0}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                      disabled={currentPage >= totalPages - 1}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card className="bg-card border-border">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Average Loan Ratio
-            </CardTitle>
-            <Percent className="h-5 w-5 text-primary" />
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <Skeleton className="h-12 w-32" />
-            ) : (
-              <div className="text-4xl font-bold text-foreground">
-                {metrics.avgMarginRatio.toFixed(1)}%
-              </div>
-            )}
-            <p className="text-sm text-muted-foreground mt-2">
-              Average margin ratio across all accounts
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Client Detail Sheet */}
+      <ClientDetailSheet
+        investorCode={selectedClient}
+        open={!!selectedClient}
+        onOpenChange={(open) => !open && setSelectedClient(null)}
+      />
     </div>
   );
 }
