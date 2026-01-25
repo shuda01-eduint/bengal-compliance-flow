@@ -45,27 +45,30 @@ interface MarginEquitySnapshot {
 }
 
 export function DashboardTab() {
-  // Fetch margin equity snapshots from the view
+  // Fetch margin equity snapshots from the view - get latest date only
   const { data: equitySnapshots, isLoading: loadingSnapshots } = useQuery({
     queryKey: ['margin-equity-snapshots'],
     queryFn: async () => {
-      // Get the latest date's snapshots using raw query for view
-      const { data, error } = await supabase
-        .rpc('get_margin_equity_snapshots' as any)
-        .limit(1000);
+      // First get the latest EOD date
+      const { data: latestDateData, error: dateError } = await supabase
+        .from('eod_ledger_snapshots')
+        .select('eod_date')
+        .order('eod_date', { ascending: false })
+        .limit(1);
       
-      if (error) {
-        // Fallback: try direct query if RPC doesn't exist
-        const result = await supabase
-          .from('margin_equity_snapshots')
-          .select('*')
-          .order('eod_date', { ascending: false })
-          .limit(1000);
-        
-        if (result.error) throw result.error;
-        return (result.data as unknown as MarginEquitySnapshot[]) || [];
-      }
-      return (data as unknown as MarginEquitySnapshot[]) || [];
+      if (dateError) throw dateError;
+      if (!latestDateData || latestDateData.length === 0) return [];
+      
+      const latestDate = latestDateData[0].eod_date;
+      
+      // Query the view for the latest date only (using any to bypass type checking for view)
+      const { data, error } = await (supabase as any)
+        .from('margin_equity_snapshots')
+        .select('*')
+        .eq('eod_date', latestDate);
+      
+      if (error) throw error;
+      return (data as MarginEquitySnapshot[]) || [];
     }
   });
 
