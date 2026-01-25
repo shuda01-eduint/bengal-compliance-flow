@@ -36,7 +36,9 @@ export function ClientAccountsTab() {
       const { data, error } = await supabase.rpc('get_margin_client_accounts', {
         p_search: searchTerm,
         p_account_type: accountTypeFilter,
-        p_limit: 100
+        p_status: statusFilter,
+        p_limit: 100,
+        p_offset: 0
       });
       if (error) throw error;
       return data || [];
