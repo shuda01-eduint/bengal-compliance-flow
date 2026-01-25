@@ -2686,6 +2686,7 @@ export type Database = {
         }
         Returns: {
           account_type: string
+          accrued_interest: number
           current_exposure: number
           department_name: string
           equity: number
