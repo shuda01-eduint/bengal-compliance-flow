@@ -1899,30 +1899,30 @@ export type Database = {
       get_accounting_data_v3:
         | {
             Args: {
-              _account_type?: string
-              _activity_filter?: string
-              _from_date: string
+              _account_type_filter?: string
+              _has_activity_filter?: string
               _limit?: number
               _offset?: number
-              _search_term?: string
-              _to_date: string
+              _opening_date: string
+              _search?: string
+              _tx_date: string
             }
             Returns: {
               account_type: string
               brokerage: number
               closing_balance: number
               department: string
+              deposits: number
               gross_buy: number
               gross_sell: number
+              has_trades: boolean
               investor_code: string
               investor_name: string
-              net_trade_value: number
               opening_balance: number
-              rm_email: string
+              rm: string
               rm_name: string
               total_count: number
-              total_deposits: number
-              total_withdrawals: number
+              withdrawals: number
             }[]
           }
         | {
