@@ -2689,6 +2689,10 @@ export type Database = {
           loan_change: number
         }[]
       }
+      get_margin_dashboard_summary: {
+        Args: { p_eod_date?: string }
+        Returns: Json
+      }
       get_negative_balance_codes: {
         Args: { p_from_date?: string; p_search?: string; p_to_date?: string }
         Returns: {
@@ -2696,6 +2700,18 @@ export type Database = {
           client_name: string
           closing_balance: number
           event_date: string
+          rm_name: string
+        }[]
+      }
+      get_top_margin_clients: {
+        Args: { p_eod_date?: string; p_limit?: number }
+        Returns: {
+          department_name: string
+          equity: number
+          exposure: number
+          investor_code: string
+          margin_ratio: number
+          portfolio_value: number
           rm_name: string
         }[]
       }
