@@ -11,6 +11,13 @@ import {
   TableRow 
 } from "@/components/ui/table";
 import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { 
   TrendingUp, 
   Wallet, 
   Percent, 
@@ -29,10 +36,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ClientDetailSheet } from "./ClientDetailSheet";
 
-// Health distribution colors
+// Health distribution colors with improved contrast
 const COLORS = {
-  safe: "#10b981",
-  warning: "#f59e0b",
+  safe: "#22c55e",
+  warning: "#eab308",
   critical: "#ef4444"
 };
 
@@ -66,6 +73,7 @@ interface TreemapRMData {
   portfolio_value: number;
   margin_ratio: number;
   client_count: number;
+  equity?: number;
 }
 
 interface TreemapNode {
@@ -75,6 +83,7 @@ interface TreemapNode {
   color?: string;
   margin_ratio?: number;
   client_count?: number;
+  equity?: number;
 }
 
 const defaultSummary: DashboardSummary = {
@@ -92,6 +101,7 @@ const defaultSummary: DashboardSummary = {
 export function DashboardTab() {
   const [currentPage, setCurrentPage] = useState(0);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const [treemapFilter, setTreemapFilter] = useState<"all" | "negative_equity">("all");
   const pageSize = 15;
 
   // Fetch dashboard summary via RPC (server-side aggregation)
@@ -196,9 +206,17 @@ export function DashboardTab() {
   const treemapHierarchy = useMemo(() => {
     if (!treemapData || treemapData.length === 0) return null;
 
+    // Filter data based on filter selection
+    let filteredData = treemapData;
+    if (treemapFilter === "negative_equity") {
+      filteredData = treemapData.filter(rm => (Number(rm.equity) || 0) < 0);
+    }
+
+    if (filteredData.length === 0) return null;
+
     // Group by department
     const departmentMap = new Map<string, TreemapRMData[]>();
-    treemapData.forEach(rm => {
+    filteredData.forEach(rm => {
       const dept = rm.department_name || 'Unassigned';
       if (!departmentMap.has(dept)) {
         departmentMap.set(dept, []);
@@ -214,12 +232,13 @@ export function DashboardTab() {
         size: Number(rm.margin_outstanding) || 1,
         color: getRiskColor(Number(rm.margin_ratio) || 0),
         margin_ratio: Number(rm.margin_ratio) || 0,
-        client_count: Number(rm.client_count) || 0
+        client_count: Number(rm.client_count) || 0,
+        equity: Number(rm.equity) || 0
       }))
     }));
 
     return { name: 'root', children };
-  }, [treemapData, getRiskColor]);
+  }, [treemapData, getRiskColor, treemapFilter]);
 
   const formatCurrency = (value: number) => {
     const absValue = Math.abs(value);
@@ -255,7 +274,7 @@ export function DashboardTab() {
 
   // Custom content renderer for treemap cells
   const CustomTreemapContent = (props: any) => {
-    const { x, y, width, height, name, color, depth } = props;
+    const { x, y, width, height, name, color, depth, margin_ratio } = props;
     
     if (depth === 1) {
       // Department level - show label only
@@ -272,13 +291,14 @@ export function DashboardTab() {
               strokeWidth: 2,
             }}
           />
-          {width > 60 && height > 20 && (
+          {width > 80 && height > 24 && (
             <text
-              x={x + 6}
-              y={y + 16}
+              x={x + 8}
+              y={y + 18}
               fill="hsl(var(--muted-foreground))"
-              fontSize={11}
-              fontWeight="bold"
+              fontSize={12}
+              fontWeight="600"
+              style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}
             >
               {name}
             </text>
@@ -288,7 +308,17 @@ export function DashboardTab() {
     }
     
     if (depth === 2) {
-      // RM level - colored box
+      // RM level - colored box with name and ratio
+      const ratioText = `${(margin_ratio || 0).toFixed(0)}%`;
+      const displayName = width > 80 
+        ? (name.length > 15 ? name.substring(0, 13) + '...' : name)
+        : (name.length > 8 ? name.substring(0, 6) + '..' : name);
+      
+      // Calculate text visibility based on box size
+      const showName = width > 50 && height > 35;
+      const showRatio = width > 40 && height > 25;
+      const showBothLines = width > 50 && height > 50;
+      
       return (
         <g>
           <rect
@@ -298,24 +328,53 @@ export function DashboardTab() {
             height={height}
             style={{
               fill: color,
-              stroke: 'hsl(var(--background))',
+              stroke: 'rgba(0, 0, 0, 0.3)',
               strokeWidth: 1,
-              opacity: 0.85,
             }}
           />
-          {width > 40 && height > 25 && (
+          {showBothLines ? (
+            // Two lines: name on top, ratio below
+            <>
+              <text
+                x={x + width / 2}
+                y={y + height / 2 - 8}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#fff"
+                fontSize={width > 100 ? 13 : 11}
+                fontWeight="600"
+                style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+              >
+                {displayName}
+              </text>
+              <text
+                x={x + width / 2}
+                y={y + height / 2 + 10}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#fff"
+                fontSize={width > 100 ? 14 : 12}
+                fontWeight="700"
+                style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+              >
+                {ratioText}
+              </text>
+            </>
+          ) : showRatio ? (
+            // Just ratio if space is limited
             <text
               x={x + width / 2}
               y={y + height / 2}
               textAnchor="middle"
               dominantBaseline="middle"
               fill="#fff"
-              fontSize={10}
-              fontWeight="500"
+              fontSize={11}
+              fontWeight="700"
+              style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
             >
-              {name.length > 12 ? name.substring(0, 10) + '...' : name}
+              {ratioText}
             </text>
-          )}
+          ) : null}
         </g>
       );
     }
@@ -530,18 +589,29 @@ export function DashboardTab() {
       {/* Full-width Treemap Row */}
       <Card className="bg-card border-border">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">Margin Health Distribution</CardTitle>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <CardTitle className="text-lg">Margin Distribution</CardTitle>
+              <Select value={treemapFilter} onValueChange={(value: "all" | "negative_equity") => setTreemapFilter(value)}>
+                <SelectTrigger className="w-[160px] h-8">
+                  <SelectValue placeholder="Filter" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="negative_equity">Negative Equity</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center gap-4 text-xs">
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.safe }} />
                 <span className="text-muted-foreground">Safe (&gt;130%)</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.warning }} />
                 <span className="text-muted-foreground">Warning (110-130%)</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <div className="w-3 h-3 rounded" style={{ backgroundColor: COLORS.critical }} />
                 <span className="text-muted-foreground">Critical (&lt;110%)</span>
               </div>
@@ -568,7 +638,9 @@ export function DashboardTab() {
               </ResponsiveContainer>
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
-                No margin account data available
+                {treemapFilter === "negative_equity" 
+                  ? "No accounts with negative equity found" 
+                  : "No margin account data available"}
               </div>
             )}
           </div>
