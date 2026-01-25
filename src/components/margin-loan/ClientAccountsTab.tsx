@@ -45,6 +45,7 @@ export function ClientAccountsTab() {
   const [startDate, setStartDate] = useState<Date | undefined>(subDays(new Date(), 30));
   const [endDate, setEndDate] = useState<Date | undefined>(new Date());
 
+  // Fetch paginated data for the table
   const { data: accounts, isLoading, refetch } = useQuery({
     queryKey: ['margin-client-accounts', selectedStatuses, accountTypeFilter, searchTerm],
     queryFn: async () => {
@@ -60,9 +61,23 @@ export function ClientAccountsTab() {
     }
   });
 
-  // Calculate metrics from filtered data
+  // Fetch summary metrics (totals across ALL data, not just paginated)
+  const { data: summary, isLoading: isSummaryLoading } = useQuery({
+    queryKey: ['margin-client-summary', selectedStatuses, accountTypeFilter, searchTerm],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_margin_client_summary', {
+        p_search: searchTerm,
+        p_account_type: accountTypeFilter,
+        p_statuses: selectedStatuses.includes("all") ? ["all"] : selectedStatuses,
+      });
+      if (error) throw error;
+      return data?.[0] || null;
+    }
+  });
+
+  // Use summary data for metric cards (shows TOTAL counts, not paginated)
   const metrics = useMemo(() => {
-    if (!accounts || accounts.length === 0) {
+    if (!summary) {
       return {
         accountCount: 0,
         totalMarginOutstanding: 0,
@@ -71,23 +86,13 @@ export function ClientAccountsTab() {
       };
     }
 
-    const accountCount = accounts.length;
-    const totalMarginOutstanding = accounts.reduce((sum: number, acc: any) => 
-      sum + (acc.current_exposure || 0), 0);
-    const totalEquity = accounts.reduce((sum: number, acc: any) => 
-      sum + (acc.equity || 0), 0);
-    
-    // Loan change would require historical data comparison
-    // For now, we'll show a placeholder or calculate from available data
-    const loanChange = 0; // TODO: Implement with date range query
-
     return {
-      accountCount,
-      totalMarginOutstanding,
-      totalEquity,
-      loanChange
+      accountCount: Number(summary.total_accounts) || 0,
+      totalMarginOutstanding: Number(summary.total_margin_outstanding) || 0,
+      totalEquity: Number(summary.total_equity) || 0,
+      loanChange: 0 // TODO: Implement with date range query
     };
-  }, [accounts]);
+  }, [summary]);
 
   const formatCurrency = (value: number) => {
     const absValue = Math.abs(value);
