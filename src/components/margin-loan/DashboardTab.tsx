@@ -36,11 +36,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ClientDetailSheet } from "./ClientDetailSheet";
 
-// Health distribution colors with improved contrast
+// Health distribution colors with balanced contrast
 const COLORS = {
-  safe: "#22c55e",
-  warning: "#eab308",
-  critical: "#ef4444"
+  safe: "#059669",      // Emerald-600 - rich but not neon
+  warning: "#d97706",   // Amber-600 - warm orange
+  critical: "#dc2626"   // Red-600 - clear danger
 };
 
 interface DashboardSummary {
