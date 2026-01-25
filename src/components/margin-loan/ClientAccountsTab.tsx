@@ -46,9 +46,11 @@ export function ClientAccountsTab() {
   });
 
   const formatCurrency = (value: number) => {
-    if (value >= 10000000) return `৳${(value / 10000000).toFixed(2)} Cr`;
-    if (value >= 100000) return `৳${(value / 100000).toFixed(2)} L`;
-    return `৳${value.toLocaleString()}`;
+    const absValue = Math.abs(value);
+    const sign = value < 0 ? '-' : '';
+    if (absValue >= 10000000) return `${sign}৳${(absValue / 10000000).toFixed(2)} Cr`;
+    if (absValue >= 100000) return `${sign}৳${(absValue / 100000).toFixed(2)} L`;
+    return `${sign}৳${absValue.toLocaleString()}`;
   };
 
   const getStatusBadge = (status: string) => {
