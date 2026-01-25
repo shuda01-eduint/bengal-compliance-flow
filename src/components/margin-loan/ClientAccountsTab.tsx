@@ -169,7 +169,7 @@ export function ClientAccountsTab() {
                       <TableCell className="text-right">
                         {formatCurrency(account.portfolio_value || 0)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className={`text-right font-medium ${(account.equity || 0) < 0 ? 'text-red-400' : ''}`}>
                         {formatCurrency(account.equity || 0)}
                       </TableCell>
                       <TableCell className={`text-right font-medium ${getUtilizationColor(Math.abs(account.margin_ratio || 0))}`}>
