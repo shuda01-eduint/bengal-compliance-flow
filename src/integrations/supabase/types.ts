@@ -954,6 +954,7 @@ export type Database = {
           investor_code: string
           investor_name: string | null
           ledger_balance: number
+          ledger_balance_snapshot: number | null
           matured_balance: number | null
           net_trade_value: number | null
           opening_balance: number | null
@@ -991,6 +992,7 @@ export type Database = {
           investor_code: string
           investor_name?: string | null
           ledger_balance?: number
+          ledger_balance_snapshot?: number | null
           matured_balance?: number | null
           net_trade_value?: number | null
           opening_balance?: number | null
@@ -1028,6 +1030,7 @@ export type Database = {
           investor_code?: string
           investor_name?: string | null
           ledger_balance?: number
+          ledger_balance_snapshot?: number | null
           matured_balance?: number | null
           net_trade_value?: number | null
           opening_balance?: number | null
