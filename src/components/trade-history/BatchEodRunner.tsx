@@ -286,33 +286,28 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         baseBalances.set(row.investor_code.toUpperCase(), row.ledger_balance || 0);
       });
 
-      // Fetch previous day's trades
+      // Fetch previous day's trades with embedded deposit/withdrawal data
       const { data: prevDayTrades } = await supabase
         .from("trade_history")
-        .select("client_code, side, value, fill_type, status")
+        .select("client_code, side, value, fill_type, status, brokerage_commission, total_deposits, total_withdrawals")
         .eq("trade_date", prevDayTradeFormat);
 
-      // Fetch previous day's transactions
-      const { data: prevDayTx } = await supabase
-        .from("deposits_withdrawals")
-        .select("investor_code, amount, transaction_type")
-        .eq("transaction_date", prevDay);
-
-      // Process transactions
+      // Process transactions from trade_history (embedded per-client aggregates)
+      // Use MAX aggregation since all trades for a client on a day have the same deposit/withdrawal values
       const txMap = new Map<string, { deposits: number; withdrawals: number }>();
-      prevDayTx?.forEach((tx) => {
-        const code = tx.investor_code.toUpperCase();
+      prevDayTrades?.forEach((trade) => {
+        if (!trade.client_code) return;
+        const code = trade.client_code.toUpperCase();
         const current = txMap.get(code) || { deposits: 0, withdrawals: 0 };
-        if (tx.transaction_type.toLowerCase().includes("deposit")) {
-          current.deposits += tx.amount || 0;
-        } else {
-          current.withdrawals += tx.amount || 0;
-        }
+        // Take max values since they're the same for all trades of a client on a given day
+        current.deposits = Math.max(current.deposits, trade.total_deposits || 0);
+        current.withdrawals = Math.max(current.withdrawals, trade.total_withdrawals || 0);
         txMap.set(code, current);
       });
 
       // Process trades - now handles B/S and checks both status and fill_type
-      const tradeMap = new Map<string, { grossBuys: number; netSells: number }>();
+      // Uses brokerage_commission from trade record directly (matching backend logic)
+      const tradeMap = new Map<string, { grossBuys: number; netSells: number; commission: number }>();
       prevDayTrades?.forEach((trade) => {
         if (!trade.client_code || !trade.value) return;
         const fillType = (trade.fill_type || "").toUpperCase();
@@ -322,15 +317,19 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
             !["FILL", "PF", "FILLED", "PARTIAL"].includes(status)) return;
 
         const clientCode = trade.client_code.toUpperCase();
-        const commissionRate = commissionMap.get(clientCode) || 0;
-        const current = tradeMap.get(clientCode) || { grossBuys: 0, netSells: 0 };
+        // Use trade-level brokerage_commission, normalize if >= 0.1 (percentage format)
+        const rawRate = trade.brokerage_commission || 0;
+        const commissionRate = rawRate >= 0.1 ? rawRate / 100 : rawRate;
+        const current = tradeMap.get(clientCode) || { grossBuys: 0, netSells: 0, commission: 0 };
         const side = (trade.side || "").toUpperCase();
+        const tradeCommission = trade.value * commissionRate;
 
         if (side === "BUY" || side === "B") {
-          current.grossBuys += trade.value * (1 + commissionRate);
+          current.grossBuys += trade.value;
         } else if (side === "SELL" || side === "S") {
-          current.netSells += trade.value * (1 - commissionRate);
+          current.netSells += trade.value;
         }
+        current.commission += tradeCommission;
         tradeMap.set(clientCode, current);
       });
 
@@ -342,9 +341,10 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         const code = row.investor_code.toUpperCase();
         const baseBalance = baseBalances.get(code) || 0;
         const tx = txMap.get(code) || { deposits: 0, withdrawals: 0 };
-        const trades = tradeMap.get(code) || { grossBuys: 0, netSells: 0 };
+        const trades = tradeMap.get(code) || { grossBuys: 0, netSells: 0, commission: 0 };
         
-        const expectedBalance = baseBalance + tx.deposits - tx.withdrawals + trades.netSells - trades.grossBuys;
+        // Match backend formula: opening + deposits - withdrawals + gross_sell - gross_buy - commission
+        const expectedBalance = baseBalance + tx.deposits - tx.withdrawals + trades.netSells - trades.grossBuys - trades.commission;
         const diff = row.ledger_balance - expectedBalance;
         
         if (Math.abs(diff) > TOLERANCE) {
