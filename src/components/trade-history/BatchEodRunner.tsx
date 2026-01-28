@@ -211,7 +211,6 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
 
     try {
       const prevDay = format(addDays(dateToProcess, -1), "yyyy-MM-dd");
-      const twoDaysBefore = format(addDays(dateToProcess, -2), "yyyy-MM-dd");
       const prevDayTradeFormat = format(addDays(dateToProcess, -1), "yyyyMMdd");
 
       // Fetch stored EOD for previous day
@@ -232,58 +231,23 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         return;
       }
 
-      // Fetch base balances (from 2 days before)
+      // Fetch base balances from immediate previous day's closing_balance (correct EOD chain)
       const baseEod = await fetchAllRows<{
         investor_code: string;
-        ledger_balance: number;
+        closing_balance: number;
       }>((from, to) =>
         supabase
           .from("eod_ledger_snapshots")
-          .select("investor_code, ledger_balance")
-          .eq("eod_date", twoDaysBefore)
+          .select("investor_code, closing_balance")
+          .eq("eod_date", prevDay)
           .range(from, to)
       );
 
-      // Fetch base balances from clients table (ledger_balance snapshot)
-      const clients = await fetchAllRows<{
-        inv_code: string;
-        ledger_balance: number;
-      }>((from, to) =>
-        supabase
-          .from("clients")
-          .select("inv_code, ledger_balance")
-          .range(from, to)
-      );
-
-      // Fetch commission rates from investors table (single source of truth)
-      const investorData = await fetchAllRows<{
-        investor_code: string;
-        brokerage_commission: number | null;
-      }>((from, to) =>
-        supabase
-          .from("investors")
-          .select("investor_code, brokerage_commission")
-          .range(from, to)
-      );
-
-      const commissionMap = new Map<string, number>();
-      investorData?.forEach((inv) => {
-        if (inv.investor_code) {
-          // Normalize commission rate: if >= 0.1, treat as percentage and divide by 100
-          const rawRate = inv.brokerage_commission || 0;
-          const normalizedRate = rawRate >= 0.1 ? rawRate / 100 : rawRate;
-          commissionMap.set(inv.investor_code.toUpperCase(), normalizedRate);
-        }
-      });
-
-      // Build base balance map from clients table
+      // Build base balance map from previous day's closing_balance
+      // For investors without previous EOD (new accounts), default to 0 (matching backend COALESCE behavior)
       const baseBalances = new Map<string, number>();
-      clients?.forEach((c) => {
-        baseBalances.set(c.inv_code.toUpperCase(), c.ledger_balance || 0);
-      });
-      // Override with base EOD data if available (more recent snapshot)
       baseEod?.forEach((row) => {
-        baseBalances.set(row.investor_code.toUpperCase(), row.ledger_balance || 0);
+        baseBalances.set(row.investor_code.toUpperCase(), row.closing_balance || 0);
       });
 
       // Fetch previous day's trades with embedded deposit/withdrawal data
