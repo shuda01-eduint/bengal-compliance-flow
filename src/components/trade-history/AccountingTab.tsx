@@ -297,9 +297,10 @@ const AccountingTab = () => {
   }, [columns]);
 
   // Format dates for queries
+  // Opening balance date: day BEFORE fromDate (the EOD snapshot we need for opening balance)
+  const openingDateStr = format(subDays(fromDate, 1), 'yyyy-MM-dd');
+  const startDateStr = format(fromDate, 'yyyy-MM-dd'); // Start date for trades/deposits
   const endDateStr = format(toDate, 'yyyy-MM-dd'); // End date (inclusive)
-  const openingDateStr = format(subDays(fromDate, 1), 'yyyy-MM-dd'); // Opening balance date (start date - 1 day EOD)
-  const startDateStr = format(fromDate, 'yyyy-MM-dd'); // Start date for trades
   
   // Debug logging
   console.log('[AccountingTab] Date params:', { startDateStr, endDateStr, openingDateStr, fromDate: fromDate.toISOString(), toDate: toDate.toISOString() });
@@ -333,13 +334,14 @@ const AccountingTab = () => {
       console.log('[AccountingTab] Fetched total:', allData.length, 'rows via v3');
       return allData;
     },
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes to reduce redundant fetches
     retry: (failureCount, error: Error) => {
       const msg = error?.message || '';
       // Don't retry on schema errors - they need code fixes
       if (msg.includes('does not exist') || msg.includes('column')) return false;
-      // Don't retry on timeout errors - suggest narrowing date range instead
-      if (msg.includes('timeout') || msg.includes('57014')) return false;
-      return failureCount < 2;
+      // Don't retry on timeout/504 errors - compounding the problem
+      if (msg.includes('timeout') || msg.includes('57014') || msg.includes('504') || msg.includes('upstream')) return false;
+      return failureCount < 1; // Only 1 retry for other errors
     },
   });
 
@@ -347,22 +349,29 @@ const AccountingTab = () => {
   const isTimeoutError = useMemo(() => {
     if (!queryError) return false;
     const msg = (queryError as Error)?.message || '';
-    return msg.includes('timeout') || msg.includes('57014') || msg.includes('canceling statement');
+    return msg.includes('timeout') || msg.includes('57014') || msg.includes('canceling statement') || msg.includes('504') || msg.includes('upstream');
   }, [queryError]);
 
   // Summary data can be computed locally from accountingResult
   const loadingSummary = loadingData;
 
-  // Fetch turnover by department
+  // Fetch turnover by department - lazy load only when margin chart is active
   const { data: departmentTurnover } = useQuery({
-    queryKey: ['accounting-turnover-by-department', openingDateStr, endDateStr],
+    queryKey: ['accounting-turnover-by-department', startDateStr, endDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_turnover_by_department', {
-        _from_tx_date: format(fromDate, 'yyyy-MM-dd'),
+        _from_tx_date: startDateStr,
         _to_tx_date: endDateStr,
       });
       if (error) throw error;
       return data || [];
+    },
+    enabled: chartView === 'margin', // Only fetch when margin chart is visible
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    retry: (failureCount, error: Error) => {
+      const msg = error?.message || '';
+      if (msg.includes('timeout') || msg.includes('504') || msg.includes('upstream')) return false;
+      return failureCount < 1;
     },
   });
 
@@ -380,18 +389,24 @@ const AccountingTab = () => {
     enabled: chartView === 'margin',
   });
 
-  // Fetch commission by department
+  // Fetch commission by department - lazy load only when commission chart is active
   const { data: commissionByDept } = useQuery({
-    queryKey: ['accounting-commission-by-department', openingDateStr, endDateStr],
+    queryKey: ['accounting-commission-by-department', startDateStr, endDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_commission_by_department', {
-        _from_tx_date: format(fromDate, 'yyyy-MM-dd'),
+        _from_tx_date: startDateStr,
         _to_tx_date: endDateStr,
       });
       if (error) throw error;
       return data || [];
     },
-    enabled: chartView === 'commission',
+    enabled: chartView === 'commission', // Only fetch when commission chart is visible
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    retry: (failureCount, error: Error) => {
+      const msg = error?.message || '';
+      if (msg.includes('timeout') || msg.includes('504') || msg.includes('upstream')) return false;
+      return failureCount < 1;
+    },
   });
 
   // Process accounting data with custom fields (filtering now done server-side)
