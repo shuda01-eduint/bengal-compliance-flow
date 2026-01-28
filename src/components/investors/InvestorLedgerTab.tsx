@@ -88,9 +88,10 @@ export function InvestorLedgerTab() {
       const dateStr = format(dayBeforeStart, 'yyyy-MM-dd');
       
       // First try eod_ledger_snapshots (imported opening balances)
+      // Use closing_balance (the authoritative EOD chain field) instead of ledger_balance
       const { data: eodData, error: eodError } = await supabase
         .from('eod_ledger_snapshots')
-        .select('ledger_balance, eod_date')
+        .select('closing_balance, eod_date')
         .eq('investor_code', searchedCode)
         .lte('eod_date', dateStr)
         .order('eod_date', { ascending: false })
@@ -100,7 +101,7 @@ export function InvestorLedgerTab() {
       
       if (eodData && eodData.length > 0) {
         const snapshotDate = eodData[0].eod_date;
-        const snapshotBalance = eodData[0].ledger_balance || 0;
+        const snapshotBalance = eodData[0].closing_balance || 0;
         
         // If snapshot is older than day before start, we need to apply gap transactions
         if (snapshotDate < dateStr) {
