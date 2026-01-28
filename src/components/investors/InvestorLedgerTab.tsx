@@ -82,85 +82,41 @@ export function InvestorLedgerTab() {
     queryFn: async () => {
       if (!searchedCode || !startDate) return null;
       
-      // Get the day before start date for opening balance lookup
+      // Get the day before start date
       const dayBeforeStart = new Date(startDate);
       dayBeforeStart.setDate(dayBeforeStart.getDate() - 1);
       const dateStr = format(dayBeforeStart, 'yyyy-MM-dd');
       
-      // First try eod_ledger_snapshots (imported opening balances)
-      // Use closing_balance (the authoritative EOD chain field) instead of ledger_balance
+      // Step 1: Try EOD snapshot closing_balance (authoritative chain)
       const { data: eodData, error: eodError } = await supabase
         .from('eod_ledger_snapshots')
-        .select('closing_balance, eod_date')
+        .select('closing_balance')
         .eq('investor_code', searchedCode)
         .lte('eod_date', dateStr)
         .order('eod_date', { ascending: false })
-        .limit(1);
+        .limit(1)
+        .maybeSingle();
       
       if (eodError) throw eodError;
       
-      if (eodData && eodData.length > 0) {
-        const snapshotDate = eodData[0].eod_date;
-        const snapshotBalance = eodData[0].closing_balance || 0;
-        
-        // If snapshot is older than day before start, we need to apply gap transactions
-        if (snapshotDate < dateStr) {
-          // Fetch trades between snapshot date (exclusive) and day before start (inclusive)
-          const nextDay = new Date(snapshotDate);
-          nextDay.setDate(nextDay.getDate() + 1);
-          const nextDayStr = format(nextDay, 'yyyyMMdd');
-          const dayBeforeStr = format(dayBeforeStart, 'yyyyMMdd');
-          
-          const { data: gapTrades } = await supabase
-            .from('trade_history')
-            .select('side, value')
-            .eq('client_code', searchedCode)
-            .gte('trade_date', nextDayStr)
-            .lte('trade_date', dayBeforeStr);
-          
-          const { data: gapTransactions } = await supabase
-            .from('deposits_withdrawals')
-            .select('transaction_type, amount')
-            .eq('investor_code', searchedCode)
-            .gt('transaction_date', snapshotDate)
-            .lte('transaction_date', dateStr);
-          
-          let adjustedBalance = snapshotBalance;
-          
-          // Apply gap trades
-          gapTrades?.forEach(trade => {
-            const value = Number(trade.value) || 0;
-            const isBuy = trade.side?.toUpperCase() === 'BUY' || trade.side?.toUpperCase() === 'B';
-            adjustedBalance = isBuy ? adjustedBalance - value : adjustedBalance + value;
-          });
-          
-          // Apply gap transactions
-          gapTransactions?.forEach(tx => {
-            const amount = Number(tx.amount) || 0;
-            const isDeposit = tx.transaction_type === 'Deposit';
-            adjustedBalance = isDeposit ? adjustedBalance + amount : adjustedBalance - amount;
-          });
-          
-          return adjustedBalance;
-        }
-        
-        return snapshotBalance;
+      if (eodData?.closing_balance != null) {
+        return eodData.closing_balance;
       }
       
-      // Fallback to balances_raw if no EOD snapshot exists
-      const { data: rawData, error: rawError } = await supabase
-        .from('balances_raw')
+      // Step 2: Fallback to investors.ledger_balance (imported baseline)
+      const { data: investorData, error: investorError } = await supabase
+        .from('investors')
         .select('ledger_balance')
         .eq('investor_code', searchedCode)
-        .lte('as_of_date', dateStr)
-        .order('as_of_date', { ascending: false })
-        .limit(1);
+        .maybeSingle();
       
-      if (rawError) throw rawError;
-      if (rawData && rawData.length > 0) {
-        return rawData[0].ledger_balance || 0;
+      if (investorError) throw investorError;
+      
+      if (investorData?.ledger_balance != null) {
+        return investorData.ledger_balance;
       }
       
+      // Step 3: Default for new accounts with no history
       return 0;
     },
     enabled: !!searchedCode && !!startDate,
