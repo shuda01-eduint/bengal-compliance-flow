@@ -1,77 +1,63 @@
 
-## Fix Frontend EOD Verification Logic
 
-### Problem Analysis
+## Fix Investor Ledger Opening Balance Mismatch
 
-The "Stale EOD Data Detected" warning is a **false positive**. Database verification confirmed:
+### Problem Summary
 
-1. **Backend is working correctly**: The `run_batch_eod` function properly sets `opening_balance = previous day's closing_balance`
-2. **EOD chain is intact**: Query confirmed zero mismatches between `opening_balance` and `prev_closing` in the database
-3. **Root cause**: Frontend verification in `BatchEodRunner.tsx` uses incorrect data sources
+The Investor Ledger for **KL167** shows **Opening Balance: 311,294.12** but the external system shows **559,562.86**. This is a difference of **248,268.74**.
 
-### Current Frontend Bug
+### Root Cause Analysis
 
-The verification function (`verifyPreviousDayEod`) has these issues:
+Two issues were identified:
 
-| Issue | Current Code | Problem |
-|-------|--------------|---------|
-| Wrong field | `select("investor_code, ledger_balance")` | Should use `closing_balance` for chain verification |
-| Wrong date | Fetches from `twoDaysBefore` | Should fetch from `prevDay` (immediate previous EOD) |
-| Stale fallback | Uses `clients.ledger_balance` as base | This is static import data, not EOD chain data |
+1. **EOD Chain Break (Database Level)**
+   - Jan 25 snapshot has `opening_balance = 4,423.32` instead of using Jan 24's `closing_balance = 252,692.06`
+   - This is a -248,268.74 error that propagates forward
+   - Jan 25 closing became 311,294.12 (wrong) instead of 559,562.86 (correct)
+
+2. **Wrong Field in InvestorLedgerTab (Code Level)**
+   - Line 93 fetches `ledger_balance` for opening balance lookup
+   - Should fetch `closing_balance` to correctly follow the EOD chain
 
 ### Solution
 
-Fix the frontend verification to match the backend logic:
+#### Part 1: Database Fix (Manual Action Required)
+Re-run Batch EOD for **Jan 25, 2026** with "Skip existing" turned **OFF** to rebuild the chain correctly
 
-1. **Fetch previous day's EOD closing balance** (not 2 days before)
-2. **Use `closing_balance` field** (not `ledger_balance`)
-3. **Remove stale `clients.ledger_balance` fallback** for verification purposes
-4. **For clients without previous EOD**: Use 0 as opening balance (matching backend COALESCE behavior)
+#### Part 2: Code Fix
+Update `InvestorLedgerTab.tsx` to use `closing_balance` instead of `ledger_balance` for opening balance calculation:
 
-### Technical Implementation
+**File: `src/components/investors/InvestorLedgerTab.tsx`**
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                 VERIFICATION LOGIC FIX                          │
-├─────────────────────────────────────────────────────────────────┤
-│ Before (Incorrect):                                             │
-│   base = clients.ledger_balance OR eod[T-2].ledger_balance      │
-│   expected = base + deposits - withdrawals + sells - buys       │
-│                                                                 │
-│ After (Correct):                                                │
-│   base = eod[T-1].closing_balance (immediate previous day)      │
-│   expected = base + deposits - withdrawals + sells - buys       │
-└─────────────────────────────────────────────────────────────────┘
+```typescript
+// Line 91-93: Change from ledger_balance to closing_balance
+const { data: eodData, error: eodError } = await supabase
+  .from('eod_ledger_snapshots')
+  .select('closing_balance, eod_date')  // Changed from ledger_balance
+  .eq('investor_code', searchedCode)
+  .lte('eod_date', dateStr)
+  .order('eod_date', { ascending: false })
+  .limit(1);
 ```
 
-### Changes Required
-
-**File: `src/components/trade-history/BatchEodRunner.tsx`**
-
-1. **Update base EOD fetch** (around line 235-245):
-   - Change date from `twoDaysBefore` to `prevDay`
-   - Change field from `ledger_balance` to `closing_balance`
-
-2. **Remove clients table fetch** (lines 247-256):
-   - The `clients.ledger_balance` is stale import data
-   - Not needed for EOD chain verification
-
-3. **Update base balance mapping** (lines 279-287):
-   - Use only EOD closing balance from previous day
-   - Default to 0 for investors without previous EOD (new accounts)
-
-4. **Keep deposit/withdrawal logic** unchanged:
-   - The trade_history embedded values are correct
+```typescript
+// Line 102-103: Use closing_balance
+if (eodData && eodData.length > 0) {
+  const snapshotDate = eodData[0].eod_date;
+  const snapshotBalance = eodData[0].closing_balance || 0;  // Changed
+```
 
 ### Expected Outcome
 
-After this fix:
-- The verification will correctly compare against the EOD chain
-- "Stale EOD Data" warnings will only appear for genuine mismatches
-- False positives will be eliminated
+After both fixes:
 
-### Verification After Fix
+| Metric | Current (Wrong) | Expected (Correct) |
+|--------|-----------------|-------------------|
+| Opening Balance (Jan 26) | 311,294.12 | 559,562.86 |
+| Closing Balance (Jan 27) | -581,906.38 | -336,459.79 |
+| Difference | 245,446.59 | Matches external ✅ |
 
-Re-run EOD for Jan 26 and confirm:
-- Warning should not appear (or show only genuine issues)
-- `ledger_balance_snapshot` mismatches are expected (file snapshot vs calculated opening) and are for audit purposes, not blocking
+### Technical Details
+
+The `ledger_balance` and `closing_balance` fields in `eod_ledger_snapshots` should be identical in a healthy state, but the chain calculation uses `closing_balance` as the authoritative field for the running balance. When an EOD re-run occurs, `closing_balance` is recalculated but `ledger_balance` may retain stale data.
+
