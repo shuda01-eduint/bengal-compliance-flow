@@ -1,118 +1,125 @@
 
 
-## Simplified Opening Balance Logic
+## Align Backend Opening Balance with Frontend Logic
 
-### Problem
+### The Problem
 
-The current opening balance logic (lines 80-167) is **87 lines of complex code** with:
-- Gap transaction calculations scanning `trade_history` (slow)
-- Gap deposit/withdrawal calculations 
-- Fallback to `balances_raw` table
-- 3-4 sequential database queries
-
-### Solution: Simple Fallback Chain
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                    NEW LOGIC (Simple)                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   Step 1: Query eod_ledger_snapshots                           │
-│           → Get closing_balance for day before start date      │
-│           → If found, return it ✓                              │
-│                                                                 │
-│   Step 2: Fallback to investors.ledger_balance                 │
-│           → This is the imported baseline balance              │
-│           → If found, return it ✓                              │
-│                                                                 │
-│   Step 3: Default to 0                                         │
-│           → Only for brand new accounts with no history        │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+**Current Backend Logic (line 79-86, 137):**
+```sql
+prev_balances AS (
+  SELECT investor_code, closing_balance, cumulative_interest
+  FROM eod_ledger_snapshots
+  WHERE eod_date = v_prev_date  -- EXACT DATE MATCH ONLY
+),
+...
+COALESCE(pb.closing_balance, 0) AS opening_balance  -- Falls back to 0
 ```
 
-### Code Changes
-
-**File: `src/components/investors/InvestorLedgerTab.tsx`**
-
-Replace lines 80-167 with simplified logic:
-
+**Current Frontend Logic (already simplified):**
 ```typescript
-const { data: openingBalanceData, isLoading: isLoadingBalance } = useQuery({
-  queryKey: ['opening-balance', searchedCode, startDate?.toISOString()],
-  queryFn: async () => {
-    if (!searchedCode || !startDate) return null;
-    
-    // Get the day before start date
-    const dayBeforeStart = new Date(startDate);
-    dayBeforeStart.setDate(dayBeforeStart.getDate() - 1);
-    const dateStr = format(dayBeforeStart, 'yyyy-MM-dd');
-    
-    // Step 1: Try EOD snapshot closing_balance (authoritative chain)
-    const { data: eodData, error: eodError } = await supabase
-      .from('eod_ledger_snapshots')
-      .select('closing_balance')
-      .eq('investor_code', searchedCode)
-      .lte('eod_date', dateStr)
-      .order('eod_date', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    
-    if (eodError) throw eodError;
-    
-    if (eodData?.closing_balance != null) {
-      return eodData.closing_balance;
-    }
-    
-    // Step 2: Fallback to investors.ledger_balance (imported baseline)
-    const { data: investorData, error: investorError } = await supabase
-      .from('investors')
-      .select('ledger_balance')
-      .eq('investor_code', searchedCode)
-      .maybeSingle();
-    
-    if (investorError) throw investorError;
-    
-    if (investorData?.ledger_balance != null) {
-      return investorData.ledger_balance;
-    }
-    
-    // Step 3: Default for new accounts with no history
-    return 0;
-  },
-  enabled: !!searchedCode && !!startDate,
-});
+// Uses lte + order desc to find MOST RECENT snapshot
+.lte('eod_date', dateStr)
+.order('eod_date', { ascending: false })
+.limit(1)
+
+// Falls back to investors.ledger_balance, then 0
 ```
 
-### What's Removed
+### The Fix
 
-| Removed | Reason |
-|---------|--------|
-| Gap trade calculations (lines 107-135) | Trust EOD chain - no recalculation |
-| Gap transaction calculations (lines 137-142) | Trust EOD chain |
-| `balances_raw` fallback (lines 150-162) | Use `investors.ledger_balance` instead |
+Update `prev_balances` CTE to find the **most recent EOD snapshot** before the target date, then fall back to `investors.ledger_balance` instead of `0`:
 
-### Performance Comparison
+```sql
+-- Previous day closing balances (use most recent available, not exact date)
+prev_balances AS (
+  SELECT DISTINCT ON (investor_code)
+    investor_code,
+    closing_balance,
+    cumulative_interest
+  FROM eod_ledger_snapshots
+  WHERE eod_date < p_eod_date  -- Any date before EOD date
+  ORDER BY investor_code, eod_date DESC  -- Get most recent per investor
+),
 
-| Metric | Before | After |
-|--------|--------|-------|
-| Database queries | 3-4 sequential | 1-2 max |
-| Lines of code | 87 lines | 35 lines |
-| Tables queried | `eod_ledger_snapshots`, `trade_history`, `deposits_withdrawals`, `balances_raw` | `eod_ledger_snapshots`, `investors` |
-| Load time | 3-5 seconds | <0.5 seconds |
-
-### Fallback Chain Logic
-
-```text
-Opening Balance =
-  eod_ledger_snapshots.closing_balance (most recent before start date)
-  → investors.ledger_balance (imported baseline, e.g., Jan 12)
-  → 0 (only for accounts with zero history)
+-- Opening balance assignment (with fallback chain)
+...
+COALESCE(pb.closing_balance, i.ledger_balance, 0) AS opening_balance
 ```
 
-### Technical Notes
+### Comparison Table
 
-- The `investors.ledger_balance` field stores the baseline balance imported during system initialization (e.g., Jan 12 baseline)
-- This matches the backend `run_batch_eod` logic which also uses `investors.ledger_balance` as the initial seed when no prior EOD exists
-- Using `.maybeSingle()` prevents errors when no record exists
+| Aspect | Current Backend | Proposed Backend | Frontend |
+|--------|-----------------|------------------|----------|
+| Lookup | `= v_prev_date` (exact) | `< p_eod_date` + `DESC LIMIT 1` | `lte` + `order desc` |
+| 1st Fallback | None (skips to 0) | `investors.ledger_balance` | `investors.ledger_balance` |
+| 2nd Fallback | `0` | `0` | `0` |
+
+### Migration SQL
+
+```sql
+CREATE OR REPLACE FUNCTION public.run_batch_eod(p_eod_date date, p_skip_existing boolean DEFAULT false)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = 'public'
+SET statement_timeout = '300s'
+AS $$
+DECLARE
+  -- ... existing declarations ...
+BEGIN
+  -- ... existing security checks ...
+  
+  WITH 
+  universe AS (
+    -- ... existing universe logic ...
+  ),
+  
+  -- UPDATED: Previous balances with flexible date lookup
+  prev_balances AS (
+    SELECT DISTINCT ON (investor_code)
+      investor_code,
+      closing_balance,
+      cumulative_interest
+    FROM eod_ledger_snapshots
+    WHERE eod_date < p_eod_date
+    ORDER BY investor_code, eod_date DESC
+  ),
+  
+  -- ... existing daily_deposits, daily_trades CTEs ...
+  
+  snapshots AS (
+    SELECT 
+      u.investor_code,
+      -- ... other fields ...
+      -- UPDATED: Fallback chain for opening balance
+      COALESCE(pb.closing_balance, im.ledger_balance, 0) AS opening_balance,
+      -- ... rest of calculations using new opening_balance ...
+    FROM universe u
+    LEFT JOIN prev_balances pb ON pb.investor_code = u.investor_code
+    LEFT JOIN daily_deposits dd ON dd.investor_code = u.investor_code
+    LEFT JOIN daily_trades dt ON dt.investor_code = u.investor_code
+    LEFT JOIN investor_meta im ON im.investor_code = u.investor_code
+  ),
+  -- ... rest of function ...
+```
+
+### Changes Summary
+
+1. **`prev_balances` CTE**: 
+   - Change `WHERE eod_date = v_prev_date` → `WHERE eod_date < p_eod_date`
+   - Add `DISTINCT ON (investor_code)` with `ORDER BY investor_code, eod_date DESC`
+
+2. **`snapshots` CTE**:
+   - Add `i.ledger_balance` to `investor_meta` select
+   - Change `COALESCE(pb.closing_balance, 0)` → `COALESCE(pb.closing_balance, im.ledger_balance, 0)`
+
+3. **Closing balance calculation**:
+   - Uses the new `opening_balance` which now has proper fallback
+
+### Benefits
+
+- **Frontend/Backend alignment**: Both use same fallback chain
+- **Gap resilience**: Missing EOD dates won't break calculations
+- **Proper baseline**: Uses imported `ledger_balance` for accounts without EOD history
+- **New accounts**: Still defaults to `0` only when truly no data exists
 
