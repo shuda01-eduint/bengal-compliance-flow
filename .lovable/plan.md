@@ -1,42 +1,69 @@
 
-## Fix: EOD Function Ambiguity Error
 
-### Problem
+## Fix: Type Mismatch in EOD Function
 
-PostgreSQL error: "Could not choose the best candidate function between:
-- `public.run_batch_eod(p_eod_date => date, p_skip_existing => boolean)`
-- `public.run_batch_eod(p_eod_date => date, p_user_id => uuid, p_skip_existing => boolean)`"
+### Problem Summary
 
-There are **two versions** of the `run_batch_eod` function in the database. When the frontend calls it with only 2 parameters, PostgreSQL cannot determine which function to use.
+The database error `operator does not exist: text = date` occurs because:
 
-### Root Cause
+- `trade_history.trade_date` is stored as **TEXT** in format `YYYYMMDD` (e.g., `'20260113'`)
+- `p_eod_date` is passed as **DATE** type
+- PostgreSQL cannot compare these types directly
 
-During previous migrations, a new version of `run_batch_eod` was created but the old 3-argument version was not removed, causing function overload ambiguity.
+### Current Database State
+
+The function has **6 locations** where this comparison fails:
+
+| Line | Code | Context |
+|------|------|---------|
+| 39 | `WHERE trade_date = p_eod_date` | Trade files count |
+| 44-45 | `WHERE trade_date = p_eod_date` | Deposit records count |
+| 55 | `WHERE trade_date = p_eod_date` | Universe CTE - trades |
+| 87 | `WHERE trade_date = p_eod_date` | Daily deposits CTE |
+| 99 | `WHERE trade_date = p_eod_date` | Daily trades CTE |
 
 ### Solution
 
-Drop the old 3-argument function signature that includes `p_user_id`, keeping only the 2-argument version that the frontend uses:
+Replace all direct date comparisons with text-formatted comparisons:
 
 ```sql
-DROP FUNCTION IF EXISTS public.run_batch_eod(date, uuid, boolean);
+-- Before (BROKEN):
+WHERE trade_date = p_eod_date
+
+-- After (FIXED):
+WHERE trade_date = TO_CHAR(p_eod_date, 'YYYYMMDD')
 ```
 
-### Implementation Steps
+### Implementation
 
-1. Create migration to drop the obsolete 3-argument function
-2. Verify only the 2-argument version remains
-3. Re-test EOD run for January 13
+Create a migration that replaces the entire `run_batch_eod` function with the corrected version. The key changes:
 
-### Technical Details
+1. Add a local variable to hold the formatted date:
+   ```sql
+   v_eod_date_text TEXT := TO_CHAR(p_eod_date, 'YYYYMMDD');
+   ```
 
-**Migration SQL:**
-```sql
--- Remove the obsolete 3-argument version of run_batch_eod
--- The current implementation uses only (p_eod_date, p_skip_existing)
-DROP FUNCTION IF EXISTS public.run_batch_eod(date, uuid, boolean);
-```
+2. Replace all `trade_date = p_eod_date` with `trade_date = v_eod_date_text`
+
+3. Keep the deposits_withdrawals comparison as DATE (since that column IS a date type)
+
+### What Won't Change
+
+- Function signature: `(p_eod_date date, p_skip_existing boolean)`
+- Business logic (delta calculation, opening balance chain, etc.)
+- 300-second timeout and SECURITY DEFINER settings
+- All table relationships and output format
+
+### After This Fix
+
+Once deployed:
+1. Re-run EOD for January 13 - should complete successfully
+2. Continue with remaining dates through January 28
+3. Verify investor 21519's closing balance matches expected **-710,722.99**
 
 ### Risk Assessment
 
-- **Low Risk**: The 3-argument version is not being called by any frontend code
-- **Immediate Fix**: Once deployed, EOD will work immediately without code changes
+- **Low Risk**: This is a type conversion fix only, no logic changes
+- **Tested Pattern**: The same `TO_CHAR` approach was already in the delta-calculation version (line 32)
+- **Immediate Effect**: Will work as soon as migration is deployed
+
