@@ -1,155 +1,164 @@
 
+# Fix: EOD Deposit/Withdrawal Calculation Bug
 
-# RPC Timeout Optimization Plan
+## Problem Identified
 
-## Problem Analysis
+The `run_batch_eod` function incorrectly calculates daily deposits when there are gaps in trade data. This causes cumulative values to be treated as daily deltas.
 
-Three RPC functions are experiencing intermittent 504 Gateway Timeout errors on the Accounting page:
+### Root Cause Analysis
 
-1. `get_accounting_data_v3` - Primary data function (504 timeout after ~125s)
-2. `get_accounting_turnover_by_department` - Department turnover chart (500 timeout)
-3. `get_commission_by_department` - Commission by department chart (500 timeout)
+| Date | Actual Daily Deposit | Trade History Delta | DW Table | EOD Used | Issue |
+|------|---------------------|---------------------|----------|----------|-------|
+| Jan 18 | 0 | 995,000 (gap: no prev day) | NULL | 995,000 | **BUG** - cumulative treated as daily |
+| Jan 20 | 0 | 800,000 (1.795M - 0.995M) | NULL | 800,000 | **BUG** - wrong delta due to gap |
 
-### Key Findings
-
-| Function | DB Execution Time | HTTP Timeout | Issue |
-|----------|------------------|--------------|-------|
-| get_accounting_data_v3 | ~213ms | ~125s | Gateway congestion + retry storms |
-| get_turnover_by_department | ~80ms | ~120s | No statement_timeout set |
-| get_commission_by_department | ~100ms | ~120s | No statement_timeout set |
-
-**Root Causes:**
-1. The functions execute quickly in the database but HTTP gateway occasionally congests
-2. The retry logic in `rpcWithRetry` compounds the problem by sending 4 parallel requests
-3. No explicit timeouts on the department aggregation functions
-4. A date calculation bug causes opening balances to be fetched from wrong date
-
-## Proposed Solution
-
-### Phase 1: Fix Retry Logic (Frontend)
-
-**File:** `src/components/trade-history/AccountingTab.tsx`
-
-Stop retrying on timeout errors since they indicate gateway congestion, not transient failures:
-
-```typescript
-// In the useQuery for accounting data
-retry: (failureCount, error: Error) => {
-  const msg = error?.message || '';
-  // Don't retry on timeout - it compounds the problem
-  if (msg.includes('timeout') || msg.includes('504') || msg.includes('upstream')) return false;
-  if (msg.includes('does not exist') || msg.includes('column')) return false;
-  return failureCount < 1; // Only 1 retry for other errors
-},
+The current logic:
+```sql
+GREATEST(dw_deposits, th_deposits_delta)
 ```
 
-### Phase 2: Add Statement Timeouts to Department Functions (Database)
+Picks the trade history delta when `deposits_withdrawals` has no record, but that delta is wrong when there's a gap in trade dates.
 
-**SQL Migration:**
+### Impact on Investor 21519
+
+- **Stored closing balance**: 56.55 lac
+- **Correct closing balance**: -6.97 lac (negative = receivable)
+- **Error**: ~63.5 lac overstatement due to deposit inflation
+
+## Solution
+
+### Phase 1: Fix Delta Calculation Logic
+
+Change the priority order - only use trade history delta as a fallback when deposits_withdrawals is unavailable **AND** the delta is positive (indicates real activity, not gap artifact).
 
 ```sql
--- Add explicit 60s timeout to get_accounting_turnover_by_department
-CREATE OR REPLACE FUNCTION public.get_accounting_turnover_by_department(
-  _from_tx_date date DEFAULT NULL::date, 
-  _to_tx_date date DEFAULT NULL::date
-)
-RETURNS TABLE(department text, total_buy numeric, total_sell numeric, turnover numeric)
+-- Current buggy logic:
+GREATEST(dw_deposits, th_deposits)
+
+-- Fixed logic - prefer deposits_withdrawals, validate trade history deltas:
+CASE 
+  WHEN COALESCE(dw.deposits, 0) > 0 THEN dw.deposits
+  WHEN th_deposits > 0 AND pdt.prev_deposits IS NOT NULL THEN th_deposits  
+  ELSE 0  -- No valid source, assume zero
+END
+```
+
+Actually, the better fix is to **always prefer `deposits_withdrawals`** and only use trade history as supplementary validation:
+
+```sql
+-- Simplified fix: deposits_withdrawals is the source of truth for daily transactions
+COALESCE(dw.deposits, 0) as total_deposits,
+COALESCE(dw.withdrawals, 0) as total_withdrawals,
+```
+
+### Phase 2: Fix Investor 21519 Data
+
+After fixing the function, we need to:
+
+1. Clear EOD snapshots for investor 21519 from Jan 12 onwards
+2. Re-run Batch EOD for the full date range
+
+```sql
+-- Clear existing incorrect snapshots
+DELETE FROM eod_ledger_snapshots 
+WHERE investor_code = '21519' AND eod_date >= '2026-01-12';
+
+-- Then re-run Batch EOD via the UI
+```
+
+## Technical Implementation
+
+### Database Migration
+
+```sql
+CREATE OR REPLACE FUNCTION public.run_batch_eod(p_eod_date date, p_skip_existing boolean DEFAULT false)
+RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO 'public'
-SET statement_timeout TO '60s'  -- Add timeout
+SET search_path = 'public'
+SET statement_timeout = '300s'
 AS $function$
--- ... existing function body unchanged
+-- ... existing declarations ...
+
+BEGIN
+  -- ... existing security and cleanup logic ...
+
+  WITH 
+  -- ... existing CTEs for prev_day_totals, today_totals, today_trades ...
+  
+  -- Deposit/withdrawal deltas from deposits_withdrawals table (case-insensitive)
+  dw_deltas AS MATERIALIZED (
+    SELECT
+      investor_code,
+      SUM(CASE WHEN LOWER(transaction_type) = 'deposit' THEN amount ELSE 0 END) as deposits,
+      SUM(CASE WHEN LOWER(transaction_type) = 'withdrawal' THEN amount ELSE 0 END) as withdrawals
+    FROM deposits_withdrawals
+    WHERE transaction_date = p_eod_date
+    GROUP BY investor_code
+  ),
+  
+  -- ... existing universe and prev_closing CTEs ...
+  
+  final_calc AS (
+    SELECT
+      u.investor_code,
+      -- ... existing columns ...
+      
+      -- FIX: Use deposits_withdrawals as primary source, not GREATEST()
+      COALESCE(dw.deposits, 0) as daily_deposits,
+      COALESCE(dw.withdrawals, 0) as daily_withdrawals,
+      
+      -- Trade history delta kept for audit/validation only
+      CASE 
+        WHEN pdt.prev_deposits IS NOT NULL 
+        THEN COALESCE(tt.today_deposits, 0) - pdt.prev_deposits
+        ELSE 0 
+      END as th_deposits_delta,
+      
+      -- ... rest of columns ...
+    FROM universe u
+    -- ... existing JOINs ...
+  )
+  INSERT INTO eod_ledger_snapshots (...)
+  SELECT
+    p_eod_date,
+    investor_code,
+    -- ... existing columns ...
+    
+    -- FIX: Use daily_deposits/withdrawals from deposits_withdrawals, not GREATEST
+    daily_deposits as total_deposits,
+    daily_withdrawals as total_withdrawals,
+    
+    -- FIX: Closing balance uses correct daily values
+    opening_balance 
+      + daily_deposits 
+      - daily_withdrawals
+      + gross_sell 
+      - gross_buy 
+      - total_commission as closing_balance,
+    
+    -- ... rest of insert ...
+  FROM final_calc;
+  
+  -- ... rest of function ...
+END;
 $function$;
-
--- Add explicit 60s timeout to get_commission_by_department
-CREATE OR REPLACE FUNCTION public.get_commission_by_department(
-  _from_tx_date date DEFAULT NULL::date, 
-  _to_tx_date date DEFAULT NULL::date
-)
-RETURNS TABLE(department text, total_commission numeric, total_turnover numeric, trade_count bigint)
-LANGUAGE plpgsql
-STABLE SECURITY DEFINER
-SET search_path TO 'public'
-SET statement_timeout TO '60s'  -- Add timeout
-AS $function$
--- ... existing function body unchanged
-$function$;
 ```
-
-### Phase 3: Fix Opening Balance Date Logic (Database + Frontend Alignment)
-
-The current code has a **double subtraction bug**:
-- Frontend sends `_opening_date = fromDate - 1 day` (e.g., Jan 27 for Jan 28 selection)
-- Database function does `eod_date = _opening_date - 1 day` (queries Jan 26!)
-
-**Option A: Fix in Database (Recommended)**
-Remove the extra day subtraction in the function:
-
-```sql
--- In get_accounting_data_v3, change:
-WHERE els.eod_date = (_opening_date - INTERVAL '1 day')::date
-
--- To:
-WHERE els.eod_date = _opening_date
-```
-
-**Option B: Fix in Frontend**
-Send `fromDate` directly instead of `subDays(fromDate, 1)`:
-
-```typescript
-// Change:
-_opening_date: openingDateStr,  // Currently subDays(fromDate, 1)
-
-// To:
-_opening_date: startDateStr,    // Use fromDate directly
-```
-
-### Phase 4: Lazy Load Department Charts (Frontend)
-
-Only fetch department data when the chart is visible:
-
-```typescript
-// Turnover query - only fetch when chart tab is active
-const { data: departmentTurnover } = useQuery({
-  queryKey: ['accounting-turnover-by-department', openingDateStr, endDateStr],
-  queryFn: async () => { /* ... */ },
-  enabled: chartView === 'margin',  // Only fetch when margin chart is selected
-  staleTime: 5 * 60 * 1000,  // Cache for 5 minutes
-});
-
-// Commission query - only fetch when commission chart is selected  
-const { data: commissionByDept } = useQuery({
-  queryKey: ['accounting-commission-by-department', openingDateStr, endDateStr],
-  queryFn: async () => { /* ... */ },
-  enabled: chartView === 'commission',  // Only fetch when commission chart is selected
-  staleTime: 5 * 60 * 1000,  // Cache for 5 minutes
-});
-```
-
-## Technical Details
 
 ### Files to Modify
 
-1. **`src/components/trade-history/AccountingTab.tsx`**
-   - Update retry logic to not retry on timeouts
-   - Fix date parameter naming (use `startDateStr` not `openingDateStr`)
-   - Add `staleTime` to reduce redundant fetches
-   - Ensure department chart queries only run when their chart is active
+1. **Database Migration**: Update `run_batch_eod` function to use `deposits_withdrawals` as the sole source for daily deposit/withdrawal values
 
-2. **Database Migration**
-   - Add `SET statement_timeout TO '60s'` to department functions
-   - Fix opening balance date logic in `get_accounting_data_v3`
+2. **Data Correction**: After migration, clear and rebuild EOD chain for affected investors
 
-### Expected Outcome
+## Expected Outcome
 
-- Timeout errors will fail fast (60s) instead of hanging for 125s
-- No retry storms during gateway congestion
-- Opening balances will be fetched from the correct date
-- Department charts will only load when needed, reducing concurrent requests
+- Investor 21519 Jan 28 closing balance: **-6.97 lac** (correct negative balance)
+- No more deposit inflation from trade history gaps
+- EOD chain integrity maintained
 
-### Risk Assessment
+## Risk Assessment
 
-- **Low Risk**: Changes are defensive and don't alter core business logic
-- **Rollback**: If issues arise, the timeout settings can be reverted via another migration
-
+- **Medium Risk**: This changes core EOD calculation logic
+- **Mitigation**: The fix makes the source of truth clearer (deposits_withdrawals table)
+- **Rollback**: If issues arise, revert migration and clear/rebuild EOD data
