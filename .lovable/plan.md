@@ -1,79 +1,155 @@
 
 
-# Fix: Accounting Page Date Selection Off-by-One Bug
+# RPC Timeout Optimization Plan
 
-## Problem Identified
+## Problem Analysis
 
-When selecting **Jan 28** in the date picker, the Accounting page displays data for **Jan 27** instead. The console logs confirm:
+Three RPC functions are experiencing intermittent 504 Gateway Timeout errors on the Accounting page:
 
-```text
-startDateStr: "2026-01-27"  (should be 2026-01-28)
-endDateStr: "2026-01-27"    (should be 2026-01-28)
-fromDate: "2026-01-26T18:00:00.000Z"  (Jan 27 midnight in UTC+6)
+1. `get_accounting_data_v3` - Primary data function (504 timeout after ~125s)
+2. `get_accounting_turnover_by_department` - Department turnover chart (500 timeout)
+3. `get_commission_by_department` - Commission by department chart (500 timeout)
+
+### Key Findings
+
+| Function | DB Execution Time | HTTP Timeout | Issue |
+|----------|------------------|--------------|-------|
+| get_accounting_data_v3 | ~213ms | ~125s | Gateway congestion + retry storms |
+| get_turnover_by_department | ~80ms | ~120s | No statement_timeout set |
+| get_commission_by_department | ~100ms | ~120s | No statement_timeout set |
+
+**Root Causes:**
+1. The functions execute quickly in the database but HTTP gateway occasionally congests
+2. The retry logic in `rpcWithRetry` compounds the problem by sending 4 parallel requests
+3. No explicit timeouts on the department aggregation functions
+4. A date calculation bug causes opening balances to be fetched from wrong date
+
+## Proposed Solution
+
+### Phase 1: Fix Retry Logic (Frontend)
+
+**File:** `src/components/trade-history/AccountingTab.tsx`
+
+Stop retrying on timeout errors since they indicate gateway congestion, not transient failures:
+
+```typescript
+// In the useQuery for accounting data
+retry: (failureCount, error: Error) => {
+  const msg = error?.message || '';
+  // Don't retry on timeout - it compounds the problem
+  if (msg.includes('timeout') || msg.includes('504') || msg.includes('upstream')) return false;
+  if (msg.includes('does not exist') || msg.includes('column')) return false;
+  return failureCount < 1; // Only 1 retry for other errors
+},
 ```
 
-The dates are consistently **one day behind** what the user selected.
+### Phase 2: Add Statement Timeouts to Department Functions (Database)
 
-## Root Cause
+**SQL Migration:**
 
-The `react-day-picker` Calendar component returns a Date object at **midnight UTC** for the selected day. When the user is in a timezone like Bangladesh (UTC+6), this UTC midnight becomes the **previous day** at 6:00 PM local time. The `date-fns format()` function then formats this according to local time, resulting in the previous day's date string.
+```sql
+-- Add explicit 60s timeout to get_accounting_turnover_by_department
+CREATE OR REPLACE FUNCTION public.get_accounting_turnover_by_department(
+  _from_tx_date date DEFAULT NULL::date, 
+  _to_tx_date date DEFAULT NULL::date
+)
+RETURNS TABLE(department text, total_buy numeric, total_sell numeric, turnover numeric)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+SET statement_timeout TO '60s'  -- Add timeout
+AS $function$
+-- ... existing function body unchanged
+$function$;
 
-**Example flow:**
-1. User clicks "Jan 28" in calendar
-2. Calendar returns: `new Date('2026-01-28T00:00:00.000Z')` (midnight UTC)
-3. In Bangladesh (UTC+6), this is: Jan 28, 6:00 AM local
-4. But the Date object stores it as UTC, and when `format()` runs in local context, timezone handling causes the issue
+-- Add explicit 60s timeout to get_commission_by_department
+CREATE OR REPLACE FUNCTION public.get_commission_by_department(
+  _from_tx_date date DEFAULT NULL::date, 
+  _to_tx_date date DEFAULT NULL::date
+)
+RETURNS TABLE(department text, total_commission numeric, total_turnover numeric, trade_count bigint)
+LANGUAGE plpgsql
+STABLE SECURITY DEFINER
+SET search_path TO 'public'
+SET statement_timeout TO '60s'  -- Add timeout
+AS $function$
+-- ... existing function body unchanged
+$function$;
+```
 
-## Solution
+### Phase 3: Fix Opening Balance Date Logic (Database + Frontend Alignment)
 
-Normalize dates immediately when selected from the calendar by creating a new Date object using **local time components** rather than relying on the potentially timezone-shifted Date from the calendar.
+The current code has a **double subtraction bug**:
+- Frontend sends `_opening_date = fromDate - 1 day` (e.g., Jan 27 for Jan 28 selection)
+- Database function does `eod_date = _opening_date - 1 day` (queries Jan 26!)
 
-### Changes Required
+**Option A: Fix in Database (Recommended)**
+Remove the extra day subtraction in the function:
 
-**File: `src/components/trade-history/AccountingTab.tsx`**
+```sql
+-- In get_accounting_data_v3, change:
+WHERE els.eod_date = (_opening_date - INTERVAL '1 day')::date
 
-1. **Add a date normalization utility function:**
-   ```typescript
-   // Normalize a date to local midnight to avoid timezone issues
-   const normalizeToLocalDate = (date: Date): Date => {
-     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-   };
-   ```
+-- To:
+WHERE els.eod_date = _opening_date
+```
 
-2. **Update the `handleFromDateChange` function:**
-   ```typescript
-   const handleFromDateChange = (date: Date | undefined) => {
-     if (date) {
-       const normalizedDate = normalizeToLocalDate(date);
-       setFromDate(normalizedDate);
-       if (normalizedDate > toDate) {
-         setToDate(normalizedDate);
-       }
-     }
-   };
-   ```
+**Option B: Fix in Frontend**
+Send `fromDate` directly instead of `subDays(fromDate, 1)`:
 
-3. **Update the Calendar onSelect for toDate:**
-   ```typescript
-   onSelect={(d) => d && setToDate(normalizeToLocalDate(d))}
-   ```
+```typescript
+// Change:
+_opening_date: openingDateStr,  // Currently subDays(fromDate, 1)
 
-4. **Update the initial date fetch to also normalize:**
-   ```typescript
-   // In the fetchLatestTradeDate useEffect
-   const latestDate = normalizeToLocalDate(new Date(year, month, day));
-   ```
+// To:
+_opening_date: startDateStr,    // Use fromDate directly
+```
+
+### Phase 4: Lazy Load Department Charts (Frontend)
+
+Only fetch department data when the chart is visible:
+
+```typescript
+// Turnover query - only fetch when chart tab is active
+const { data: departmentTurnover } = useQuery({
+  queryKey: ['accounting-turnover-by-department', openingDateStr, endDateStr],
+  queryFn: async () => { /* ... */ },
+  enabled: chartView === 'margin',  // Only fetch when margin chart is selected
+  staleTime: 5 * 60 * 1000,  // Cache for 5 minutes
+});
+
+// Commission query - only fetch when commission chart is selected  
+const { data: commissionByDept } = useQuery({
+  queryKey: ['accounting-commission-by-department', openingDateStr, endDateStr],
+  queryFn: async () => { /* ... */ },
+  enabled: chartView === 'commission',  // Only fetch when commission chart is selected
+  staleTime: 5 * 60 * 1000,  // Cache for 5 minutes
+});
+```
 
 ## Technical Details
 
-- The `normalizeToLocalDate()` function extracts year, month, and day components and creates a new Date at local midnight
-- This ensures the Date object represents the correct calendar date in the user's local timezone
-- The `date-fns format()` will then produce the expected date string
+### Files to Modify
 
-## Expected Outcome
+1. **`src/components/trade-history/AccountingTab.tsx`**
+   - Update retry logic to not retry on timeouts
+   - Fix date parameter naming (use `startDateStr` not `openingDateStr`)
+   - Add `staleTime` to reduce redundant fetches
+   - Ensure department chart queries only run when their chart is active
 
-After this fix:
-- Selecting "28 Jan" will correctly query data for `_tx_date: "2026-01-28"`
-- The opening date will correctly be `"2026-01-27"` (one day before)
-- The turnover, commission, and accounting data will display for the correct date range
+2. **Database Migration**
+   - Add `SET statement_timeout TO '60s'` to department functions
+   - Fix opening balance date logic in `get_accounting_data_v3`
+
+### Expected Outcome
+
+- Timeout errors will fail fast (60s) instead of hanging for 125s
+- No retry storms during gateway congestion
+- Opening balances will be fetched from the correct date
+- Department charts will only load when needed, reducing concurrent requests
+
+### Risk Assessment
+
+- **Low Risk**: Changes are defensive and don't alter core business logic
+- **Rollback**: If issues arise, the timeout settings can be reverted via another migration
 
