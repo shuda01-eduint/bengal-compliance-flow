@@ -231,7 +231,9 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         return;
       }
 
-      // Fetch base balances from immediate previous day's closing_balance (correct EOD chain)
+      // Fetch base balances from TWO days prior (the opening balance for the day we're verifying)
+      // prevDay is the day we're verifying, so we need the day BEFORE that for opening balances
+      const twoDaysAgo = format(addDays(dateToProcess, -2), "yyyy-MM-dd");
       const baseEod = await fetchAllRows<{
         investor_code: string;
         closing_balance: number;
@@ -239,11 +241,11 @@ export const BatchEodRunner = ({ onComplete }: BatchEodRunnerProps) => {
         supabase
           .from("eod_ledger_snapshots")
           .select("investor_code, closing_balance")
-          .eq("eod_date", prevDay)
+          .eq("eod_date", twoDaysAgo)
           .range(from, to)
       );
 
-      // Build base balance map from previous day's closing_balance
+      // Build base balance map from two days ago's closing_balance (= opening for prevDay)
       // For investors without previous EOD (new accounts), default to 0 (matching backend COALESCE behavior)
       const baseBalances = new Map<string, number>();
       baseEod?.forEach((row) => {
