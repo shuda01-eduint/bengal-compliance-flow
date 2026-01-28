@@ -1,86 +1,79 @@
 
 
-## Analysis: January 25 EOD Timeout Issue
+# Fix: Accounting Page Date Selection Off-by-One Bug
 
-### What's Happening
+## Problem Identified
 
-The EOD process is hitting an **HTTP gateway timeout** (~120 seconds) before the PostgreSQL query can complete. The database function has a 300-second timeout, but the Lovable Cloud HTTP layer has a stricter limit.
-
-| Date | Duration | Status |
-|------|----------|--------|
-| Jan 18-24 | 42-60 sec | Success |
-| Jan 25 | 125-145 sec | Timeout |
-
-### Why January 25 Is Slower
-
-1. **Larger Dataset**
-   - 31,065 trades on Jan 25 (vs 29,423 on Jan 22)
-   - 32,687 investors in the universe
-   - Data volume is growing daily
-
-2. **Cumulative Processing**
-   - Delta calculations scan trade_history twice (today vs yesterday)
-   - Opening balance lookups across 32K+ investors
-   - Holding snapshots insertion for all positions
-
-3. **HTTP Gateway Limit**
-   - Supabase HTTP proxy has ~120s timeout
-   - Cannot be increased from function settings
-   - The 300s statement_timeout only prevents DB-level runaway queries
-
-### Solution Options
-
-**Option A: Optimize the Current Function** (Recommended)
-- Add early exit conditions
-- Reduce redundant subqueries
-- Use temporary tables for intermediate results
-- Batch holdings snapshot insertion
-
-**Option B: Split Into Smaller Operations**
-- Create separate functions for each phase:
-  1. Calculate ledger balances (fast)
-  2. Snapshot holdings (separate call)
-  3. Record run history
-- Call sequentially from frontend
-
-**Option C: Use Background Processing**
-- Create an edge function for long-running EOD
-- Use database pg_cron for scheduling
-- More complex but handles any dataset size
-
-### Recommended Approach
-
-I recommend **Option A** - optimizing the function to complete within 90 seconds by:
-
-1. **Pre-computing delta values** in a single pass instead of subqueries
-2. **Removing redundant universe recalculation** 
-3. **Batching holdings inserts** in chunks of 5,000
-4. **Adding query planner hints** to use indexes efficiently
-
-### Technical Implementation
-
-Create a migration with an optimized version of `run_batch_eod`:
+When selecting **Jan 28** in the date picker, the Accounting page displays data for **Jan 27** instead. The console logs confirm:
 
 ```text
-+------------------+     +-------------------+     +------------------+
-| 1. Single CTE    | --> | 2. Batch Process  | --> | 3. Atomic Insert |
-| Universe + Deltas|     | Holdings (5K/batch)|    | Final Snapshots  |
-+------------------+     +-------------------+     +------------------+
-        |                         |                        |
-    ~15 seconds              ~30 seconds              ~20 seconds
-                                                    Total: ~65 seconds
+startDateStr: "2026-01-27"  (should be 2026-01-28)
+endDateStr: "2026-01-27"    (should be 2026-01-28)
+fromDate: "2026-01-26T18:00:00.000Z"  (Jan 27 midnight in UTC+6)
 ```
 
-Key optimizations:
-- Combine universe and delta calculation into single scan
-- Use `WITH` clauses for materialized intermediate results
-- Add `/*+ IndexScan */` hints for trade_history queries
-- Limit holdings snapshot to investors with actual positions
+The dates are consistently **one day behind** what the user selected.
 
-### After Fix
+## Root Cause
 
-Once deployed:
-1. January 25 EOD should complete in ~60-90 seconds
-2. Future dates will also benefit from optimization
-3. System can scale to larger datasets
+The `react-day-picker` Calendar component returns a Date object at **midnight UTC** for the selected day. When the user is in a timezone like Bangladesh (UTC+6), this UTC midnight becomes the **previous day** at 6:00 PM local time. The `date-fns format()` function then formats this according to local time, resulting in the previous day's date string.
+
+**Example flow:**
+1. User clicks "Jan 28" in calendar
+2. Calendar returns: `new Date('2026-01-28T00:00:00.000Z')` (midnight UTC)
+3. In Bangladesh (UTC+6), this is: Jan 28, 6:00 AM local
+4. But the Date object stores it as UTC, and when `format()` runs in local context, timezone handling causes the issue
+
+## Solution
+
+Normalize dates immediately when selected from the calendar by creating a new Date object using **local time components** rather than relying on the potentially timezone-shifted Date from the calendar.
+
+### Changes Required
+
+**File: `src/components/trade-history/AccountingTab.tsx`**
+
+1. **Add a date normalization utility function:**
+   ```typescript
+   // Normalize a date to local midnight to avoid timezone issues
+   const normalizeToLocalDate = (date: Date): Date => {
+     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+   };
+   ```
+
+2. **Update the `handleFromDateChange` function:**
+   ```typescript
+   const handleFromDateChange = (date: Date | undefined) => {
+     if (date) {
+       const normalizedDate = normalizeToLocalDate(date);
+       setFromDate(normalizedDate);
+       if (normalizedDate > toDate) {
+         setToDate(normalizedDate);
+       }
+     }
+   };
+   ```
+
+3. **Update the Calendar onSelect for toDate:**
+   ```typescript
+   onSelect={(d) => d && setToDate(normalizeToLocalDate(d))}
+   ```
+
+4. **Update the initial date fetch to also normalize:**
+   ```typescript
+   // In the fetchLatestTradeDate useEffect
+   const latestDate = normalizeToLocalDate(new Date(year, month, day));
+   ```
+
+## Technical Details
+
+- The `normalizeToLocalDate()` function extracts year, month, and day components and creates a new Date at local midnight
+- This ensures the Date object represents the correct calendar date in the user's local timezone
+- The `date-fns format()` will then produce the expected date string
+
+## Expected Outcome
+
+After this fix:
+- Selecting "28 Jan" will correctly query data for `_tx_date: "2026-01-28"`
+- The opening date will correctly be `"2026-01-27"` (one day before)
+- The turnover, commission, and accounting data will display for the correct date range
 
