@@ -138,6 +138,11 @@ const evaluateFormula = (formula: string, row: AccountingRow): number => {
 
 type ChartView = 'margin' | 'commission';
 
+// Normalize a date to local midnight to avoid timezone issues with react-day-picker
+const normalizeToLocalDate = (date: Date): Date => {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+};
+
 const AccountingTab = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
@@ -199,7 +204,8 @@ const AccountingTab = () => {
         const year = parseInt(dateStr.substring(0, 4));
         const month = parseInt(dateStr.substring(4, 6)) - 1;
         const day = parseInt(dateStr.substring(6, 8));
-        const latestDate = new Date(year, month, day);
+        // Normalize to local date to avoid timezone issues
+        const latestDate = normalizeToLocalDate(new Date(year, month, day));
         setFromDate(latestDate);
         setToDate(latestDate);
       }
@@ -222,10 +228,12 @@ const AccountingTab = () => {
   // Handler to sync toDate when fromDate changes (single day mode)
   const handleFromDateChange = (date: Date | undefined) => {
     if (date) {
-      setFromDate(date);
+      // Normalize to local midnight to avoid timezone issues
+      const normalizedDate = normalizeToLocalDate(date);
+      setFromDate(normalizedDate);
       // If user selects a from date after the to date, sync them
-      if (date > toDate) {
-        setToDate(date);
+      if (normalizedDate > toDate) {
+        setToDate(normalizedDate);
       }
     }
   };
@@ -1442,7 +1450,7 @@ const AccountingTab = () => {
                 <Calendar
                   mode="single"
                   selected={toDate}
-                  onSelect={(d) => d && setToDate(d)}
+                  onSelect={(d) => d && setToDate(normalizeToLocalDate(d))}
                   className="pointer-events-auto"
                 />
               </PopoverContent>
