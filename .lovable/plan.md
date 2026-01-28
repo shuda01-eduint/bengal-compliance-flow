@@ -1,125 +1,121 @@
 
 
-## Align Backend Opening Balance with Frontend Logic
+## Fix EOD Deposits/Withdrawals Logic + Baseline Alignment
 
-### The Problem
+### Problem Summary
 
-**Current Backend Logic (line 79-86, 137):**
+The `run_batch_eod` function produces incorrect closing balances because:
+
+1. **Cumulative vs Daily**: Trade files store **cumulative** deposit/withdrawal totals, but the EOD engine uses them as if they were daily values
+2. **Baseline Mismatch**: Investor 21519's baseline was imported incorrectly (462.28 vs -73.61)
+
+### Data Evidence
+
+| Date | Cumulative Deposits (trade_history) | Actual Daily Deposit (deposits_withdrawals) |
+|------|-------------------------------------|---------------------------------------------|
+| Jan 27 | 1,795,000 | 325,000 |
+| Jan 28 | 2,120,000 | 0 (no deposit) |
+
+The EOD engine is using 1,795,000 as the Jan 27 deposit instead of 325,000.
+
+### Solution
+
+**Option A: Use Delta Calculation (Recommended)**
+
+Calculate daily deposits/withdrawals by comparing today's cumulative value with yesterday's:
+
 ```sql
-prev_balances AS (
-  SELECT investor_code, closing_balance, cumulative_interest
-  FROM eod_ledger_snapshots
-  WHERE eod_date = v_prev_date  -- EXACT DATE MATCH ONLY
+-- Current (wrong):
+SELECT 
+  client_code,
+  MAX(total_deposits) AS deposits,  -- Gets cumulative!
+  MAX(total_withdrawals) AS withdrawals
+FROM trade_history
+WHERE trade_date = p_eod_date
+
+-- Fixed (delta calculation):
+WITH cumulative_today AS (
+  SELECT client_code, MAX(total_deposits) AS cum_dep, MAX(total_withdrawals) AS cum_wdl
+  FROM trade_history WHERE trade_date = p_eod_date
+  GROUP BY client_code
 ),
-...
-COALESCE(pb.closing_balance, 0) AS opening_balance  -- Falls back to 0
+cumulative_prev AS (
+  SELECT client_code, MAX(total_deposits) AS cum_dep, MAX(total_withdrawals) AS cum_wdl
+  FROM trade_history WHERE trade_date < p_eod_date
+  GROUP BY client_code
+)
+SELECT 
+  t.client_code,
+  COALESCE(t.cum_dep, 0) - COALESCE(p.cum_dep, 0) AS deposits,  -- Daily delta
+  COALESCE(t.cum_wdl, 0) - COALESCE(p.cum_wdl, 0) AS withdrawals
+FROM cumulative_today t
+LEFT JOIN cumulative_prev p ON p.client_code = t.client_code
 ```
 
-**Current Frontend Logic (already simplified):**
-```typescript
-// Uses lte + order desc to find MOST RECENT snapshot
-.lte('eod_date', dateStr)
-.order('eod_date', { ascending: false })
-.limit(1)
+**Option B: Use deposits_withdrawals Table**
 
-// Falls back to investors.ledger_balance, then 0
-```
-
-### The Fix
-
-Update `prev_balances` CTE to find the **most recent EOD snapshot** before the target date, then fall back to `investors.ledger_balance` instead of `0`:
+Switch back to using the `deposits_withdrawals` table which has correct daily values:
 
 ```sql
--- Previous day closing balances (use most recent available, not exact date)
-prev_balances AS (
-  SELECT DISTINCT ON (investor_code)
+daily_deposits AS (
+  SELECT 
     investor_code,
-    closing_balance,
-    cumulative_interest
-  FROM eod_ledger_snapshots
-  WHERE eod_date < p_eod_date  -- Any date before EOD date
-  ORDER BY investor_code, eod_date DESC  -- Get most recent per investor
-),
-
--- Opening balance assignment (with fallback chain)
-...
-COALESCE(pb.closing_balance, i.ledger_balance, 0) AS opening_balance
+    SUM(CASE WHEN transaction_type = 'Deposit' THEN amount ELSE 0 END) AS deposits,
+    SUM(CASE WHEN transaction_type = 'Withdrawal' THEN amount ELSE 0 END) AS withdrawals
+  FROM deposits_withdrawals
+  WHERE transaction_date = p_eod_date
+  GROUP BY investor_code
+)
 ```
 
-### Comparison Table
+### Recommendation: Hybrid Approach
 
-| Aspect | Current Backend | Proposed Backend | Frontend |
-|--------|-----------------|------------------|----------|
-| Lookup | `= v_prev_date` (exact) | `< p_eod_date` + `DESC LIMIT 1` | `lte` + `order desc` |
-| 1st Fallback | None (skips to 0) | `investors.ledger_balance` | `investors.ledger_balance` |
-| 2nd Fallback | `0` | `0` | `0` |
+Use **deposits_withdrawals** table as primary source (has correct daily values), with fallback to trade_history delta calculation for backwards compatibility.
 
-### Migration SQL
+### Implementation Steps
+
+1. **Update `run_batch_eod` function**
+   - Modify `daily_deposits` CTE to use delta calculation or deposits_withdrawals table
+   - Keep ledger_balance_snapshot capture from trade_history for audit
+
+2. **Fix baseline for affected investors**
+   - Update investor 21519: `ledger_balance = -73.61`
+   - Clear EOD snapshots from Jan 12 onward
+   - Re-run batch EOD to rebuild the chain
+
+3. **Validation**
+   - Verify Jan 28 closing for 21519 matches source: `-710,722.99`
+
+### Technical Details
+
+**Migration SQL (deposits_withdrawals approach):**
 
 ```sql
-CREATE OR REPLACE FUNCTION public.run_batch_eod(p_eod_date date, p_skip_existing boolean DEFAULT false)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = 'public'
-SET statement_timeout = '300s'
-AS $$
-DECLARE
-  -- ... existing declarations ...
-BEGIN
-  -- ... existing security checks ...
-  
-  WITH 
-  universe AS (
-    -- ... existing universe logic ...
-  ),
-  
-  -- UPDATED: Previous balances with flexible date lookup
-  prev_balances AS (
-    SELECT DISTINCT ON (investor_code)
-      investor_code,
-      closing_balance,
-      cumulative_interest
-    FROM eod_ledger_snapshots
-    WHERE eod_date < p_eod_date
-    ORDER BY investor_code, eod_date DESC
-  ),
-  
-  -- ... existing daily_deposits, daily_trades CTEs ...
-  
-  snapshots AS (
-    SELECT 
-      u.investor_code,
-      -- ... other fields ...
-      -- UPDATED: Fallback chain for opening balance
-      COALESCE(pb.closing_balance, im.ledger_balance, 0) AS opening_balance,
-      -- ... rest of calculations using new opening_balance ...
-    FROM universe u
-    LEFT JOIN prev_balances pb ON pb.investor_code = u.investor_code
-    LEFT JOIN daily_deposits dd ON dd.investor_code = u.investor_code
-    LEFT JOIN daily_trades dt ON dt.investor_code = u.investor_code
-    LEFT JOIN investor_meta im ON im.investor_code = u.investor_code
-  ),
-  -- ... rest of function ...
+-- Replace daily_deposits CTE
+daily_deposits AS (
+  SELECT 
+    investor_code,
+    COALESCE(SUM(CASE WHEN transaction_type = 'Deposit' THEN amount ELSE 0 END), 0) AS deposits,
+    COALESCE(SUM(CASE WHEN transaction_type = 'Withdrawal' THEN amount ELSE 0 END), 0) AS withdrawals
+  FROM deposits_withdrawals
+  WHERE transaction_date = p_eod_date
+  GROUP BY investor_code
+),
+
+-- Keep trade_history ledger snapshot for audit (separate CTE)
+trade_ledger_snapshot AS (
+  SELECT 
+    client_code AS investor_code,
+    MAX(ledger_balance_snapshot) AS ledger_snapshot
+  FROM trade_history
+  WHERE trade_date = p_eod_date
+  GROUP BY client_code
+)
 ```
 
-### Changes Summary
+### Risk Assessment
 
-1. **`prev_balances` CTE**: 
-   - Change `WHERE eod_date = v_prev_date` → `WHERE eod_date < p_eod_date`
-   - Add `DISTINCT ON (investor_code)` with `ORDER BY investor_code, eod_date DESC`
-
-2. **`snapshots` CTE**:
-   - Add `i.ledger_balance` to `investor_meta` select
-   - Change `COALESCE(pb.closing_balance, 0)` → `COALESCE(pb.closing_balance, im.ledger_balance, 0)`
-
-3. **Closing balance calculation**:
-   - Uses the new `opening_balance` which now has proper fallback
-
-### Benefits
-
-- **Frontend/Backend alignment**: Both use same fallback chain
-- **Gap resilience**: Missing EOD dates won't break calculations
-- **Proper baseline**: Uses imported `ledger_balance` for accounts without EOD history
-- **New accounts**: Still defaults to `0` only when truly no data exists
+- **Low Risk**: Using deposits_withdrawals is the cleaner approach as it already has correct daily values
+- **Data Integrity**: Must clear and re-run EOD for all affected dates after fixing
+- **Verification**: Should validate against source system for multiple investors, not just 21519
 
