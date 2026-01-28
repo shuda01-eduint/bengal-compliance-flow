@@ -1,69 +1,86 @@
 
 
-## Fix: Type Mismatch in EOD Function
+## Analysis: January 25 EOD Timeout Issue
 
-### Problem Summary
+### What's Happening
 
-The database error `operator does not exist: text = date` occurs because:
+The EOD process is hitting an **HTTP gateway timeout** (~120 seconds) before the PostgreSQL query can complete. The database function has a 300-second timeout, but the Lovable Cloud HTTP layer has a stricter limit.
 
-- `trade_history.trade_date` is stored as **TEXT** in format `YYYYMMDD` (e.g., `'20260113'`)
-- `p_eod_date` is passed as **DATE** type
-- PostgreSQL cannot compare these types directly
+| Date | Duration | Status |
+|------|----------|--------|
+| Jan 18-24 | 42-60 sec | Success |
+| Jan 25 | 125-145 sec | Timeout |
 
-### Current Database State
+### Why January 25 Is Slower
 
-The function has **6 locations** where this comparison fails:
+1. **Larger Dataset**
+   - 31,065 trades on Jan 25 (vs 29,423 on Jan 22)
+   - 32,687 investors in the universe
+   - Data volume is growing daily
 
-| Line | Code | Context |
-|------|------|---------|
-| 39 | `WHERE trade_date = p_eod_date` | Trade files count |
-| 44-45 | `WHERE trade_date = p_eod_date` | Deposit records count |
-| 55 | `WHERE trade_date = p_eod_date` | Universe CTE - trades |
-| 87 | `WHERE trade_date = p_eod_date` | Daily deposits CTE |
-| 99 | `WHERE trade_date = p_eod_date` | Daily trades CTE |
+2. **Cumulative Processing**
+   - Delta calculations scan trade_history twice (today vs yesterday)
+   - Opening balance lookups across 32K+ investors
+   - Holding snapshots insertion for all positions
 
-### Solution
+3. **HTTP Gateway Limit**
+   - Supabase HTTP proxy has ~120s timeout
+   - Cannot be increased from function settings
+   - The 300s statement_timeout only prevents DB-level runaway queries
 
-Replace all direct date comparisons with text-formatted comparisons:
+### Solution Options
 
-```sql
--- Before (BROKEN):
-WHERE trade_date = p_eod_date
+**Option A: Optimize the Current Function** (Recommended)
+- Add early exit conditions
+- Reduce redundant subqueries
+- Use temporary tables for intermediate results
+- Batch holdings snapshot insertion
 
--- After (FIXED):
-WHERE trade_date = TO_CHAR(p_eod_date, 'YYYYMMDD')
+**Option B: Split Into Smaller Operations**
+- Create separate functions for each phase:
+  1. Calculate ledger balances (fast)
+  2. Snapshot holdings (separate call)
+  3. Record run history
+- Call sequentially from frontend
+
+**Option C: Use Background Processing**
+- Create an edge function for long-running EOD
+- Use database pg_cron for scheduling
+- More complex but handles any dataset size
+
+### Recommended Approach
+
+I recommend **Option A** - optimizing the function to complete within 90 seconds by:
+
+1. **Pre-computing delta values** in a single pass instead of subqueries
+2. **Removing redundant universe recalculation** 
+3. **Batching holdings inserts** in chunks of 5,000
+4. **Adding query planner hints** to use indexes efficiently
+
+### Technical Implementation
+
+Create a migration with an optimized version of `run_batch_eod`:
+
+```text
++------------------+     +-------------------+     +------------------+
+| 1. Single CTE    | --> | 2. Batch Process  | --> | 3. Atomic Insert |
+| Universe + Deltas|     | Holdings (5K/batch)|    | Final Snapshots  |
++------------------+     +-------------------+     +------------------+
+        |                         |                        |
+    ~15 seconds              ~30 seconds              ~20 seconds
+                                                    Total: ~65 seconds
 ```
 
-### Implementation
+Key optimizations:
+- Combine universe and delta calculation into single scan
+- Use `WITH` clauses for materialized intermediate results
+- Add `/*+ IndexScan */` hints for trade_history queries
+- Limit holdings snapshot to investors with actual positions
 
-Create a migration that replaces the entire `run_batch_eod` function with the corrected version. The key changes:
-
-1. Add a local variable to hold the formatted date:
-   ```sql
-   v_eod_date_text TEXT := TO_CHAR(p_eod_date, 'YYYYMMDD');
-   ```
-
-2. Replace all `trade_date = p_eod_date` with `trade_date = v_eod_date_text`
-
-3. Keep the deposits_withdrawals comparison as DATE (since that column IS a date type)
-
-### What Won't Change
-
-- Function signature: `(p_eod_date date, p_skip_existing boolean)`
-- Business logic (delta calculation, opening balance chain, etc.)
-- 300-second timeout and SECURITY DEFINER settings
-- All table relationships and output format
-
-### After This Fix
+### After Fix
 
 Once deployed:
-1. Re-run EOD for January 13 - should complete successfully
-2. Continue with remaining dates through January 28
-3. Verify investor 21519's closing balance matches expected **-710,722.99**
-
-### Risk Assessment
-
-- **Low Risk**: This is a type conversion fix only, no logic changes
-- **Tested Pattern**: The same `TO_CHAR` approach was already in the delta-calculation version (line 32)
-- **Immediate Effect**: Will work as soon as migration is deployed
+1. January 25 EOD should complete in ~60-90 seconds
+2. Future dates will also benefit from optimization
+3. System can scale to larger datasets
 
