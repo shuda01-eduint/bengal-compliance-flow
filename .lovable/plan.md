@@ -1,164 +1,152 @@
 
-# Fix: EOD Deposit/Withdrawal Calculation Bug
+# Add Ledger Balance Column and Historical Date Selection to Margin Loan Client Accounts
 
-## Problem Identified
+## Overview
+Enhance the Client Accounts tab in the Margin Loan Management page to:
+1. Add a **Ledger Balance** column showing the actual closing balance (negative values for margin accounts)
+2. Add a **date picker** to view margin account data for any historical date (currently only shows latest)
+3. Use the stored `cumulative_interest` from EOD snapshots instead of dynamically calculating it
 
-The `run_batch_eod` function incorrectly calculates daily deposits when there are gaps in trade data. This causes cumulative values to be treated as daily deltas.
+## Current State Analysis
+- The `get_margin_client_accounts` RPC only fetches the **latest** EOD snapshot data
+- It calculates accrued interest dynamically: `(interest_rate / 365 / 100) * ABS(ledger_balance) * 90`
+- The stored `cumulative_interest` in `eod_ledger_snapshots` is not being used
+- No date parameter exists to query historical data
+- Table shows: Investor Code, Investor Name, RM Name, Margin Loan, Accrued Interest, Portfolio Value, Equity, Margin Ratio %, Status
 
-### Root Cause Analysis
+## Implementation Plan
 
-| Date | Actual Daily Deposit | Trade History Delta | DW Table | EOD Used | Issue |
-|------|---------------------|---------------------|----------|----------|-------|
-| Jan 18 | 0 | 995,000 (gap: no prev day) | NULL | 995,000 | **BUG** - cumulative treated as daily |
-| Jan 20 | 0 | 800,000 (1.795M - 0.995M) | NULL | 800,000 | **BUG** - wrong delta due to gap |
+### Phase 1: Update Database RPC Function
 
-The current logic:
+Modify `get_margin_client_accounts` to:
+- Accept a new `p_as_of_date` parameter (defaults to latest date if NULL)
+- Return `ledger_balance` (closing_balance) as a new column
+- Use stored `cumulative_interest` instead of calculating dynamically
+- Query snapshots for the specified date instead of always using the latest
+
 ```sql
-GREATEST(dw_deposits, th_deposits_delta)
+CREATE OR REPLACE FUNCTION public.get_margin_client_accounts(
+  p_search text DEFAULT '',
+  p_account_type text DEFAULT 'all',
+  p_statuses text[] DEFAULT ARRAY['all'],
+  p_limit integer DEFAULT 1000,
+  p_offset integer DEFAULT 0,
+  p_as_of_date date DEFAULT NULL  -- NEW: Optional date parameter
+)
+RETURNS TABLE(
+  investor_code text,
+  investor_name text,
+  rm_name text,
+  account_type text,
+  ledger_balance numeric,      -- NEW: Actual closing balance
+  current_exposure numeric,
+  accrued_interest numeric,
+  portfolio_value numeric,
+  equity numeric,
+  margin_ratio numeric,
+  status text
+)
 ```
 
-Picks the trade history delta when `deposits_withdrawals` has no record, but that delta is wrong when there's a gap in trade dates.
+### Phase 2: Update Frontend Component
 
-### Impact on Investor 21519
+Modify `ClientAccountsTab.tsx`:
 
-- **Stored closing balance**: 56.55 lac
-- **Correct closing balance**: -6.97 lac (negative = receivable)
-- **Error**: ~63.5 lac overstatement due to deposit inflation
+1. **Add Date Picker** in the filter section:
+   - Add a date selector with calendar popup
+   - Default to "Latest" (null) which uses the most recent EOD date
+   - Show selected date or "Latest" label
 
-## Solution
+2. **Add Ledger Balance Column** to the table:
+   - Insert between "RM Name" and "Margin Loan"
+   - Display the actual balance (negative for margin accounts)
+   - Color-code: red for negative values
 
-### Phase 1: Fix Delta Calculation Logic
+3. **Update Query** to pass the selected date:
+   ```typescript
+   const { data: accounts, isLoading, refetch } = useQuery({
+     queryKey: ['margin-client-accounts', selectedStatuses, accountTypeFilter, searchTerm, selectedDate],
+     queryFn: async () => {
+       const { data, error } = await supabase.rpc('get_margin_client_accounts', {
+         p_search: searchTerm,
+         p_account_type: accountTypeFilter,
+         p_statuses: selectedStatuses.includes("all") ? ["all"] : selectedStatuses,
+         p_limit: 10000,
+         p_offset: 0,
+         p_as_of_date: selectedDate // NEW: Pass selected date
+       });
+       // ...
+     }
+   });
+   ```
 
-Change the priority order - only use trade history delta as a fallback when deposits_withdrawals is unavailable **AND** the delta is positive (indicates real activity, not gap artifact).
+## UI Changes
 
-```sql
--- Current buggy logic:
-GREATEST(dw_deposits, th_deposits)
-
--- Fixed logic - prefer deposits_withdrawals, validate trade history deltas:
-CASE 
-  WHEN COALESCE(dw.deposits, 0) > 0 THEN dw.deposits
-  WHEN th_deposits > 0 AND pdt.prev_deposits IS NOT NULL THEN th_deposits  
-  ELSE 0  -- No valid source, assume zero
-END
+### Filter Bar (Updated)
+```
++------------------------------------------------------------------+
+| [Search by investor code...]  [All Types v] [All Status v]       |
+|                                                                  |
+| [Date: Latest v] [Jan 28] (calendar popup)     [Refresh]         |
++------------------------------------------------------------------+
 ```
 
-Actually, the better fix is to **always prefer `deposits_withdrawals`** and only use trade history as supplementary validation:
+### Table Columns (Updated)
+| Investor Code | Investor Name | RM Name | Ledger Balance | Margin Loan | Accrued Interest | Portfolio Value | Equity | Margin Ratio % | Status | Actions |
 
+- **Ledger Balance**: Shows actual closing balance (e.g., "-৳67.37 Cr" for negative)
+- **Margin Loan**: Shows absolute value of negative balance (exposure)
+- **Accrued Interest**: Uses stored cumulative_interest from EOD snapshots
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `supabase/migrations/` | New migration to update `get_margin_client_accounts` RPC |
+| `src/components/margin-loan/ClientAccountsTab.tsx` | Add date picker, ledger balance column, update query |
+| `src/integrations/supabase/types.ts` | Auto-updates with new RPC signature |
+
+## Technical Details
+
+### RPC Function Changes
 ```sql
--- Simplified fix: deposits_withdrawals is the source of truth for daily transactions
-COALESCE(dw.deposits, 0) as total_deposits,
-COALESCE(dw.withdrawals, 0) as total_withdrawals,
-```
-
-### Phase 2: Fix Investor 21519 Data
-
-After fixing the function, we need to:
-
-1. Clear EOD snapshots for investor 21519 from Jan 12 onwards
-2. Re-run Batch EOD for the full date range
-
-```sql
--- Clear existing incorrect snapshots
-DELETE FROM eod_ledger_snapshots 
-WHERE investor_code = '21519' AND eod_date >= '2026-01-12';
-
--- Then re-run Batch EOD via the UI
-```
-
-## Technical Implementation
-
-### Database Migration
-
-```sql
-CREATE OR REPLACE FUNCTION public.run_batch_eod(p_eod_date date, p_skip_existing boolean DEFAULT false)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = 'public'
-SET statement_timeout = '300s'
-AS $function$
--- ... existing declarations ...
-
-BEGIN
-  -- ... existing security and cleanup logic ...
-
-  WITH 
-  -- ... existing CTEs for prev_day_totals, today_totals, today_trades ...
-  
-  -- Deposit/withdrawal deltas from deposits_withdrawals table (case-insensitive)
-  dw_deltas AS MATERIALIZED (
-    SELECT
-      investor_code,
-      SUM(CASE WHEN LOWER(transaction_type) = 'deposit' THEN amount ELSE 0 END) as deposits,
-      SUM(CASE WHEN LOWER(transaction_type) = 'withdrawal' THEN amount ELSE 0 END) as withdrawals
-    FROM deposits_withdrawals
-    WHERE transaction_date = p_eod_date
-    GROUP BY investor_code
-  ),
-  
-  -- ... existing universe and prev_closing CTEs ...
-  
-  final_calc AS (
-    SELECT
-      u.investor_code,
-      -- ... existing columns ...
-      
-      -- FIX: Use deposits_withdrawals as primary source, not GREATEST()
-      COALESCE(dw.deposits, 0) as daily_deposits,
-      COALESCE(dw.withdrawals, 0) as daily_withdrawals,
-      
-      -- Trade history delta kept for audit/validation only
-      CASE 
-        WHEN pdt.prev_deposits IS NOT NULL 
-        THEN COALESCE(tt.today_deposits, 0) - pdt.prev_deposits
-        ELSE 0 
-      END as th_deposits_delta,
-      
-      -- ... rest of columns ...
-    FROM universe u
-    -- ... existing JOINs ...
+-- Key changes in the CTE:
+snapshot_for_date AS (
+  SELECT DISTINCT ON (els.investor_code)
+    els.investor_code,
+    els.investor_name,
+    els.rm_name,
+    els.account_type,
+    els.closing_balance as ledger_balance,
+    els.cumulative_interest,  -- Use stored value
+    els.interest_rate,
+    els.eod_date
+  FROM eod_ledger_snapshots els
+  WHERE (p_as_of_date IS NULL OR els.eod_date <= p_as_of_date)
+  ORDER BY els.investor_code, els.eod_date DESC
+),
+portfolio_values AS (
+  SELECT 
+    ehs.investor_code,
+    SUM(COALESCE(ehs.market_value, 0)) as total_portfolio_value
+  FROM eod_holding_snapshots ehs
+  WHERE ehs.eod_date = (
+    SELECT MAX(eod_date) 
+    FROM eod_holding_snapshots 
+    WHERE (p_as_of_date IS NULL OR eod_date <= p_as_of_date)
   )
-  INSERT INTO eod_ledger_snapshots (...)
-  SELECT
-    p_eod_date,
-    investor_code,
-    -- ... existing columns ...
-    
-    -- FIX: Use daily_deposits/withdrawals from deposits_withdrawals, not GREATEST
-    daily_deposits as total_deposits,
-    daily_withdrawals as total_withdrawals,
-    
-    -- FIX: Closing balance uses correct daily values
-    opening_balance 
-      + daily_deposits 
-      - daily_withdrawals
-      + gross_sell 
-      - gross_buy 
-      - total_commission as closing_balance,
-    
-    -- ... rest of insert ...
-  FROM final_calc;
-  
-  -- ... rest of function ...
-END;
-$function$;
+  GROUP BY ehs.investor_code
+)
 ```
 
-### Files to Modify
-
-1. **Database Migration**: Update `run_batch_eod` function to use `deposits_withdrawals` as the sole source for daily deposit/withdrawal values
-
-2. **Data Correction**: After migration, clear and rebuild EOD chain for affected investors
+### Frontend Date State
+```typescript
+const [selectedDate, setSelectedDate] = useState<Date | null>(null); // null = Latest
+```
 
 ## Expected Outcome
 
-- Investor 21519 Jan 28 closing balance: **-6.97 lac** (correct negative balance)
-- No more deposit inflation from trade history gaps
-- EOD chain integrity maintained
-
-## Risk Assessment
-
-- **Medium Risk**: This changes core EOD calculation logic
-- **Mitigation**: The fix makes the source of truth clearer (deposits_withdrawals table)
-- **Rollback**: If issues arise, revert migration and clear/rebuild EOD data
+1. Users can view margin account data for any historical date
+2. Ledger Balance column shows actual balance (helpful for seeing the sign)
+3. Accrued Interest uses actual stored cumulative values
+4. Default behavior remains "Latest" for backwards compatibility
