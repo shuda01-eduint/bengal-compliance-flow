@@ -103,11 +103,22 @@ export function ClientAccountsTab() {
       const { data: ledgerData, error: ledgerError } = await query;
       if (ledgerError) throw ledgerError;
 
-      // Get portfolio values from eod_holding_snapshots for the same date
+      // Get the latest available holding date (may differ from ledger date)
+      const { data: latestHoldingDate } = await supabase
+        .from('eod_holding_snapshots')
+        .select('eod_date')
+        .lte('eod_date', targetDate)
+        .order('eod_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const holdingDate = latestHoldingDate?.eod_date || targetDate;
+
+      // Get portfolio values from the available date
       const { data: holdingData } = await supabase
         .from('eod_holding_snapshots')
         .select('investor_code, market_value')
-        .eq('eod_date', targetDate);
+        .eq('eod_date', holdingDate);
 
       // Aggregate portfolio values by investor
       const portfolioMap = new Map<string, number>();
