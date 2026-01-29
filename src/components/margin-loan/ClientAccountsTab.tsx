@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Eye, RefreshCw, Users, TrendingUp, Wallet, ArrowUpDown, Calendar } from "lucide-react";
+import { Search, Eye, RefreshCw, Users, TrendingUp, Wallet, ArrowUpDown, Calendar, CalendarDays } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,19 +44,116 @@ export function ClientAccountsTab() {
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [startDate, setStartDate] = useState<Date | undefined>(subDays(new Date(), 30));
   const [endDate, setEndDate] = useState<Date | undefined>(new Date());
+  const [asOfDate, setAsOfDate] = useState<Date | undefined>(undefined); // undefined = Latest
 
+  // Helper to normalize date for query
+  const normalizeToLocalDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Query eod_ledger_snapshots directly for historical data support
   const { data: accounts, isLoading, refetch } = useQuery({
-    queryKey: ['margin-client-accounts', selectedStatuses, accountTypeFilter, searchTerm],
+    queryKey: ['margin-client-accounts-direct', selectedStatuses, accountTypeFilter, searchTerm, asOfDate?.toISOString()],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_margin_client_accounts', {
-        p_search: searchTerm,
-        p_account_type: accountTypeFilter,
-        p_statuses: selectedStatuses.includes("all") ? ["all"] : selectedStatuses,
-        p_limit: 10000,
-        p_offset: 0
+      // First get the target date (latest or selected)
+      let targetDate: string;
+      
+      if (asOfDate) {
+        targetDate = normalizeToLocalDate(asOfDate);
+      } else {
+        // Get latest EOD date
+        const { data: latestDate } = await supabase
+          .from('eod_ledger_snapshots')
+          .select('eod_date')
+          .order('eod_date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        targetDate = latestDate?.eod_date || normalizeToLocalDate(new Date());
+      }
+
+      // Query ledger snapshots for the target date
+      let query = supabase
+        .from('eod_ledger_snapshots')
+        .select(`
+          investor_code,
+          investor_name,
+          rm_name,
+          account_type,
+          closing_balance,
+          cumulative_interest,
+          interest_rate,
+          eod_date
+        `)
+        .eq('eod_date', targetDate);
+
+      // Apply search filter
+      if (searchTerm) {
+        query = query.ilike('investor_code', `%${searchTerm}%`);
+      }
+
+      // Apply account type filter
+      if (accountTypeFilter !== 'all') {
+        query = query.eq('account_type', accountTypeFilter);
+      }
+
+      const { data: ledgerData, error: ledgerError } = await query;
+      if (ledgerError) throw ledgerError;
+
+      // Get portfolio values from eod_holding_snapshots for the same date
+      const { data: holdingData } = await supabase
+        .from('eod_holding_snapshots')
+        .select('investor_code, market_value')
+        .eq('eod_date', targetDate);
+
+      // Aggregate portfolio values by investor
+      const portfolioMap = new Map<string, number>();
+      holdingData?.forEach(h => {
+        const current = portfolioMap.get(h.investor_code) || 0;
+        portfolioMap.set(h.investor_code, current + (h.market_value || 0));
       });
-      if (error) throw error;
-      return data || [];
+
+      // Transform and filter data
+      const results = (ledgerData || [])
+        .filter(row => (row.closing_balance || 0) < 0) // Only margin accounts (negative balance)
+        .map(row => {
+          const ledgerBalance = row.closing_balance || 0;
+          const currentExposure = Math.abs(ledgerBalance);
+          const accruedInterest = row.cumulative_interest || 0;
+          const portfolioValue = portfolioMap.get(row.investor_code) || 0;
+          const equity = portfolioValue - currentExposure - accruedInterest;
+          const marginRatio = portfolioValue > 0 ? (currentExposure / portfolioValue) * 100 : 0;
+
+          // Determine status based on equity and margin ratio
+          let status = 'active';
+          if (equity < 0) status = 'negative_equity';
+          else if (marginRatio >= 90) status = 'critical';
+          else if (marginRatio >= 70) status = 'suspended';
+
+          return {
+            investor_code: row.investor_code,
+            investor_name: row.investor_name,
+            rm_name: row.rm_name,
+            account_type: row.account_type,
+            ledger_balance: ledgerBalance,
+            current_exposure: currentExposure,
+            accrued_interest: accruedInterest,
+            portfolio_value: portfolioValue,
+            equity,
+            margin_ratio: marginRatio,
+            status
+          };
+        });
+
+      // Apply status filter
+      if (!selectedStatuses.includes('all') && selectedStatuses.length > 0) {
+        return results.filter(r => selectedStatuses.includes(r.status));
+      }
+
+      return results;
     }
   });
 
@@ -306,6 +403,35 @@ export function ClientAccountsTab() {
               </PopoverContent>
             </Popover>
 
+            {/* As Of Date Picker */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-[180px] justify-start">
+                  <CalendarDays className="h-4 w-4 mr-2" />
+                  {asOfDate ? format(asOfDate, "MMM d, yyyy") : "Latest"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <div className="p-2 border-b">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="w-full justify-start"
+                    onClick={() => setAsOfDate(undefined)}
+                  >
+                    Show Latest
+                  </Button>
+                </div>
+                <CalendarComponent
+                  mode="single"
+                  selected={asOfDate}
+                  onSelect={setAsOfDate}
+                  initialFocus
+                  className="p-3 pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
+
             <Button variant="outline" onClick={() => refetch()}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
@@ -334,6 +460,7 @@ export function ClientAccountsTab() {
                     <TableHead>Investor Code</TableHead>
                     <TableHead>Investor Name</TableHead>
                     <TableHead>RM Name</TableHead>
+                    <TableHead className="text-right">Ledger Balance</TableHead>
                     <TableHead className="text-right">Margin Loan</TableHead>
                     <TableHead className="text-right">Accrued Interest</TableHead>
                     <TableHead className="text-right">Portfolio Value</TableHead>
@@ -355,6 +482,9 @@ export function ClientAccountsTab() {
                       <TableCell className="max-w-[150px] truncate">
                         {account.rm_name || '-'}
                       </TableCell>
+                      <TableCell className={cn("text-right font-medium", (account.ledger_balance || 0) < 0 && "text-red-400")}>
+                        {formatCurrency(account.ledger_balance || 0)}
+                      </TableCell>
                       <TableCell className="text-right">
                         {formatCurrency(account.current_exposure || 0)}
                       </TableCell>
@@ -364,10 +494,10 @@ export function ClientAccountsTab() {
                       <TableCell className="text-right">
                         {formatCurrency(account.portfolio_value || 0)}
                       </TableCell>
-                      <TableCell className={`text-right font-medium ${(account.equity || 0) < 0 ? 'text-red-400' : ''}`}>
+                      <TableCell className={cn("text-right font-medium", (account.equity || 0) < 0 && "text-red-400")}>
                         {formatCurrency(account.equity || 0)}
                       </TableCell>
-                      <TableCell className={`text-right font-medium ${getUtilizationColor(Math.abs(account.margin_ratio || 0))}`}>
+                      <TableCell className={cn("text-right font-medium", getUtilizationColor(Math.abs(account.margin_ratio || 0)))}>
                         {(account.margin_ratio || 0).toFixed(2)}%
                       </TableCell>
                       <TableCell>{getStatusBadge(account.status || 'active')}</TableCell>
@@ -384,7 +514,7 @@ export function ClientAccountsTab() {
                     </TableRow>
                   )) : (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                         No margin accounts found
                       </TableCell>
                     </TableRow>
