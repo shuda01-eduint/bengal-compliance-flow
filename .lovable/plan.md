@@ -1,64 +1,73 @@
 
+## What’s happening (why investor 3008 still shows portfolio value = 0)
 
-# Fix: Portfolio Value Shows 0 Due to Date Mismatch
+- Your holdings snapshots are **huge** for the latest holdings date (**~74,877 rows** on 2026-01-28).
+- In the current code, the Client Accounts tab runs:
 
-## Problem
-Investor **3008** and others show **portfolio value = 0** in the Client Accounts tab, even though holdings data exists.
+  - Fetch ledger snapshots for the selected/latest date (fine)
+  - Fetch **all holdings rows for that date**:
+    - `select investor_code, market_value where eod_date = holdingDate`
 
-## Root Cause
-The two snapshot tables have **different latest dates**:
+- The backend API has a **default 1000-row cap per request**.  
+  So the “all holdings rows” request returns only the **first 1000** holdings rows (arbitrary order), which often **does not include investor 3008**, so the app thinks 3008 has no holdings and shows 0.
 
-| Table | Latest Date | Records |
-|-------|-------------|---------|
-| `eod_ledger_snapshots` | **Jan 29** | Has data |
-| `eod_holding_snapshots` | **Jan 28** | Has data |
+We confirmed in the database that investor **3008 does have holdings**:
+- `eod_holding_snapshots` for 3008 on 2026-01-28 totals **23,706,100** (≈ ৳2.37 Cr).
 
-The current code queries both tables using the **same date** (from ledger snapshots = Jan 29). Since there are **0 holding records** for Jan 29, all portfolio values are 0.
+## Goal
 
-## Solution
-Modify the query logic to get portfolio values from the **latest available date** in `eod_holding_snapshots` that is **less than or equal to** the target date.
+Make portfolio values reliable by ensuring the holdings query:
+1) only fetches holdings for the investors currently being displayed (or searched), and  
+2) paginates through results so we don’t lose rows to the 1000-row cap.
 
-### Code Change in `ClientAccountsTab.tsx`
+## Implementation approach (no backend changes)
 
-**Current (broken):**
-```typescript
-// Get portfolio values from eod_holding_snapshots for the same date
-const { data: holdingData } = await supabase
-  .from('eod_holding_snapshots')
-  .select('investor_code, market_value')
-  .eq('eod_date', targetDate);  // ← Jan 29 has 0 records!
-```
+### 1) Change holdings fetch to only request holdings for the ledger investors we already fetched
+In `src/components/margin-loan/ClientAccountsTab.tsx`, after `ledgerData` is loaded:
 
-**Fixed:**
-```typescript
-// Get the latest available holding date (may differ from ledger date)
-const { data: latestHoldingDate } = await supabase
-  .from('eod_holding_snapshots')
-  .select('eod_date')
-  .lte('eod_date', targetDate)  // ← Find latest available date up to targetDate
-  .order('eod_date', { ascending: false })
-  .limit(1)
-  .maybeSingle();
+- Build a unique list:
+  - `const investorCodes = [...new Set((ledgerData ?? []).map(r => r.investor_code))];`
 
-const holdingDate = latestHoldingDate?.eod_date || targetDate;
+- Fetch holdings using:
+  - `.eq('eod_date', holdingDate)`
+  - `.in('investor_code', investorCodes)`
 
-// Get portfolio values from the available date
-const { data: holdingData } = await supabase
-  .from('eod_holding_snapshots')
-  .select('investor_code, market_value')
-  .eq('eod_date', holdingDate);  // ← Use Jan 28 if Jan 29 not available
-```
+This alone will fix the “search 3008 => portfolio 0” case because the holdings request becomes tiny (only holdings rows for that investor).
 
-## Files to Modify
+### 2) Add pagination for the holdings query using `.range(from, to)`
+Even after filtering by investorCodes, the result can still exceed 1000 rows (many investors × multiple securities). So we will:
 
-| File | Change |
-|------|--------|
-| `src/components/margin-loan/ClientAccountsTab.tsx` | Query holdings from latest available date ≤ target date |
+- Set `PAGE_SIZE = 1000`
+- Loop:
+  - request `.range(offset, offset + PAGE_SIZE - 1)` with a stable `.order(...)`
+  - append results
+  - stop when returned rows `< PAGE_SIZE`
 
-## Expected Outcome
+This guarantees we fetch the complete holdings set for the current investorCodes list.
 
-After the fix:
-- **3008** will show portfolio value of **৳2.37 Cr** (23.71M)
-- All investors will correctly show their holdings-based portfolio values
-- The system gracefully handles date gaps between ledger and holding snapshots
+### 3) (Small UX clarity) Show which holdings date is being used
+Because ledger date and holdings date can differ, we’ll optionally display something like:
+- “Portfolio values as of: Jan 28, 2026” next to the As-Of selector, when holdings lag behind.
 
+This reduces “why doesn’t it match” confusion.
+
+## Files to change
+
+- `src/components/margin-loan/ClientAccountsTab.tsx`
+  - Update holdings query:
+    - add `.in('investor_code', investorCodes)`
+    - add pagination loop with `.range()`
+    - (optional) show holdings date used in the UI
+
+## Testing checklist (what you should verify in the UI)
+
+1) Go to **Margin Loan → Client Accounts**
+2) Search **3008**
+3) Confirm **Portfolio Value ≈ ৳2.37 Cr** (not 0)
+4) Clear search and try a few random investors; verify portfolio values are no longer frequently 0 (unless they truly have no holdings)
+5) Switch As-Of date and confirm portfolio value follows the latest available holdings snapshot ≤ that date
+
+## Notes / constraints
+
+- This fix stays fully “frontend-only” and avoids any backend/schema changes.
+- It also improves performance because we stop fetching tens of thousands of holdings rows when the user is just viewing a small filtered subset (like searching a single investor).
