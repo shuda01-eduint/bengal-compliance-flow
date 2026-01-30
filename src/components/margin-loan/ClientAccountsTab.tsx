@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, Eye, RefreshCw, Users, TrendingUp, Wallet, ArrowUpDown, Calendar, CalendarDays } from "lucide-react";
+import { Search, Eye, RefreshCw, Users, TrendingUp, Wallet, ArrowUpDown, Calendar, CalendarDays, Info } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +28,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format, subDays } from "date-fns";
 import { cn } from "@/lib/utils";
+import { fetchAllRows } from "@/lib/supabase-utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All Status" },
@@ -55,7 +57,7 @@ export function ClientAccountsTab() {
   };
 
   // Query eod_ledger_snapshots directly for historical data support
-  const { data: accounts, isLoading, refetch } = useQuery({
+  const { data: queryResult, isLoading, refetch } = useQuery({
     queryKey: ['margin-client-accounts-direct', selectedStatuses, accountTypeFilter, searchTerm, asOfDate?.toISOString()],
     queryFn: async () => {
       // First get the target date (latest or selected)
@@ -103,6 +105,14 @@ export function ClientAccountsTab() {
       const { data: ledgerData, error: ledgerError } = await query;
       if (ledgerError) throw ledgerError;
 
+      // Get unique investor codes from ledger data
+      const investorCodes = [...new Set((ledgerData ?? []).map(r => r.investor_code))];
+      
+      // Skip holdings fetch if no investors
+      if (investorCodes.length === 0) {
+        return { accounts: [], holdingDate: null };
+      }
+
       // Get the latest available holding date (may differ from ledger date)
       const { data: latestHoldingDate } = await supabase
         .from('eod_holding_snapshots')
@@ -114,15 +124,20 @@ export function ClientAccountsTab() {
 
       const holdingDate = latestHoldingDate?.eod_date || targetDate;
 
-      // Get portfolio values from the available date
-      const { data: holdingData } = await supabase
-        .from('eod_holding_snapshots')
-        .select('investor_code, market_value')
-        .eq('eod_date', holdingDate);
+      // Get portfolio values with pagination, filtered by investor codes
+      const holdingData = await fetchAllRows<{ investor_code: string; market_value: number | null }>((from, to) =>
+        supabase
+          .from('eod_holding_snapshots')
+          .select('investor_code, market_value')
+          .eq('eod_date', holdingDate)
+          .in('investor_code', investorCodes)
+          .order('investor_code')
+          .range(from, to)
+      );
 
       // Aggregate portfolio values by investor
       const portfolioMap = new Map<string, number>();
-      holdingData?.forEach(h => {
+      holdingData.forEach(h => {
         const current = portfolioMap.get(h.investor_code) || 0;
         portfolioMap.set(h.investor_code, current + (h.market_value || 0));
       });
@@ -160,13 +175,18 @@ export function ClientAccountsTab() {
         });
 
       // Apply status filter
+      let filteredResults = results;
       if (!selectedStatuses.includes('all') && selectedStatuses.length > 0) {
-        return results.filter(r => selectedStatuses.includes(r.status));
+        filteredResults = results.filter(r => selectedStatuses.includes(r.status));
       }
 
-      return results;
+      return { accounts: filteredResults, holdingDate };
     }
   });
+
+  // Extract accounts and holdingDate from query result
+  const accounts = queryResult?.accounts;
+  const holdingDate = queryResult?.holdingDate;
 
   // Calculate metrics from filtered data
   const metrics = useMemo(() => {
@@ -442,6 +462,21 @@ export function ClientAccountsTab() {
                 />
               </PopoverContent>
             </Popover>
+
+            {/* Portfolio date indicator */}
+            {holdingDate && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Info className="h-3 w-3" />
+                    <span>Portfolio as of {format(new Date(holdingDate + 'T00:00:00'), "MMM d")}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Portfolio values from the latest available holdings snapshot</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
 
             <Button variant="outline" onClick={() => refetch()}>
               <RefreshCw className="h-4 w-4 mr-2" />
