@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import { sanitizeString } from "@/lib/validation-schemas";
 
 interface ParsedTrade {
-  cse: string;
+  board: string;
   dp_code: string;
   investor_code: string;
   full_investor_code: string;
@@ -162,15 +162,15 @@ function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: stri
       return { line: lineNumber, message: `Invalid price: ${priceStr}`, raw: trimmed.substring(0, 60) };
     }
 
-    // Field 7: Trade ID (e.g., "GZ44", "NJ21", "NJ30", "NJ47")
+    // Field 7: Trade ID prefix (e.g., "GZ44", "NJ21", "NJ30", "NJ47")
     const tradeIdPrefix = fields[6].trim();
 
-    // Field 8: (Empty or other data)
-    // Field 9: Some number (possibly trade sequence)
-    const tradeSequence = fields[8]?.trim() || "";
+    // Fields 7-8: Empty (index 7 and 8)
+    // Field 10 (index 9): Trade sequence number (e.g., "22", "310", "599")
+    const tradeSequence = fields[9]?.trim() || "";
 
-    // Field 10: Date (DD/MM/YYYY format like "13/01/2026")
-    const tradeDateRaw = fields[9]?.trim() || "";
+    // Field 11 (index 10): Date (DD/MM/YYYY format like "13/01/2026")
+    const tradeDateRaw = fields[10]?.trim() || "";
     if (!tradeDateRaw) {
       return { line: lineNumber, message: `Missing trade date`, raw: trimmed.substring(0, 60) };
     }
@@ -188,13 +188,17 @@ function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: stri
     const execId = `${exchange}_${fullInvestorCode}_${securityCode}_${tradeDateFormatted}_${tradeId}`;
 
     // Optional fields from remaining columns if present
-    const tradeTime = fields[10]?.trim() || "";
-    const settlementDateRaw = fields[11]?.trim() || "";
-    const settlementTime = fields[12]?.trim() || "";
-    const categoryFlag = fields[13]?.trim() || "N"; // Default to Normal
+    // Field 12 (index 11): Trade time (HH:MM:SS)
+    const tradeTime = fields[11]?.trim() || "";
+    // Field 13 (index 12): Settlement date
+    const settlementDateRaw = fields[12]?.trim() || "";
+    // Field 14 (index 13): Settlement time
+    const settlementTime = fields[13]?.trim() || "";
+    // Field 15 (index 14): Category flag (N=Normal, B=Block)
+    const categoryFlag = fields[14]?.trim() || "N";
 
     return {
-      cse: exchange,
+      board: exchangeDP,
       dp_code: dpCode,
       investor_code: investorCode,
       full_investor_code: fullInvestorCode,
@@ -394,7 +398,7 @@ export function TradeImportDialog({
           status: "FILL",
           side: trade.side,
           security_code: sanitizeString(trade.security_code),
-          board: trade.cse,
+          board: trade.board,
           trade_date: trade.trade_date,
           trade_time: trade.trade_time,
           quantity: trade.quantity,
@@ -504,23 +508,22 @@ export function TradeImportDialog({
                 Each line contains trade data with pipe (|) separators:
               </p>
               <code className="text-xs block bg-background p-2 rounded font-mono break-all">
-                DHK01|14028|LOVELLO|S|35000|65.00|GZ44||12345|13/01/2026|...
+                DHK01|14028|LOVELLO|S|35000|65.00|GZ44|||22|13/01/2026|10:11:38|...
               </code>
               <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
-                <div>• Pos 1-3: CSE Terminal</div>
-                <div>• Pos 4-5: DP Code</div>
-                <div>• Pos 6-10: Investor Code (5 digits)</div>
-                <div>• Variable: Instrument Code</div>
-                <div>• 1 char: Side (B=Buy, S=Sell)</div>
-                <div>• Variable: Quantity</div>
-                <div>• Variable: Price (with decimal)</div>
-                <div>• 2 chars: Market Type (GZ, NJ)</div>
-                <div>• Variable: Trade ID</div>
-                <div>• 8 chars: Trade Date (DDMMYYYY)</div>
-                <div>• 6 chars: Trade Time (HHMMSS)</div>
-                <div>• 8 chars: Settlement Date</div>
-                <div>• 6 chars: Settlement Time</div>
-                <div>• 1 char: Category (B/N)</div>
+                <div>• Field 1: Board+DP (DHK01, CSE05)</div>
+                <div>• Field 2: Investor Code (14028)</div>
+                <div>• Field 3: Instrument (LOVELLO)</div>
+                <div>• Field 4: Side (B=Buy, S=Sell)</div>
+                <div>• Field 5: Quantity (35000)</div>
+                <div>• Field 6: Price (65.00)</div>
+                <div>• Field 7: Trade ID Prefix (GZ44)</div>
+                <div>• Field 8-9: Empty</div>
+                <div>• Field 10: Sequence (22)</div>
+                <div>• Field 11: Trade Date (DD/MM/YYYY)</div>
+                <div>• Field 12: Trade Time (HH:MM:SS)</div>
+                <div>• Field 13-14: Settlement Date/Time</div>
+                <div>• Field 15: Category (B/N)</div>
               </div>
             </div>
           </div>
@@ -571,7 +574,7 @@ export function TradeImportDialog({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[70px]">CSE</TableHead>
+                      <TableHead className="w-[70px]">Board</TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Security</TableHead>
                       <TableHead>Side</TableHead>
@@ -588,7 +591,7 @@ export function TradeImportDialog({
                     {parsedTrades.slice(0, 100).map((trade, idx) => (
                       <TableRow key={idx}>
                         <TableCell className="font-mono text-xs">
-                          {trade.cse}
+                          {trade.board}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           {trade.full_investor_code}
