@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Building2 } from "lucide-react";
+import { Loader2, Building2, Mail } from "lucide-react";
 import { z } from "zod";
 
 const loginSchema = z.object({
@@ -27,11 +28,48 @@ const signupSchema = z.object({
 
 export default function AuthPage() {
   const [isLoading, setIsLoading] = useState(false);
+  const [isResending, setIsResending] = useState(false);
   const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [signupData, setSignupData] = useState({ fullName: "", email: "", password: "", confirmPassword: "" });
+  const [showResendConfirmation, setShowResendConfirmation] = useState(false);
+  const [resendEmail, setResendEmail] = useState("");
   const { signIn, signUp, user, isApproved } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  const handleResendConfirmation = async () => {
+    if (!resendEmail) return;
+    
+    setIsResending(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: resendEmail,
+      });
+      
+      if (error) {
+        toast({
+          title: "Error",
+          description: error.message,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Confirmation Email Sent",
+          description: "Please check your inbox and spam folder for the confirmation link.",
+        });
+        setShowResendConfirmation(false);
+      }
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to resend confirmation email. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   useEffect(() => {
     if (user && isApproved) {
@@ -66,13 +104,24 @@ export default function AuthPage() {
     }
 
     if (error) {
-      toast({
-        title: "Login Failed",
-        description: error.message === "Invalid login credentials" 
-          ? "Invalid email or password. Please try again." 
-          : error.message,
-        variant: "destructive",
-      });
+      // Check if it's an email not confirmed error
+      if (error.message.toLowerCase().includes("email not confirmed")) {
+        setResendEmail(loginData.email);
+        setShowResendConfirmation(true);
+        toast({
+          title: "Email Not Confirmed",
+          description: "Please check your inbox for the confirmation email, or resend it below.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Login Failed",
+          description: error.message === "Invalid login credentials" 
+            ? "Invalid email or password. Please try again." 
+            : error.message,
+          variant: "destructive",
+        });
+      }
     }
   };
 
@@ -181,6 +230,39 @@ export default function AuthPage() {
                       "Sign In"
                     )}
                   </Button>
+                  
+                  {/* Resend confirmation email section */}
+                  {showResendConfirmation && (
+                    <div className="mt-4 p-4 border border-amber-500/50 bg-amber-500/10 rounded-lg space-y-3">
+                      <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                        <Mail className="h-4 w-4" />
+                        <span className="text-sm font-medium">Email confirmation required</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Your email <strong>{resendEmail}</strong> needs to be confirmed. Check your inbox and spam folder.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleResendConfirmation}
+                        disabled={isResending}
+                        className="w-full"
+                      >
+                        {isResending ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Sending...
+                          </>
+                        ) : (
+                          <>
+                            <Mail className="mr-2 h-4 w-4" />
+                            Resend Confirmation Email
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </form>
               </TabsContent>
 
