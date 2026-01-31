@@ -1,0 +1,363 @@
+
+-- Fix: Restore commission calculation in process_staged_trades
+-- Commission = SUM(qty * price * normalized_brokerage_rate)
+-- Rate normalization: >= 0.1 → divide by 100; < 0.1 → use directly; NULL → 0.004
+
+CREATE OR REPLACE FUNCTION public.process_staged_trades(p_trade_date date)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET statement_timeout = '300s'
+AS $$
+DECLARE
+  v_result jsonb;
+  v_trade_count bigint := 0;
+  v_investor_count bigint := 0;
+  v_gross_buy numeric := 0;
+  v_gross_sell numeric := 0;
+  v_total_commission numeric := 0;
+  v_deposit_count bigint := 0;
+  v_withdrawal_count bigint := 0;
+  v_total_deposits numeric := 0;
+  v_total_withdrawals numeric := 0;
+  v_instruments_priced bigint := 0;
+  v_positions_captured bigint := 0;
+  v_total_market_value numeric := 0;
+  v_snapshots_created bigint := 0;
+  v_margin_accounts bigint := 0;
+  v_margin_exposure numeric := 0;
+  v_daily_interest_total numeric := 0;
+  v_cumulative_interest_total numeric := 0;
+  v_total_equity numeric := 0;
+  v_negative_equity_count bigint := 0;
+  v_with_rm_assigned bigint := 0;
+  v_with_department bigint := 0;
+  v_prev_date date;
+BEGIN
+  -- Find previous business day with data
+  SELECT MAX(as_of_date) INTO v_prev_date
+  FROM balances_raw
+  WHERE as_of_date < p_trade_date;
+
+  -- Delete existing EOD data for this date to prevent duplicates
+  DELETE FROM eod_ledger_snapshots WHERE eod_date = p_trade_date;
+  DELETE FROM eod_instrument_position WHERE trade_date = p_trade_date;
+
+  -- Aggregate trades with commission calculation
+  WITH trade_agg AS (
+    SELECT
+      tf.investor_code,
+      COUNT(*) as trade_count,
+      SUM(CASE WHEN tf.side = 'BUY' THEN tf.qty * tf.price ELSE 0 END) as gross_buy,
+      SUM(CASE WHEN tf.side = 'SELL' THEN tf.qty * tf.price ELSE 0 END) as gross_sell,
+      -- Commission calculation with rate normalization
+      SUM(
+        tf.qty * tf.price * 
+        CASE 
+          WHEN i.brokerage_commission >= 0.1 THEN i.brokerage_commission / 100
+          WHEN i.brokerage_commission < 0.1 AND i.brokerage_commission > 0 THEN i.brokerage_commission
+          ELSE 0.004
+        END
+      ) as total_commission
+    FROM trade_file tf
+    LEFT JOIN investors i ON tf.investor_code = i.investor_code
+    WHERE tf.trade_date = p_trade_date
+    GROUP BY tf.investor_code
+  ),
+  -- Aggregate deposits/withdrawals
+  cash_agg AS (
+    SELECT
+      investor_code,
+      SUM(CASE WHEN type = 'DEPOSIT' THEN amount ELSE 0 END) as deposits,
+      SUM(CASE WHEN type = 'WITHDRAWAL' THEN amount ELSE 0 END) as withdrawals,
+      COUNT(CASE WHEN type = 'DEPOSIT' THEN 1 END) as deposit_count,
+      COUNT(CASE WHEN type = 'WITHDRAWAL' THEN 1 END) as withdrawal_count
+    FROM cash_ledger_txn
+    WHERE txn_date = p_trade_date
+    GROUP BY investor_code
+  ),
+  -- Get previous day balances
+  prev_bal AS (
+    SELECT DISTINCT ON (investor_code)
+      investor_code,
+      ledger_balance as opening_balance,
+      total_mv as opening_mv,
+      rm_id,
+      rm_name,
+      rm_email
+    FROM balances_raw
+    WHERE as_of_date = v_prev_date
+    ORDER BY investor_code, as_of_date DESC
+  ),
+  -- Get employee info for RM assignments
+  emp_info AS (
+    SELECT 
+      employee_id,
+      name,
+      email,
+      department
+    FROM employees
+    WHERE status = 'Active'
+  ),
+  -- Position aggregation with market value
+  position_agg AS (
+    SELECT
+      tf.investor_code,
+      tf.instrument,
+      SUM(CASE WHEN tf.side = 'BUY' THEN tf.qty ELSE 0 END) as buy_qty,
+      SUM(CASE WHEN tf.side = 'SELL' THEN tf.qty ELSE 0 END) as sell_qty,
+      SUM(CASE WHEN tf.side = 'BUY' THEN tf.qty ELSE -tf.qty END) as net_qty,
+      SUM(CASE WHEN tf.side = 'BUY' THEN tf.qty * tf.price ELSE 0 END) as buy_cost
+    FROM trade_file tf
+    WHERE tf.trade_date = p_trade_date
+    GROUP BY tf.investor_code, tf.instrument
+  ),
+  -- EOD prices
+  prices AS (
+    SELECT instrument, eod_price
+    FROM instrument_prices_eod
+    WHERE trade_date = p_trade_date
+  ),
+  -- Calculate investor snapshots
+  investor_snapshot AS (
+    SELECT
+      inv.investor_code,
+      inv.investor_name,
+      COALESCE(pb.opening_balance, inv.ledger_balance, 0) as opening_balance,
+      COALESCE(ta.gross_buy, 0) as gross_buy,
+      COALESCE(ta.gross_sell, 0) as gross_sell,
+      COALESCE(ta.total_commission, 0) as total_commission,
+      COALESCE(ca.deposits, 0) as total_deposits,
+      COALESCE(ca.withdrawals, 0) as total_withdrawals,
+      -- Closing balance = opening + sells - buys - commission + deposits - withdrawals
+      COALESCE(pb.opening_balance, inv.ledger_balance, 0) 
+        + COALESCE(ta.gross_sell, 0) 
+        - COALESCE(ta.gross_buy, 0) 
+        - COALESCE(ta.total_commission, 0)
+        + COALESCE(ca.deposits, 0) 
+        - COALESCE(ca.withdrawals, 0) as closing_balance,
+      inv.brokerage_commission as brokerage_rate,
+      inv.interest_rate,
+      COALESCE(ei.employee_id, pb.rm_id, inv.rm_id) as rm_id,
+      COALESCE(ei.name, pb.rm_name, inv.rm_name) as rm_name,
+      COALESCE(ei.email, pb.rm_email) as rm_email,
+      COALESCE(ei.department, inv.department) as department,
+      inv.account_type
+    FROM investors inv
+    LEFT JOIN trade_agg ta ON inv.investor_code = ta.investor_code
+    LEFT JOIN cash_agg ca ON inv.investor_code = ca.investor_code
+    LEFT JOIN prev_bal pb ON inv.investor_code = pb.investor_code
+    LEFT JOIN emp_info ei ON inv.rm_id = ei.employee_id
+  ),
+  -- Calculate position market values
+  position_mv AS (
+    SELECT
+      pa.investor_code,
+      pa.instrument,
+      pa.net_qty as total_stock,
+      pa.net_qty as saleable,
+      CASE WHEN pa.net_qty > 0 THEN pa.buy_cost / NULLIF(pa.buy_qty, 0) ELSE 0 END as avg_cost,
+      pa.buy_cost as total_cost,
+      COALESCE(pr.eod_price, 0) * pa.net_qty as market_value
+    FROM position_agg pa
+    LEFT JOIN prices pr ON pa.instrument = pr.instrument
+    WHERE pa.net_qty <> 0
+  ),
+  -- Aggregate market value per investor
+  investor_mv AS (
+    SELECT
+      investor_code,
+      SUM(market_value) as total_mv,
+      COUNT(*) as position_count
+    FROM position_mv
+    GROUP BY investor_code
+  )
+  -- Insert ledger snapshots
+  INSERT INTO eod_ledger_snapshots (
+    eod_date,
+    investor_code,
+    investor_name,
+    opening_balance,
+    closing_balance,
+    ledger_balance,
+    gross_buy,
+    gross_sell,
+    total_commission,
+    total_deposits,
+    total_withdrawals,
+    total_mv,
+    brokerage_rate,
+    interest_rate,
+    rm_id,
+    rm_name,
+    rm_email,
+    department,
+    account_type,
+    accrued_interest,
+    cumulative_interest
+  )
+  SELECT
+    p_trade_date,
+    iss.investor_code,
+    iss.investor_name,
+    iss.opening_balance,
+    iss.closing_balance,
+    iss.closing_balance,
+    iss.gross_buy,
+    iss.gross_sell,
+    iss.total_commission,
+    iss.total_deposits,
+    iss.total_withdrawals,
+    COALESCE(imv.total_mv, 0),
+    iss.brokerage_rate,
+    iss.interest_rate,
+    iss.rm_id,
+    iss.rm_name,
+    iss.rm_email,
+    iss.department,
+    iss.account_type,
+    -- Daily interest for negative balances (margin accounts)
+    CASE 
+      WHEN iss.closing_balance < 0 THEN 
+        ABS(iss.closing_balance) * COALESCE(iss.interest_rate, 12) / 100 / 365
+      ELSE 0 
+    END,
+    0 -- cumulative_interest to be updated separately if needed
+  FROM investor_snapshot iss
+  LEFT JOIN investor_mv imv ON iss.investor_code = imv.investor_code;
+
+  GET DIAGNOSTICS v_snapshots_created = ROW_COUNT;
+
+  -- Insert position snapshots
+  INSERT INTO eod_instrument_position (
+    trade_date,
+    investor_code,
+    instrument,
+    total_stock,
+    saleable,
+    avg_cost,
+    total_cost,
+    total_market_value
+  )
+  SELECT
+    p_trade_date,
+    investor_code,
+    instrument,
+    total_stock,
+    saleable,
+    avg_cost,
+    total_cost,
+    market_value
+  FROM position_mv;
+
+  GET DIAGNOSTICS v_positions_captured = ROW_COUNT;
+
+  -- Collect summary statistics
+  SELECT 
+    COUNT(*),
+    COALESCE(SUM(gross_buy), 0),
+    COALESCE(SUM(gross_sell), 0),
+    COALESCE(SUM(total_commission), 0)
+  INTO v_trade_count, v_gross_buy, v_gross_sell, v_total_commission
+  FROM trade_file tf
+  LEFT JOIN investors i ON tf.investor_code = i.investor_code
+  WHERE tf.trade_date = p_trade_date
+  GROUP BY ()
+  LIMIT 1;
+
+  -- Get trade count properly
+  SELECT COUNT(*) INTO v_trade_count FROM trade_file WHERE trade_date = p_trade_date;
+
+  -- Recalculate commission from the aggregated snapshots
+  SELECT COALESCE(SUM(total_commission), 0) INTO v_total_commission
+  FROM eod_ledger_snapshots WHERE eod_date = p_trade_date;
+
+  -- Recalculate gross buy/sell from snapshots
+  SELECT 
+    COALESCE(SUM(gross_buy), 0),
+    COALESCE(SUM(gross_sell), 0)
+  INTO v_gross_buy, v_gross_sell
+  FROM eod_ledger_snapshots WHERE eod_date = p_trade_date;
+
+  -- Get deposit/withdrawal stats
+  SELECT 
+    COUNT(CASE WHEN type = 'DEPOSIT' THEN 1 END),
+    COUNT(CASE WHEN type = 'WITHDRAWAL' THEN 1 END),
+    COALESCE(SUM(CASE WHEN type = 'DEPOSIT' THEN amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN type = 'WITHDRAWAL' THEN amount ELSE 0 END), 0)
+  INTO v_deposit_count, v_withdrawal_count, v_total_deposits, v_total_withdrawals
+  FROM cash_ledger_txn
+  WHERE txn_date = p_trade_date;
+
+  -- Get unique investor count
+  SELECT COUNT(DISTINCT investor_code) INTO v_investor_count
+  FROM eod_ledger_snapshots WHERE eod_date = p_trade_date;
+
+  -- Get instruments priced
+  SELECT COUNT(*) INTO v_instruments_priced
+  FROM instrument_prices_eod WHERE trade_date = p_trade_date;
+
+  -- Get total market value
+  SELECT COALESCE(SUM(total_mv), 0) INTO v_total_market_value
+  FROM eod_ledger_snapshots WHERE eod_date = p_trade_date;
+
+  -- Get margin statistics
+  SELECT 
+    COUNT(*),
+    COALESCE(SUM(ABS(closing_balance)), 0),
+    COALESCE(SUM(accrued_interest), 0)
+  INTO v_margin_accounts, v_margin_exposure, v_daily_interest_total
+  FROM eod_ledger_snapshots 
+  WHERE eod_date = p_trade_date AND closing_balance < 0;
+
+  -- Get equity and negative equity count
+  SELECT 
+    COALESCE(SUM(total_mv + closing_balance), 0),
+    COUNT(CASE WHEN (total_mv + closing_balance) < 0 THEN 1 END)
+  INTO v_total_equity, v_negative_equity_count
+  FROM eod_ledger_snapshots WHERE eod_date = p_trade_date;
+
+  -- Get RM assignment stats
+  SELECT COUNT(*) INTO v_with_rm_assigned
+  FROM eod_ledger_snapshots WHERE eod_date = p_trade_date AND rm_id IS NOT NULL;
+
+  SELECT COUNT(*) INTO v_with_department
+  FROM eod_ledger_snapshots WHERE eod_date = p_trade_date AND department IS NOT NULL;
+
+  -- Build result
+  v_result := jsonb_build_object(
+    'success', true,
+    'trade_date', p_trade_date,
+    'trade_count', v_trade_count,
+    'investor_count', v_investor_count,
+    'gross_buy', v_gross_buy,
+    'gross_sell', v_gross_sell,
+    'total_commission', v_total_commission,
+    'deposit_count', v_deposit_count,
+    'withdrawal_count', v_withdrawal_count,
+    'total_deposits', v_total_deposits,
+    'total_withdrawals', v_total_withdrawals,
+    'instruments_priced', v_instruments_priced,
+    'positions_captured', v_positions_captured,
+    'total_market_value', v_total_market_value,
+    'snapshots_created', v_snapshots_created,
+    'margin_accounts', v_margin_accounts,
+    'margin_exposure', v_margin_exposure,
+    'daily_interest_total', v_daily_interest_total,
+    'cumulative_interest_total', v_cumulative_interest_total,
+    'total_equity', v_total_equity,
+    'negative_equity_count', v_negative_equity_count,
+    'with_rm_assigned', v_with_rm_assigned,
+    'with_department', v_with_department
+  );
+
+  RETURN v_result;
+
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object(
+    'success', false,
+    'error', SQLERRM,
+    'error_detail', SQLSTATE
+  );
+END;
+$$;
