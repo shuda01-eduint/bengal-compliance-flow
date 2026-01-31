@@ -58,22 +58,42 @@ interface TradeImportDialogProps {
 
 type ImportStep = "upload" | "preview" | "importing" | "complete";
 
-// Convert DDMMYYYY to YYYYMMDD format
-function convertDateFormat(ddmmyyyy: string): string {
-  if (ddmmyyyy.length !== 8) return ddmmyyyy;
-  const day = ddmmyyyy.substring(0, 2);
-  const month = ddmmyyyy.substring(2, 4);
-  const year = ddmmyyyy.substring(4, 8);
-  return `${year}${month}${day}`;
+// Convert DD/MM/YYYY to YYYYMMDD format
+function convertDateFormat(dateStr: string): string {
+  // Handle DD/MM/YYYY format
+  if (dateStr.includes("/")) {
+    const [day, month, year] = dateStr.split("/");
+    return `${year}${month.padStart(2, "0")}${day.padStart(2, "0")}`;
+  }
+  // Handle DDMMYYYY format
+  if (dateStr.length === 8 && !dateStr.includes("-")) {
+    const day = dateStr.substring(0, 2);
+    const month = dateStr.substring(2, 4);
+    const year = dateStr.substring(4, 8);
+    return `${year}${month}${day}`;
+  }
+  // Handle YYYY-MM-DD format (already standard)
+  if (dateStr.includes("-")) {
+    return dateStr.replace(/-/g, "");
+  }
+  return dateStr;
 }
 
-// Convert DDMMYYYY to YYYY-MM-DD display format
-function formatDateForDisplay(ddmmyyyy: string): string {
-  if (ddmmyyyy.length !== 8) return ddmmyyyy;
-  const day = ddmmyyyy.substring(0, 2);
-  const month = ddmmyyyy.substring(2, 4);
-  const year = ddmmyyyy.substring(4, 8);
-  return `${year}-${month}-${day}`;
+// Convert various date formats to YYYY-MM-DD display format
+function formatDateForDisplay(dateStr: string): string {
+  // Handle DD/MM/YYYY format
+  if (dateStr.includes("/")) {
+    const [day, month, year] = dateStr.split("/");
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  // Handle YYYYMMDD format
+  if (dateStr.length === 8 && !dateStr.includes("-")) {
+    const year = dateStr.substring(0, 4);
+    const month = dateStr.substring(4, 6);
+    const day = dateStr.substring(6, 8);
+    return `${year}-${month}-${day}`;
+  }
+  return dateStr;
 }
 
 // Convert HHMMSS to HH:MM:SS display format
@@ -85,104 +105,93 @@ function formatTimeForDisplay(hhmmss: string): string {
   return `${hour}:${min}:${sec}`;
 }
 
-// Parse a single line of DSE fixed-width trade data
-function parseFixedWidthLine(line: string, lineNumber: number, fileName: string): ParsedTrade | ValidationError {
+// Parse a single line of DSE pipe-delimited trade data
+function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: string): ParsedTrade | ValidationError {
   const trimmed = line.trim();
   
-  // Minimum length check: 3+2+5 (fixed start) + some middle + 29 (fixed end) = ~45+ chars
-  if (trimmed.length < 45) {
-    return { line: lineNumber, message: `Line too short (${trimmed.length} chars, need 45+)`, raw: trimmed.substring(0, 50) };
+  if (!trimmed || trimmed.length < 10) {
+    return { line: lineNumber, message: `Line too short`, raw: trimmed.substring(0, 50) };
   }
 
   try {
-    // === FIXED START POSITIONS ===
-    const exchange = trimmed.substring(0, 3); // DHK or CSE
-    const dpCode = trimmed.substring(3, 5); // 01, 05, 11, 16, etc.
-    const investorCode = trimmed.substring(5, 10); // 5 digits
+    const fields = trimmed.split("|");
+    
+    if (fields.length < 10) {
+      return { line: lineNumber, message: `Expected at least 10 pipe-delimited fields, got ${fields.length}`, raw: trimmed.substring(0, 60) };
+    }
+
+    // Field 1: Exchange+DP (e.g., "DHK01", "DHK05")
+    const exchangeDP = fields[0].trim();
+    if (exchangeDP.length < 4) {
+      return { line: lineNumber, message: `Invalid Exchange+DP: ${exchangeDP}`, raw: trimmed.substring(0, 60) };
+    }
+    const exchange = exchangeDP.substring(0, 3); // DHK or CSE
+    const dpCode = exchangeDP.substring(3); // 01, 05, etc.
+
+    // Field 2: Investor Code (e.g., "14028", "23005")
+    const investorCode = fields[1].trim();
+    if (!investorCode) {
+      return { line: lineNumber, message: `Missing investor code`, raw: trimmed.substring(0, 60) };
+    }
     const fullInvestorCode = dpCode + investorCode;
 
-    // === FIXED END POSITIONS (from the end) ===
-    const len = trimmed.length;
-    const categoryFlag = trimmed.substring(len - 1); // Last char: B or N
-    const settlementTime = trimmed.substring(len - 7, len - 1); // 6 chars before category
-    const settlementDate = trimmed.substring(len - 15, len - 7); // 8 chars DDMMYYYY
-    const tradeTime = trimmed.substring(len - 21, len - 15); // 6 chars HHMMSS
-    const tradeDate = trimmed.substring(len - 29, len - 21); // 8 chars DDMMYYYY
-
-    // Validate dates look like numbers
-    if (!/^\d{8}$/.test(tradeDate)) {
-      return { line: lineNumber, message: `Invalid trade date format: ${tradeDate}`, raw: trimmed.substring(0, 50) };
-    }
-    if (!/^\d{8}$/.test(settlementDate)) {
-      return { line: lineNumber, message: `Invalid settlement date format: ${settlementDate}`, raw: trimmed.substring(0, 50) };
+    // Field 3: Instrument Code (e.g., "LOVELLO", "SPCERAMICS")
+    const securityCode = fields[2].trim().toUpperCase();
+    if (!securityCode) {
+      return { line: lineNumber, message: `Missing instrument code`, raw: trimmed.substring(0, 60) };
     }
 
-    // === VARIABLE MIDDLE SECTION ===
-    // Everything between position 10 and (len - 29)
-    const middleSection = trimmed.substring(10, len - 29);
-    
-    if (middleSection.length < 10) {
-      return { line: lineNumber, message: `Middle section too short: ${middleSection}`, raw: trimmed.substring(0, 50) };
+    // Field 4: Side (B=Buy, S=Sell)
+    const sideChar = fields[3].trim().toUpperCase();
+    if (sideChar !== "B" && sideChar !== "S") {
+      return { line: lineNumber, message: `Invalid side: ${sideChar}, expected B or S`, raw: trimmed.substring(0, 60) };
     }
+    const side: "BUY" | "SELL" = sideChar === "S" ? "SELL" : "BUY";
 
-    // Find the side (B or S) - it separates instrument code from quantity
-    // Instrument is uppercase letters, side is B or S, followed by digits
-    const sideMatch = middleSection.match(/^([A-Z0-9]+)(B|S)(.+)$/);
-    if (!sideMatch) {
-      return { line: lineNumber, message: `Cannot find B/S side indicator`, raw: trimmed.substring(0, 50) };
-    }
-
-    const securityCode = sideMatch[1];
-    const side: "BUY" | "SELL" = sideMatch[2] === "S" ? "SELL" : "BUY";
-    const afterSide = sideMatch[3]; // e.g., "3500065.00GZ44221"
-
-    // Parse: Quantity + Price + TradeID
-    // Price has a decimal point (XX.XX format)
-    // TradeID starts with letters (like GZ, NJ) followed by digits
-
-    // Find the decimal point for price
-    const decimalIndex = afterSide.indexOf(".");
-    if (decimalIndex === -1) {
-      return { line: lineNumber, message: `Cannot find decimal point for price`, raw: trimmed.substring(0, 50) };
-    }
-
-    // After decimal, we have: 2 decimal digits + TradeID (letters + digits)
-    // e.g., "00GZ44221" -> "00" is decimal part, "GZ44221" is trade ID
-    const afterDecimal = afterSide.substring(decimalIndex + 1);
-    
-    // TradeID starts with letters (GZ, NJ, etc.) followed by digits
-    const tradeIdMatch = afterDecimal.match(/^(\d{2})([A-Z]+\d+)$/);
-    
-    if (!tradeIdMatch) {
-      return { line: lineNumber, message: `Cannot parse trade ID from: ${afterDecimal}`, raw: trimmed.substring(0, 50) };
-    }
-
-    const priceDecimals = tradeIdMatch[1]; // "00" from "65.00"
-    const tradeId = tradeIdMatch[2]; // "GZ44221" (includes the prefix)
-
-    // Find where price starts - work backwards from decimal
-    let priceStartIndex = decimalIndex - 1;
-    while (priceStartIndex > 0 && /\d/.test(afterSide[priceStartIndex - 1])) {
-      priceStartIndex--;
-    }
-    
-    // Quantity is everything from start of afterSide to priceStartIndex
-    const quantityStr = afterSide.substring(0, priceStartIndex);
-    const priceStr = afterSide.substring(priceStartIndex, decimalIndex) + "." + priceDecimals;
-
+    // Field 5: Quantity
+    const quantityStr = fields[4].trim();
     const quantity = parseInt(quantityStr, 10);
-    const price = parseFloat(priceStr);
-
     if (isNaN(quantity) || quantity <= 0) {
-      return { line: lineNumber, message: `Invalid quantity: ${quantityStr}`, raw: trimmed.substring(0, 50) };
-    }
-    if (isNaN(price) || price <= 0) {
-      return { line: lineNumber, message: `Invalid price: ${priceStr}`, raw: trimmed.substring(0, 50) };
+      return { line: lineNumber, message: `Invalid quantity: ${quantityStr}`, raw: trimmed.substring(0, 60) };
     }
 
+    // Field 6: Price
+    const priceStr = fields[5].trim();
+    const price = parseFloat(priceStr);
+    if (isNaN(price) || price <= 0) {
+      return { line: lineNumber, message: `Invalid price: ${priceStr}`, raw: trimmed.substring(0, 60) };
+    }
+
+    // Field 7: Trade ID (e.g., "GZ44", "NJ21", "NJ30", "NJ47")
+    const tradeIdPrefix = fields[6].trim();
+
+    // Field 8: (Empty or other data)
+    // Field 9: Some number (possibly trade sequence)
+    const tradeSequence = fields[8]?.trim() || "";
+
+    // Field 10: Date (DD/MM/YYYY format like "13/01/2026")
+    const tradeDateRaw = fields[9]?.trim() || "";
+    if (!tradeDateRaw) {
+      return { line: lineNumber, message: `Missing trade date`, raw: trimmed.substring(0, 60) };
+    }
+
+    // Build trade ID from prefix and sequence if available
+    const tradeId = tradeSequence ? `${tradeIdPrefix}${tradeSequence}` : tradeIdPrefix;
+    
+    // Calculate value
     const value = quantity * price;
-    const tradeDateFormatted = convertDateFormat(tradeDate);
+    
+    // Convert date to YYYYMMDD format
+    const tradeDateFormatted = convertDateFormat(tradeDateRaw);
+    
+    // Generate unique exec_id
     const execId = `${exchange}_${fullInvestorCode}_${securityCode}_${tradeDateFormatted}_${tradeId}`;
+
+    // Optional fields from remaining columns if present
+    const tradeTime = fields[10]?.trim() || "";
+    const settlementDateRaw = fields[11]?.trim() || "";
+    const settlementTime = fields[12]?.trim() || "";
+    const categoryFlag = fields[13]?.trim() || "N"; // Default to Normal
 
     return {
       exchange,
@@ -197,7 +206,7 @@ function parseFixedWidthLine(line: string, lineNumber: number, fileName: string)
       trade_id: tradeId,
       trade_date: tradeDateFormatted,
       trade_time: tradeTime,
-      settlement_date: convertDateFormat(settlementDate),
+      settlement_date: settlementDateRaw ? convertDateFormat(settlementDateRaw) : tradeDateFormatted,
       settlement_time: settlementTime,
       category_flag: categoryFlag,
       exec_id: execId,
@@ -273,9 +282,9 @@ export function TradeImportDialog({
       const errors: ValidationError[] = [];
       const fileName = file.name;
 
-      // Process each line
+      // Process each line using pipe-delimited parser
       for (let i = 0; i < lines.length; i++) {
-        const result = parseFixedWidthLine(lines[i], i + 1, fileName);
+        const result = parsePipeDelimitedLine(lines[i], i + 1, fileName);
         
         if ('message' in result) {
           // It's an error
@@ -464,7 +473,7 @@ export function TradeImportDialog({
         <DialogHeader>
           <DialogTitle>Import DSE Trade Data</DialogTitle>
           <DialogDescription>
-            Upload a .txt file with DSE fixed-width trade data
+            Upload a .txt file with DSE pipe-delimited trade data
           </DialogDescription>
         </DialogHeader>
 
@@ -478,7 +487,7 @@ export function TradeImportDialog({
               <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <p className="text-lg font-medium">Click to upload or drag and drop</p>
               <p className="text-sm text-muted-foreground mt-2">
-                DSE fixed-width .txt file
+                DSE pipe-delimited .txt file
               </p>
               <input
                 type="file"
@@ -490,12 +499,12 @@ export function TradeImportDialog({
             </div>
 
             <div className="bg-muted/50 rounded-lg p-4">
-              <h4 className="font-medium mb-2">Expected Format (Fixed-Width)</h4>
+              <h4 className="font-medium mb-2">Expected Format (Pipe-Delimited)</h4>
               <p className="text-sm text-muted-foreground mb-2">
-                Each line contains trade data in DSE fixed-width format:
+                Each line contains trade data with pipe (|) separators:
               </p>
               <code className="text-xs block bg-background p-2 rounded font-mono break-all">
-                DHK0114028LOVELLOS3500065.00GZ44221301202610113813012026101138B
+                DHK01|14028|LOVELLO|S|35000|65.00|GZ44||12345|13/01/2026|...
               </code>
               <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
                 <div>• Pos 1-3: Exchange (DHK/CSE)</div>
