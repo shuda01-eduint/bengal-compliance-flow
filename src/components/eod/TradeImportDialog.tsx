@@ -566,7 +566,7 @@ export function TradeImportDialog({
       setParsedTrades(trades);
       setValidationErrors(errors);
 
-      // Count existing trades for the parsed dates in trade_file table
+      // Count existing trades for the parsed dates in trade_file table (exchange-specific)
       if (trades.length > 0) {
         const tradeDates = [...new Set(trades.map(t => {
           // Convert YYYYMMDD to YYYY-MM-DD for database query
@@ -575,11 +575,21 @@ export function TradeImportDialog({
         }))];
         let totalExisting = 0;
         
+        // Filter by exchange: DSE (.xml) vs CSE (.txt with DHK% terminals)
         for (const tradeDate of tradeDates) {
-          const { count, error: countErr } = await supabase
+          let query = supabase
             .from("trade_file")
             .select("*", { count: "exact", head: true })
             .eq("trade_date", tradeDate);
+          
+          // Apply exchange-specific filter
+          if (isXml) {
+            query = query.eq("exchange_code", "DSE");
+          } else {
+            query = query.like("exchange_code", "DHK%");
+          }
+          
+          const { count, error: countErr } = await query;
           
           if (!countErr && count) {
             totalExisting += count;
@@ -628,14 +638,24 @@ export function TradeImportDialog({
       // Get unique trade dates for deletion/checking
       const tradeDatesForDb = [...new Set(parsedTrades.map(t => formatTradeDateForDb(t.trade_date)))];
 
-      // If replacing, delete existing trades for the dates first
+      // If replacing, delete existing trades for the dates first (exchange-specific)
       if (replaceExisting) {
+        const isXml = file?.name.toLowerCase().endsWith('.xml');
+        
         for (const tradeDate of tradeDatesForDb) {
-          const { error: deleteError } = await supabase
+          let deleteQuery = supabase
             .from("trade_file")
             .delete()
             .eq("trade_date", tradeDate);
           
+          // Apply exchange-specific filter: DSE (.xml) vs CSE (.txt with DHK% terminals)
+          if (isXml) {
+            deleteQuery = deleteQuery.eq("exchange_code", "DSE");
+          } else {
+            deleteQuery = deleteQuery.like("exchange_code", "DHK%");
+          }
+          
+          const { error: deleteError } = await deleteQuery;
           if (deleteError) throw deleteError;
         }
       }
@@ -914,7 +934,7 @@ export function TradeImportDialog({
               </div>
             </div>
 
-            {/* Replace Existing Option */}
+            {/* Replace Existing Option - Exchange Specific */}
             {existingTradeCount > 0 && (
               <Card className={replaceExisting ? "border-destructive/50 bg-destructive/5" : ""}>
                 <CardContent className="pt-4 space-y-3">
@@ -929,10 +949,10 @@ export function TradeImportDialog({
                         htmlFor="replace-existing-trades" 
                         className="text-sm font-medium cursor-pointer"
                       >
-                        Replace existing trade data
+                        Replace existing {file?.name.toLowerCase().endsWith('.xml') ? 'DSE' : 'CSE'} trade data
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        {existingTradeCount.toLocaleString()} existing trades found for these dates
+                        {existingTradeCount.toLocaleString()} existing {file?.name.toLowerCase().endsWith('.xml') ? 'DSE' : 'CSE'} trades found for these dates
                       </p>
                     </div>
                   </div>
@@ -941,7 +961,7 @@ export function TradeImportDialog({
                     <div className="flex items-center gap-2 p-2 rounded-md bg-destructive/10 border border-destructive/20">
                       <Trash2 className="h-4 w-4 text-destructive shrink-0" />
                       <p className="text-xs text-destructive font-medium">
-                        This will delete {existingTradeCount.toLocaleString()} existing trades and import {parsedTrades.length.toLocaleString()} new trades
+                        This will delete {existingTradeCount.toLocaleString()} existing {file?.name.toLowerCase().endsWith('.xml') ? 'DSE' : 'CSE'} trades and import {parsedTrades.length.toLocaleString()} new trades
                       </p>
                     </div>
                   )}
