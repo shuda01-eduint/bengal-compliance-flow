@@ -34,7 +34,6 @@ interface ParsedTrade {
   quantity: number;
   price: number;
   value: number;
-  market_type: string;
   trade_id: string;
   trade_date: string;
   trade_time: string;
@@ -137,10 +136,9 @@ function parseFixedWidthLine(line: string, lineNumber: number, fileName: string)
     const side: "BUY" | "SELL" = sideMatch[2] === "S" ? "SELL" : "BUY";
     const afterSide = sideMatch[3]; // e.g., "3500065.00GZ44221"
 
-    // Parse: Quantity + Price + MarketType + TradeID
+    // Parse: Quantity + Price + TradeID
     // Price has a decimal point (XX.XX format)
-    // MarketType is 2 uppercase letters (GZ, NJ, BK, ST, etc.)
-    // TradeID is digits at the end
+    // TradeID starts with letters (like GZ, NJ) followed by digits
 
     // Find the decimal point for price
     const decimalIndex = afterSide.indexOf(".");
@@ -148,25 +146,21 @@ function parseFixedWidthLine(line: string, lineNumber: number, fileName: string)
       return { line: lineNumber, message: `Cannot find decimal point for price`, raw: trimmed.substring(0, 50) };
     }
 
-    // Find market type (2 uppercase letters after the price)
-    // Price format: digits.XX where XX is 2 decimal places
+    // After decimal, we have: 2 decimal digits + TradeID (letters + digits)
+    // e.g., "00GZ44221" -> "00" is decimal part, "GZ44221" is trade ID
     const afterDecimal = afterSide.substring(decimalIndex + 1);
-    const marketMatch = afterDecimal.match(/^(\d{2})([A-Z]{2})(\d+)$/);
     
-    if (!marketMatch) {
-      return { line: lineNumber, message: `Cannot parse market type and trade ID from: ${afterDecimal}`, raw: trimmed.substring(0, 50) };
+    // TradeID starts with letters (GZ, NJ, etc.) followed by digits
+    const tradeIdMatch = afterDecimal.match(/^(\d{2})([A-Z]+\d+)$/);
+    
+    if (!tradeIdMatch) {
+      return { line: lineNumber, message: `Cannot parse trade ID from: ${afterDecimal}`, raw: trimmed.substring(0, 50) };
     }
 
-    const priceDecimals = marketMatch[1]; // "00" from "65.00"
-    const marketType = marketMatch[2]; // "GZ"
-    const tradeId = marketMatch[3]; // "44221"
+    const priceDecimals = tradeIdMatch[1]; // "00" from "65.00"
+    const tradeId = tradeIdMatch[2]; // "GZ44221" (includes the prefix)
 
-    // Extract price: everything from some point before decimal to the decimals
-    // Price is the number ending at decimal + 2 digits
-    const priceEndIndex = decimalIndex + 3; // includes ".XX"
-    
-    // Find where price starts - it's the digits immediately before the decimal
-    // that form a reasonable price (work backwards from decimal)
+    // Find where price starts - work backwards from decimal
     let priceStartIndex = decimalIndex - 1;
     while (priceStartIndex > 0 && /\d/.test(afterSide[priceStartIndex - 1])) {
       priceStartIndex--;
@@ -200,7 +194,6 @@ function parseFixedWidthLine(line: string, lineNumber: number, fileName: string)
       quantity,
       price,
       value,
-      market_type: marketType,
       trade_id: tradeId,
       trade_date: tradeDateFormatted,
       trade_time: tradeTime,
@@ -392,7 +385,7 @@ export function TradeImportDialog({
           status: "FILL",
           side: trade.side,
           security_code: sanitizeString(trade.security_code),
-          board: trade.market_type,
+          board: trade.exchange,
           trade_date: trade.trade_date,
           trade_time: trade.trade_time,
           quantity: trade.quantity,
@@ -576,7 +569,7 @@ export function TradeImportDialog({
                       <TableHead className="text-right">Qty</TableHead>
                       <TableHead className="text-right">Price</TableHead>
                       <TableHead className="text-right">Value</TableHead>
-                      <TableHead>Market</TableHead>
+                      <TableHead>Trade ID</TableHead>
                       <TableHead>Trade Date</TableHead>
                       <TableHead>Time</TableHead>
                       <TableHead>Cat</TableHead>
@@ -612,7 +605,7 @@ export function TradeImportDialog({
                           {trade.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
-                          {trade.market_type}
+                          {trade.trade_id}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           {formatDateForDisplay(trade.trade_date.replace(/(\d{4})(\d{2})(\d{2})/, "$3$2$1"))}
