@@ -19,7 +19,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Upload, FileText, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent } from "@/components/ui/card";
+import { Upload, FileText, AlertCircle, CheckCircle2, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { sanitizeString } from "@/lib/validation-schemas";
@@ -464,6 +467,8 @@ export function TradeImportDialog({
     imported: number;
     errors: number;
   } | null>(null);
+  const [replaceExisting, setReplaceExisting] = useState(false);
+  const [existingTradeCount, setExistingTradeCount] = useState(0);
 
   const resetState = useCallback(() => {
     setStep("upload");
@@ -473,6 +478,8 @@ export function TradeImportDialog({
     setImporting(false);
     setProgress(0);
     setImportSummary(null);
+    setReplaceExisting(false);
+    setExistingTradeCount(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -509,22 +516,14 @@ export function TradeImportDialog({
       const isXml = fileNameLower.endsWith(".xml");
       const fileName = file.name;
 
+      let trades: ParsedTrade[] = [];
+      let errors: ValidationError[] = [];
+
       if (isXml) {
         // DSE XML parser
-        const { trades, errors } = parseDseXmlContent(content, fileName);
-        setParsedTrades(trades);
-        setValidationErrors(errors);
-        setStep("preview");
-
-        if (trades.length === 0 && errors.length > 0) {
-          toast.error("No valid trades found", {
-            description: `${errors.length} validation errors detected`,
-          });
-        } else {
-          toast.success(`Parsed ${trades.length} DSE trades`, {
-            description: errors.length > 0 ? `${errors.length} lines with errors` : undefined,
-          });
-        }
+        const result = parseDseXmlContent(content, fileName);
+        trades = result.trades;
+        errors = result.errors;
       } else {
         // CSE pipe-delimited parser
         const lines = content.split("\n").filter((line) => line.trim());
@@ -533,9 +532,6 @@ export function TradeImportDialog({
           toast.error("Empty file", { description: "The file contains no data" });
           return;
         }
-
-        const trades: ParsedTrade[] = [];
-        const errors: ValidationError[] = [];
 
         // Process each line using pipe-delimited parser
         for (let i = 0; i < lines.length; i++) {
@@ -556,20 +552,41 @@ export function TradeImportDialog({
             await new Promise((resolve) => setTimeout(resolve, 0));
           }
         }
+      }
 
-        setParsedTrades(trades);
-        setValidationErrors(errors);
-        setStep("preview");
+      setParsedTrades(trades);
+      setValidationErrors(errors);
 
-        if (trades.length === 0 && errors.length > 0) {
-          toast.error("No valid trades found", {
-            description: `${errors.length} validation errors detected`,
-          });
-        } else {
-          toast.success(`Parsed ${trades.length} CSE trades`, {
-            description: errors.length > 0 ? `${errors.length} lines with errors` : undefined,
-          });
+      // Count existing trades for the parsed dates
+      if (trades.length > 0) {
+        const tradeDates = [...new Set(trades.map(t => t.trade_date))];
+        let totalExisting = 0;
+        
+        for (const tradeDate of tradeDates) {
+          const { count, error: countErr } = await supabase
+            .from("trade_history")
+            .select("*", { count: "exact", head: true })
+            .eq("trade_date", tradeDate);
+          
+          if (!countErr && count) {
+            totalExisting += count;
+          }
         }
+        
+        setExistingTradeCount(totalExisting);
+      }
+
+      setStep("preview");
+
+      if (trades.length === 0 && errors.length > 0) {
+        toast.error("No valid trades found", {
+          description: `${errors.length} validation errors detected`,
+        });
+      } else {
+        const fileType = isXml ? "DSE" : "CSE";
+        toast.success(`Parsed ${trades.length} ${fileType} trades`, {
+          description: errors.length > 0 ? `${errors.length} lines with errors` : undefined,
+        });
       }
     } catch (error: any) {
       toast.error("Failed to parse file", { description: error.message });
@@ -587,6 +604,20 @@ export function TradeImportDialog({
     setProgress(0);
 
     try {
+      // If replacing, delete existing trades for the dates first
+      if (replaceExisting) {
+        const tradeDates = [...new Set(parsedTrades.map(t => t.trade_date))];
+        
+        for (const tradeDate of tradeDates) {
+          const { error: deleteError } = await supabase
+            .from("trade_history")
+            .delete()
+            .eq("trade_date", tradeDate);
+          
+          if (deleteError) throw deleteError;
+        }
+      }
+
       // Fetch investor/client data for denormalization
       const clientCodes = [...new Set(parsedTrades.map((t) => t.full_investor_code))];
 
@@ -674,7 +705,7 @@ export function TradeImportDialog({
         };
       });
 
-      // Insert in batches
+      // Insert in batches (use insert if replacing, otherwise upsert)
       const batchSize = 1000;
       let imported = 0;
       let errorCount = 0;
@@ -682,10 +713,19 @@ export function TradeImportDialog({
       for (let i = 0; i < records.length; i += batchSize) {
         const batch = records.slice(i, i + batchSize);
 
-        const { error } = await supabase.from("trade_history").upsert(batch, {
-          onConflict: "exec_id,trade_date,client_code,board",
-          ignoreDuplicates: false,
-        });
+        let error;
+        if (replaceExisting) {
+          // Fresh insert since we deleted existing
+          const result = await supabase.from("trade_history").insert(batch);
+          error = result.error;
+        } else {
+          // Upsert to handle duplicates
+          const result = await supabase.from("trade_history").upsert(batch, {
+            onConflict: "exec_id,trade_date,client_code,board",
+            ignoreDuplicates: false,
+          });
+          error = result.error;
+        }
 
         if (error) {
           console.error("Batch insert error:", error);
@@ -710,7 +750,9 @@ export function TradeImportDialog({
       setStep("complete");
 
       toast.success("Import complete", {
-        description: `${imported} trades imported successfully`,
+        description: replaceExisting 
+          ? `Replaced data and imported ${imported} trades`
+          : `${imported} trades imported successfully`,
       });
 
       onImportComplete?.();
@@ -924,6 +966,41 @@ export function TradeImportDialog({
                 <p className="font-bold text-red-600">{parsedTrades.filter(t => t.side === "SELL").length.toLocaleString()}</p>
               </div>
             </div>
+
+            {/* Replace Existing Option */}
+            {existingTradeCount > 0 && (
+              <Card className={replaceExisting ? "border-destructive/50 bg-destructive/5" : ""}>
+                <CardContent className="pt-4 space-y-3">
+                  <div className="flex items-start space-x-3">
+                    <Checkbox 
+                      id="replace-existing-trades" 
+                      checked={replaceExisting}
+                      onCheckedChange={(checked) => setReplaceExisting(checked === true)}
+                    />
+                    <div className="grid gap-1.5 leading-none">
+                      <Label 
+                        htmlFor="replace-existing-trades" 
+                        className="text-sm font-medium cursor-pointer"
+                      >
+                        Replace existing trade data
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {existingTradeCount.toLocaleString()} existing trades found for these dates
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {replaceExisting && (
+                    <div className="flex items-center gap-2 p-2 rounded-md bg-destructive/10 border border-destructive/20">
+                      <Trash2 className="h-4 w-4 text-destructive shrink-0" />
+                      <p className="text-xs text-destructive font-medium">
+                        This will delete {existingTradeCount.toLocaleString()} existing trades and import {parsedTrades.length.toLocaleString()} new trades
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 
@@ -988,8 +1065,12 @@ export function TradeImportDialog({
               <Button
                 onClick={handleImport}
                 disabled={parsedTrades.length === 0 || importing}
+                className={replaceExisting ? "bg-destructive hover:bg-destructive/90" : ""}
               >
-                Import {parsedTrades.length.toLocaleString()} Trades
+                {replaceExisting 
+                  ? `Replace & Import ${parsedTrades.length.toLocaleString()} Trades`
+                  : `Import ${parsedTrades.length.toLocaleString()} Trades`
+                }
               </Button>
             </>
           )}

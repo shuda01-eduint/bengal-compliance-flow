@@ -36,14 +36,20 @@ export function DepositsImportDialog({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewData, setPreviewData] = useState<ImportPreviewData | null>(null);
   const [pendingRecords, setPendingRecords] = useState<DepositsWithdrawalsRecord[]>([]);
+  const [allValidRecords, setAllValidRecords] = useState<DepositsWithdrawalsRecord[]>([]);
   const [importedCount, setImportedCount] = useState(0);
+  const [replaceExisting, setReplaceExisting] = useState(false);
+  const [importDates, setImportDates] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resetDialog = () => {
     setStep("upload");
     setPreviewData(null);
     setPendingRecords([]);
+    setAllValidRecords([]);
     setImportedCount(0);
+    setReplaceExisting(false);
+    setImportDates([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -305,7 +311,8 @@ export function DepositsImportDialog({
         return `${investorCode.toUpperCase().trim()}|${Number(amount).toFixed(2)}|${transactionType.toLowerCase().trim()}|${date}`;
       };
       
-      const importDates = [...new Set(valid.map(r => r.transaction_date || format(new Date(), "yyyy-MM-dd")))];
+      const detectedDates = [...new Set(valid.map(r => r.transaction_date || format(new Date(), "yyyy-MM-dd")))];
+      setImportDates(detectedDates);
       
       const importCounts = new Map<string, number>();
       valid.forEach(record => {
@@ -319,7 +326,7 @@ export function DepositsImportDialog({
       });
       
       const existingCounts = new Map<string, number>();
-      for (const importDate of importDates) {
+      for (const importDate of detectedDates) {
         const { data: counts, error: countError } = await supabase
           .rpc('get_deposit_withdrawal_counts', { p_date: importDate });
         
@@ -330,6 +337,19 @@ export function DepositsImportDialog({
             const key = createDuplicateKey(c.investor_code, c.amount, c.transaction_type, importDate);
             existingCounts.set(key, Number(c.count));
           });
+        }
+      }
+      
+      // Count total existing records for the dates
+      let existingRecordsCount = 0;
+      for (const importDate of detectedDates) {
+        const { count, error: countErr } = await supabase
+          .from("deposits_withdrawals")
+          .select("*", { count: "exact", head: true })
+          .eq("transaction_date", importDate);
+        
+        if (!countErr && count) {
+          existingRecordsCount += count;
         }
       }
       
@@ -383,7 +403,7 @@ export function DepositsImportDialog({
       });
 
       const preview: ImportPreviewData = {
-        fileDate: fileDate || (importDates.length === 1 ? importDates[0] : null),
+        fileDate: fileDate || (detectedDates.length === 1 ? detectedDates[0] : null),
         totalRows: filteredData.length,
         validRows: valid.length,
         errorRows: errors.length,
@@ -393,9 +413,11 @@ export function DepositsImportDialog({
         totalWithdrawals,
         depositCount,
         withdrawalCount,
+        existingRecordsCount,
       };
 
       setPendingRecords(uniqueRecords);
+      setAllValidRecords(valid);
       setPreviewData(preview);
       setPreviewOpen(true);
       setStep("preview");
@@ -412,7 +434,9 @@ export function DepositsImportDialog({
   };
 
   const handleConfirmImport = async () => {
-    if (pendingRecords.length === 0) {
+    const recordsToImport = replaceExisting ? allValidRecords : pendingRecords;
+    
+    if (recordsToImport.length === 0) {
       toast.info("No records to import");
       setPreviewOpen(false);
       setStep("upload");
@@ -423,11 +447,21 @@ export function DepositsImportDialog({
     setPreviewOpen(false);
 
     try {
+      // If replacing, delete existing records for the dates first
+      if (replaceExisting && importDates.length > 0) {
+        const { error: deleteError } = await supabase
+          .from("deposits_withdrawals")
+          .delete()
+          .in("transaction_date", importDates);
+        
+        if (deleteError) throw deleteError;
+      }
+
       const BATCH_SIZE = 500;
       let inserted = 0;
 
-      for (let i = 0; i < pendingRecords.length; i += BATCH_SIZE) {
-        const batch = pendingRecords.slice(i, i + BATCH_SIZE).map((record) => ({
+      for (let i = 0; i < recordsToImport.length; i += BATCH_SIZE) {
+        const batch = recordsToImport.slice(i, i + BATCH_SIZE).map((record) => ({
           investor_code: record.investor_code,
           transaction_type: record.transaction_type,
           amount: record.amount,
@@ -447,7 +481,11 @@ export function DepositsImportDialog({
 
       setImportedCount(inserted);
       setStep("complete");
-      toast.success(`Imported ${inserted} transactions`);
+      toast.success(
+        replaceExisting 
+          ? `Replaced data and imported ${inserted} transactions`
+          : `Imported ${inserted} transactions`
+      );
       onImportComplete?.();
       
     } catch (error: any) {
@@ -461,7 +499,9 @@ export function DepositsImportDialog({
     setPreviewOpen(false);
     setStep("upload");
     setPendingRecords([]);
+    setAllValidRecords([]);
     setPreviewData(null);
+    setReplaceExisting(false);
   };
 
   return (
@@ -553,6 +593,9 @@ export function DepositsImportDialog({
         previewData={previewData}
         onConfirm={handleConfirmImport}
         onCancel={handleCancelPreview}
+        showReplaceOption={previewData?.duplicateRows !== undefined && previewData.duplicateRows > 0}
+        replaceExisting={replaceExisting}
+        onReplaceChange={setReplaceExisting}
       />
     </>
   );
