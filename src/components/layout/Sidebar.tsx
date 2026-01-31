@@ -17,7 +17,8 @@ import {
   PieChart,
   UserCog,
   AlertTriangle,
-  TrendingUp
+  TrendingUp,
+  CalendarClock
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ const navigation: NavItem[] = [
   { name: "Admin Panel", href: "/admin/panel", icon: UserCog, adminOnly: true },
   { name: "CEO Dashboard", href: "/ceo-dashboard", icon: PieChart, adminOnly: true },
   { name: "Trade History", href: "/trade-history", icon: History, adminOnly: true },
+  { name: "EOD Processing", href: "/eod", icon: CalendarClock, adminOnly: true },
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
   { name: "Margin Loan", href: "/margin-loan", icon: TrendingUp, adminOnly: true },
   { name: "Securities", href: "/securities", icon: Landmark, adminOnly: true },
