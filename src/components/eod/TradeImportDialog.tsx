@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import { sanitizeString } from "@/lib/validation-schemas";
 
 interface ParsedTrade {
-  exchange: string;
+  cse: string;
   dp_code: string;
   investor_code: string;
   full_investor_code: string;
@@ -194,7 +194,7 @@ function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: stri
     const categoryFlag = fields[13]?.trim() || "N"; // Default to Normal
 
     return {
-      exchange,
+      cse: exchange,
       dp_code: dpCode,
       investor_code: investorCode,
       full_investor_code: fullInvestorCode,
@@ -394,7 +394,7 @@ export function TradeImportDialog({
           status: "FILL",
           side: trade.side,
           security_code: sanitizeString(trade.security_code),
-          board: trade.exchange,
+          board: trade.cse,
           trade_date: trade.trade_date,
           trade_time: trade.trade_time,
           quantity: trade.quantity,
@@ -507,7 +507,7 @@ export function TradeImportDialog({
                 DHK01|14028|LOVELLO|S|35000|65.00|GZ44||12345|13/01/2026|...
               </code>
               <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
-                <div>• Pos 1-3: Exchange (DHK/CSE)</div>
+                <div>• Pos 1-3: CSE Terminal</div>
                 <div>• Pos 4-5: DP Code</div>
                 <div>• Pos 6-10: Investor Code (5 digits)</div>
                 <div>• Variable: Instrument Code</div>
@@ -571,7 +571,7 @@ export function TradeImportDialog({
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[70px]">Exchange</TableHead>
+                      <TableHead className="w-[70px]">CSE</TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Security</TableHead>
                       <TableHead>Side</TableHead>
@@ -588,7 +588,7 @@ export function TradeImportDialog({
                     {parsedTrades.slice(0, 100).map((trade, idx) => (
                       <TableRow key={idx}>
                         <TableCell className="font-mono text-xs">
-                          {trade.exchange}
+                          {trade.cse}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           {trade.full_investor_code}
