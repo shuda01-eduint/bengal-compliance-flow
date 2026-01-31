@@ -89,10 +89,16 @@ export function EodSummaryCards({
       color: "text-primary",
     },
     {
-      title: "Net Deposits",
-      value: `৳${formatCurrency(totalDeposits - totalWithdrawals)}`,
-      icon: totalDeposits >= totalWithdrawals ? TrendingUp : TrendingDown,
-      color: totalDeposits >= totalWithdrawals ? "text-green-600" : "text-red-600",
+      title: "Deposits",
+      value: `৳${formatCurrency(totalDeposits)}`,
+      icon: TrendingUp,
+      color: "text-green-600",
+    },
+    {
+      title: "Withdrawals",
+      value: `৳${formatCurrency(totalWithdrawals)}`,
+      icon: TrendingDown,
+      color: "text-red-600",
     },
   ];
 
