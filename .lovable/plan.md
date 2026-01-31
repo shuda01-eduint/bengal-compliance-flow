@@ -1,134 +1,171 @@
 
 
-# Fix CSE Trade Parser: Field Indices Off By One
+# Unified EOD Data Import: Add Deposits/Withdrawals to EOD Page
 
-## Root Cause Analysis
+## Summary
 
-Looking at the actual uploaded file `BT_WITH_TRADE_FLAG-4.txt`:
+Consolidate all daily data imports into the EOD page by adding a **Deposits/Withdrawals Import** dialog alongside the existing Trade Import. This creates a single workflow hub where operators can:
+1. Import trade files (CSE `.txt` + DSE `.xml`)
+2. Import deposits/withdrawals (Excel)
+3. Run EOD processing
+
+This eliminates the need to visit the Trade History page for deposits/withdrawals.
+
+---
+
+## Architecture Overview
 
 ```
-DHK01|14028|LOVELLO|S|35000|65.00|GZ44|||22|13/01/2026|10:11:38|13/01/2026|10:11:38|B
+EOD Page Workflow
+┌────────────────────────────────────────────────────────────┐
+│  1. Select Date                                            │
+├────────────────────────────────────────────────────────────┤
+│  2. Import Data                                            │
+│     ┌─────────────────────┐  ┌─────────────────────────┐   │
+│     │ Import Trade Data   │  │ Import Deposits/        │   │
+│     │ (CSE .txt + DSE    │  │ Withdrawals (.xlsx)     │   │
+│     │  .xml)              │  │                         │   │
+│     └─────────────────────┘  └─────────────────────────┘   │
+├────────────────────────────────────────────────────────────┤
+│  3. Run Full EOD (reads from deposits_withdrawals table)   │
+└────────────────────────────────────────────────────────────┘
 ```
 
-The file has **15 pipe-delimited fields** (indices 0-14), but the parser is written for **13 fields** (indices 0-12). This causes all field mappings after index 0 to be off by one position.
-
-### Actual Field Structure
-
-| Index | Actual Content | Parser Expects | Result |
-|-------|---------------|----------------|--------|
-| 0 | DHK01 (Terminal) | Terminal | Correct |
-| 1 | **14028** (Unknown ID) | Security Code | **WRONG** |
-| 2 | LOVELLO (Security) | Side | **WRONG** - parsed as side causes "Invalid side" |
-| 3 | S (Side) | Quantity | **WRONG** - parseInt("S") = NaN |
-| 4 | 35000 (Qty) | Price | **WRONG** |
-| 5 | 65.00 (Price) | Investor Code | **WRONG** |
-| 6 | GZ44 (Investor) | Empty | **WRONG** |
-| ... | ... | ... | ... |
-
-### Why 12 Validation Errors Occur
-
-Every line fails validation because:
-- `fields[2]` (LOVELLO) is tested as Side ("B" or "S") → Fails validation
-- `fields[3]` ("S") is parsed as quantity → `parseInt("S")` = NaN → Invalid quantity
-- The cascade of wrong field positions causes parse failures
-
-## Solution
-
-Update the parser to use the correct field indices based on the actual 15-field CSE format:
-
-| Index | Field | Example |
-|-------|-------|---------|
-| 0 | CSE Terminal | DHK01 |
-| 1 | Unknown ID (ignore) | 14028 |
-| 2 | Security Code | LOVELLO |
-| 3 | Side (B/S) | S |
-| 4 | Quantity | 35000 |
-| 5 | Price | 65.00 |
-| 6 | Investor Code | GZ44 |
-| 7-8 | Empty | (unused) |
-| 9 | Trade Sequence | 22 |
-| 10 | Trade Date | 13/01/2026 |
-| 11 | Trade Time | 10:11:38 |
-| 12 | Settlement Date | 13/01/2026 |
-| 13 | Settlement Time | 10:11:38 |
-| 14 | Category Flag | B |
+---
 
 ## Changes Required
 
-### File: `src/components/eod/TradeImportDialog.tsx`
+### 1. New Component: `DepositsImportDialog.tsx`
 
-### 1. Update Minimum Field Count Validation (Line 119-120)
+Create a new dialog component in `src/components/eod/` that handles deposits/withdrawals import with the same UX pattern as TradeImportDialog.
 
-Change from:
+**Features to include:**
+- Excel file upload (`.xlsx`, `.xls`)
+- Flexible column mapping (handles various column name formats)
+- File date extraction from embedded "Date : DD-MMM-YYYY" headers
+- Transaction type normalization (Receipt → Deposit, Payment → Withdrawal)
+- Duplicate detection using count-based comparison
+- Preview dialog before final import
+- Insert into `deposits_withdrawals` table
+
+**Logic to port from DepositsWithdrawalsTable.tsx:**
+- `handleFileUpload` function (lines 288-654)
+- `parseNumber` helper
+- `normalizeTransactionType` helper
+- Date parsing logic (Excel serial numbers, DD/MM/YYYY, DD-MMM-YYYY)
+- Duplicate detection using `get_deposit_withdrawal_counts` RPC
+
+### 2. Update `EodActionButtons.tsx`
+
+Add a new button for importing deposits/withdrawals:
+
+| Current Buttons | After |
+|-----------------|-------|
+| Import Trade Data | Import Trades |
+| Process Staged Trades | **Import Deposits/Withdrawals** (NEW) |
+| Calculate Settlements | Process Staged Trades |
+| Run Full EOD | Calculate Settlements |
+| Generate Report | Run Full EOD |
+| Clear Selected | Generate Report |
+| | Clear Selected |
+
+**New prop:** `onImportDeposits: () => void`
+
+### 3. Update `EodPage.tsx`
+
+Add state and handler for the deposits import dialog:
+
 ```typescript
-if (fields.length < 9) {
-  return { line: lineNumber, message: `Expected at least 9 pipe-delimited fields, got ${fields.length}` ...
+// New state
+const [depositsDialogOpen, setDepositsDialogOpen] = useState(false);
+
+// New handler
+const handleImportDeposits = () => {
+  setDepositsDialogOpen(true);
+};
+
+// Add to render
+<DepositsImportDialog
+  open={depositsDialogOpen}
+  onOpenChange={setDepositsDialogOpen}
+  onImportComplete={() => {
+    queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
+    toast.success("Ready to run EOD");
+  }}
+/>
 ```
 
-To:
+### 4. Reuse `ImportPreviewDialog.tsx`
+
+The existing `ImportPreviewDialog` component is already well-designed for deposits/withdrawals preview. It will be reused directly in the new `DepositsImportDialog`.
+
+---
+
+## File Changes Summary
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/components/eod/DepositsImportDialog.tsx` | **CREATE** | New dialog for deposits/withdrawals import |
+| `src/components/eod/EodActionButtons.tsx` | MODIFY | Add "Import Deposits/Withdrawals" button |
+| `src/pages/EodPage.tsx` | MODIFY | Add state and dialog for deposits import |
+
+---
+
+## DepositsImportDialog Component Structure
+
 ```typescript
-if (fields.length < 11) {
-  return { line: lineNumber, message: `Expected at least 11 pipe-delimited fields, got ${fields.length}` ...
+// Props
+interface DepositsImportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onImportComplete?: () => void;
+}
+
+// Steps
+type ImportStep = "upload" | "analyzing" | "preview" | "importing" | "complete";
+
+// Key features:
+// 1. Upload .xlsx/.xls file
+// 2. Parse and validate records using DepositsWithdrawalsRecordSchema
+// 3. Detect duplicates via RPC call
+// 4. Show preview with totals
+// 5. Insert unique records
+// 6. Show completion summary
 ```
 
-### 2. Fix Field Index Mappings (Lines 131-190)
+---
 
-| Current Index | New Index | Field |
-|---------------|-----------|-------|
-| `fields[1]` | `fields[2]` | Security Code |
-| `fields[2]` | `fields[3]` | Side |
-| `fields[3]` | `fields[4]` | Quantity |
-| `fields[4]` | `fields[5]` | Price |
-| `fields[5]` | `fields[6]` | Investor Code |
-| `fields[8]` | `fields[10]` | Trade Date |
-| `fields[9]` | `fields[11]` | Trade Time |
-| `fields[10]` | `fields[12]` | Settlement Date |
-| `fields[11]` | `fields[13]` | Settlement Time |
-| `fields[12]` | `fields[14]` | Category Flag |
+## Workflow After Implementation
 
-### 3. Update exec_id to Include Trade Sequence (Line 181)
+**Daily EOD Operator Workflow (Single Page):**
 
-Include the trade sequence number (index 9) in the exec_id for better uniqueness:
-```typescript
-const tradeSequence = fields[9]?.trim() || "";
-const execId = `CSE_${cseTerminal}_${fullInvestorCode}_${securityCode}_${tradeDateFormatted}_${side}_${quantity}_${price}_${tradeSequence}`;
-```
+1. Navigate to `/eod`
+2. Select the EOD date
+3. Click **"Import Trades"** → Upload CSE `.txt` or DSE `.xml` file
+4. Click **"Import Deposits/Withdrawals"** → Upload Excel file from bank/treasury
+5. Click **"Run Full EOD"** → System reads from `deposits_withdrawals` table and calculates snapshots
+6. Review summary and logs
 
-### 4. Update Format Documentation (Lines 501-516)
+**Benefits:**
+- Single-page workflow for all daily data
+- No need to navigate to Trade History page
+- Consistent UX with preview dialogs
+- Duplicate detection prevents double-imports
 
-Update the example and field descriptions to match the actual 15-field format:
-```
-DHK01|14028|LOVELLO|S|35000|65.00|GZ44|||22|13/01/2026|10:11:38|13/01/2026|10:11:38|B
-```
+---
 
-Field descriptions:
-- Field 1: CSE Terminal (DHK01, DHK05)
-- Field 2: Unknown ID (ignored)
-- Field 3: Security Code (LOVELLO)
-- Field 4: Side (B=Buy, S=Sell)
-- Field 5: Quantity (35000)
-- Field 6: Price (65.00)
-- Field 7: Investor Code (GZ44, NJ21)
-- Field 8-9: Empty
-- Field 10: Trade Sequence (22)
-- Field 11: Trade Date (DD/MM/YYYY)
-- Field 12: Trade Time (HH:MM:SS)
-- Field 13-14: Settlement Date/Time
-- Field 15: Category (B/N)
+## Technical Notes
 
-## Technical Summary
+1. **Duplicate Detection**: Uses the existing `get_deposit_withdrawal_counts` RPC function which compares (investor_code, amount, transaction_type, date) tuples
 
-The core issue is that the actual CSE file has an additional field at index 1 (a numeric ID like "14028") that the current parser doesn't account for. All subsequent field indices need to be shifted by +1.
+2. **Transaction Type Mapping**:
+   - Receipt, Credit, Deposit → "Deposit"
+   - Payment, Debit, Withdrawal → "Withdrawal"
 
-### Before (Wrong)
-```typescript
-const securityCode = fields[1].trim(); // Gets "14028" instead of "LOVELLO"
-const sideChar = fields[2].trim();     // Gets "LOVELLO" instead of "S"
-```
+3. **Date Parsing Priority**:
+   - First: File header date ("Date : 12-Jan-2026")
+   - Second: Row-level date column
+   - Fallback: Current date
 
-### After (Correct)
-```typescript
-const securityCode = fields[2].trim(); // Gets "LOVELLO"
-const sideChar = fields[3].trim();     // Gets "S"
-```
+4. **Validation**: Uses existing `DepositsWithdrawalsRecordSchema` from `validation-schemas.ts`
 
