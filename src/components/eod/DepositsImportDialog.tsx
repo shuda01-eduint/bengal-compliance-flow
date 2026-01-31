@@ -70,6 +70,7 @@ export function DepositsImportDialog({
     return 0;
   };
 
+  // Normalize to cash_ledger_txn type enum: DEPOSIT, WITHDRAW, TRADE_CASH, COMMISSION, INTEREST, OTHER
   const normalizeTransactionType = (rawType: string): string => {
     const lower = rawType.toLowerCase().trim();
     
@@ -81,7 +82,7 @@ export function DepositsImportDialog({
       lower.includes("receipt") ||
       lower.includes("deposit")
     ) {
-      return "Deposit";
+      return "DEPOSIT";
     }
     
     if (
@@ -94,10 +95,18 @@ export function DepositsImportDialog({
       lower.includes("withdraw") ||
       lower.includes("paid")
     ) {
-      return "Withdrawal";
+      return "WITHDRAW";
+    }
+
+    if (lower.includes("commission") || lower.includes("brokerage")) {
+      return "COMMISSION";
+    }
+
+    if (lower.includes("interest")) {
+      return "INTEREST";
     }
     
-    return rawType;
+    return "OTHER";
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -286,7 +295,7 @@ export function DepositsImportDialog({
         return {
           investor_code: investorCode,
           investor_name: investorName,
-          transaction_type: transactionType || "Deposit",
+          transaction_type: transactionType || "DEPOSIT",
           amount: amount,
           transaction_date: transactionDate || format(new Date(), "yyyy-MM-dd"),
           remarks: remarks,
@@ -308,7 +317,7 @@ export function DepositsImportDialog({
 
       // Duplicate detection
       const createDuplicateKey = (investorCode: string, amount: number, transactionType: string, date: string) => {
-        return `${investorCode.toUpperCase().trim()}|${Number(amount).toFixed(2)}|${transactionType.toLowerCase().trim()}|${date}`;
+        return `${investorCode.toUpperCase().trim()}|${Number(amount).toFixed(2)}|${transactionType.toUpperCase().trim()}|${date}`;
       };
       
       const detectedDates = [...new Set(valid.map(r => r.transaction_date || format(new Date(), "yyyy-MM-dd")))];
@@ -325,31 +334,26 @@ export function DepositsImportDialog({
         importCounts.set(key, (importCounts.get(key) || 0) + 1);
       });
       
-      const existingCounts = new Map<string, number>();
-      for (const importDate of detectedDates) {
-        const { data: counts, error: countError } = await supabase
-          .rpc('get_deposit_withdrawal_counts', { p_date: importDate });
-        
-        if (countError) {
-          console.error("Error fetching counts:", countError);
-        } else if (counts) {
-          counts.forEach((c: { investor_code: string; amount: number; transaction_type: string; count: number }) => {
-            const key = createDuplicateKey(c.investor_code, c.amount, c.transaction_type, importDate);
-            existingCounts.set(key, Number(c.count));
-          });
-        }
-      }
-      
-      // Count total existing records for the dates
+      // Check for existing records in cash_ledger_txn table
       let existingRecordsCount = 0;
+      const existingCounts = new Map<string, number>();
+      
       for (const importDate of detectedDates) {
-        const { count, error: countErr } = await supabase
-          .from("deposits_withdrawals")
-          .select("*", { count: "exact", head: true })
-          .eq("transaction_date", importDate);
+        // Get existing records from cash_ledger_txn
+        const { data: existingData, count, error: countErr } = await supabase
+          .from("cash_ledger_txn")
+          .select("investor_code, amount, type", { count: "exact" })
+          .eq("txn_date", importDate);
         
         if (!countErr && count) {
           existingRecordsCount += count;
+        }
+        
+        if (existingData) {
+          existingData.forEach((c: { investor_code: string; amount: number; type: string }) => {
+            const key = createDuplicateKey(c.investor_code, c.amount, c.type || "OTHER", importDate);
+            existingCounts.set(key, (existingCounts.get(key) || 0) + 1);
+          });
         }
       }
       
@@ -385,18 +389,11 @@ export function DepositsImportDialog({
       let withdrawalCount = 0;
       
       uniqueRecords.forEach(record => {
-        const lower = record.transaction_type.toLowerCase();
-        if (
-          lower === "deposit" ||
-          lower === "receipt" ||
-          lower === "receive" ||
-          lower === "credit" ||
-          lower.includes("deposit") ||
-          lower.includes("receipt")
-        ) {
+        const upper = record.transaction_type.toUpperCase();
+        if (upper === "DEPOSIT") {
           totalDeposits += record.amount;
           depositCount++;
-        } else {
+        } else if (upper === "WITHDRAW") {
           totalWithdrawals += record.amount;
           withdrawalCount++;
         }
@@ -450,9 +447,9 @@ export function DepositsImportDialog({
       // If replacing, delete existing records for the dates first
       if (replaceExisting && importDates.length > 0) {
         const { error: deleteError } = await supabase
-          .from("deposits_withdrawals")
+          .from("cash_ledger_txn")
           .delete()
-          .in("transaction_date", importDates);
+          .in("txn_date", importDates);
         
         if (deleteError) throw deleteError;
       }
@@ -463,16 +460,15 @@ export function DepositsImportDialog({
       for (let i = 0; i < recordsToImport.length; i += BATCH_SIZE) {
         const batch = recordsToImport.slice(i, i + BATCH_SIZE).map((record) => ({
           investor_code: record.investor_code,
-          transaction_type: record.transaction_type,
+          type: record.transaction_type, // Now uses DEPOSIT, WITHDRAW, etc.
           amount: record.amount,
-          transaction_date: record.transaction_date || format(new Date(), "yyyy-MM-dd"),
-          investor_name: record.investor_name || null,
-          rm_email: record.rm_email || null,
-          remarks: record.remarks || null,
+          txn_date: record.transaction_date || format(new Date(), "yyyy-MM-dd"),
+          description: record.remarks || null,
+          reference: null,
         }));
         
         const { error } = await supabase
-          .from("deposits_withdrawals")
+          .from("cash_ledger_txn")
           .insert(batch);
 
         if (error) throw error;
@@ -483,8 +479,8 @@ export function DepositsImportDialog({
       setStep("complete");
       toast.success(
         replaceExisting 
-          ? `Replaced data and imported ${inserted} transactions`
-          : `Imported ${inserted} transactions`
+          ? `Replaced data and imported ${inserted} transactions to cash ledger`
+          : `Imported ${inserted} transactions to cash ledger`
       );
       onImportComplete?.();
       

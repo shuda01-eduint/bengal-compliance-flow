@@ -326,6 +326,39 @@ export type Database = {
         }
         Relationships: []
       }
+      cash_ledger_txn: {
+        Row: {
+          amount: number
+          created_at: string | null
+          description: string | null
+          investor_code: string
+          reference: string | null
+          txn_date: string
+          txn_id: number
+          type: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          description?: string | null
+          investor_code: string
+          reference?: string | null
+          txn_date: string
+          txn_id?: number
+          type?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          description?: string | null
+          investor_code?: string
+          reference?: string | null
+          txn_date?: string
+          txn_id?: number
+          type?: string | null
+        }
+        Relationships: []
+      }
       ceo_dashboard_thresholds: {
         Row: {
           created_at: string | null
@@ -434,6 +467,33 @@ export type Database = {
           min_base_amount?: number | null
           min_charge?: number | null
           rate?: number
+        }
+        Relationships: []
+      }
+      cheque_in_hand: {
+        Row: {
+          amount: number
+          cheque_date: string
+          created_at: string | null
+          id: number
+          investor_code: string
+          status: string | null
+        }
+        Insert: {
+          amount: number
+          cheque_date: string
+          created_at?: string | null
+          id?: number
+          investor_code: string
+          status?: string | null
+        }
+        Update: {
+          amount?: number
+          cheque_date?: string
+          created_at?: string | null
+          id?: number
+          investor_code?: string
+          status?: string | null
         }
         Relationships: []
       }
@@ -934,6 +994,84 @@ export type Database = {
         }
         Relationships: []
       }
+      eod_instrument_position: {
+        Row: {
+          avg_cost: number
+          instrument: string
+          investor_code: string
+          saleable: number
+          total_cost: number
+          total_market_value: number
+          total_stock: number
+          trade_date: string
+        }
+        Insert: {
+          avg_cost: number
+          instrument: string
+          investor_code: string
+          saleable: number
+          total_cost: number
+          total_market_value: number
+          total_stock: number
+          trade_date: string
+        }
+        Update: {
+          avg_cost?: number
+          instrument?: string
+          investor_code?: string
+          saleable?: number
+          total_cost?: number
+          total_market_value?: number
+          total_stock?: number
+          trade_date?: string
+        }
+        Relationships: []
+      }
+      eod_investor_balance: {
+        Row: {
+          accrued_int: number
+          boid: string | null
+          cheque_in_tran_hand: number
+          closing_ledger_balance: number
+          d_e_rate: number | null
+          equity: number
+          investor_code: string
+          matured_balance: number
+          opening_ledger_balance: number
+          receivable_sales: number
+          rm_id: string | null
+          trade_date: string
+        }
+        Insert: {
+          accrued_int?: number
+          boid?: string | null
+          cheque_in_tran_hand?: number
+          closing_ledger_balance?: number
+          d_e_rate?: number | null
+          equity?: number
+          investor_code: string
+          matured_balance?: number
+          opening_ledger_balance?: number
+          receivable_sales?: number
+          rm_id?: string | null
+          trade_date: string
+        }
+        Update: {
+          accrued_int?: number
+          boid?: string | null
+          cheque_in_tran_hand?: number
+          closing_ledger_balance?: number
+          d_e_rate?: number | null
+          equity?: number
+          investor_code?: string
+          matured_balance?: number
+          opening_ledger_balance?: number
+          receivable_sales?: number
+          rm_id?: string | null
+          trade_date?: string
+        }
+        Relationships: []
+      }
       eod_ledger_snapshots: {
         Row: {
           account_type: string | null
@@ -1209,6 +1347,24 @@ export type Database = {
         }
         Relationships: []
       }
+      instrument_prices_eod: {
+        Row: {
+          eod_price: number
+          instrument: string
+          trade_date: string
+        }
+        Insert: {
+          eod_price: number
+          instrument: string
+          trade_date: string
+        }
+        Update: {
+          eod_price?: number
+          instrument?: string
+          trade_date?: string
+        }
+        Relationships: []
+      }
       investor_agent_assignments: {
         Row: {
           agent_id: string
@@ -1236,6 +1392,78 @@ export type Database = {
           investor_code?: string
           percentage?: number
           updated_at?: string
+        }
+        Relationships: []
+      }
+      investor_change_logs: {
+        Row: {
+          approval_status: string | null
+          approved_at: string | null
+          approved_by: string | null
+          changed_at: string | null
+          changed_by: string
+          field_name: string
+          id: number
+          investor_code: string
+          new_value: string | null
+          old_value: string | null
+        }
+        Insert: {
+          approval_status?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          changed_at?: string | null
+          changed_by: string
+          field_name: string
+          id?: number
+          investor_code: string
+          new_value?: string | null
+          old_value?: string | null
+        }
+        Update: {
+          approval_status?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          changed_at?: string | null
+          changed_by?: string
+          field_name?: string
+          id?: number
+          investor_code?: string
+          new_value?: string | null
+          old_value?: string | null
+        }
+        Relationships: []
+      }
+      investor_charge_config: {
+        Row: {
+          charge_rate: number
+          commission_rate: number
+          created_at: string | null
+          d_e_limit: number | null
+          effective_from: string
+          effective_to: string | null
+          id: number
+          investor_code: string
+        }
+        Insert: {
+          charge_rate: number
+          commission_rate: number
+          created_at?: string | null
+          d_e_limit?: number | null
+          effective_from: string
+          effective_to?: string | null
+          id?: number
+          investor_code: string
+        }
+        Update: {
+          charge_rate?: number
+          commission_rate?: number
+          created_at?: string | null
+          d_e_limit?: number | null
+          effective_from?: string
+          effective_to?: string | null
+          id?: number
+          investor_code?: string
         }
         Relationships: []
       }
@@ -2089,6 +2317,54 @@ export type Database = {
           trading_code?: string
           trailing_pe_ratio?: number | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      trade_file: {
+        Row: {
+          category: string | null
+          commission: number | null
+          created_at: string | null
+          exchange_code: string | null
+          fill_type: string | null
+          instrument: string
+          investor_code: string
+          price: number
+          qty: number
+          settlement_date: string
+          side: string | null
+          trade_date: string
+          trade_id: number
+        }
+        Insert: {
+          category?: string | null
+          commission?: number | null
+          created_at?: string | null
+          exchange_code?: string | null
+          fill_type?: string | null
+          instrument: string
+          investor_code: string
+          price: number
+          qty: number
+          settlement_date: string
+          side?: string | null
+          trade_date: string
+          trade_id?: number
+        }
+        Update: {
+          category?: string | null
+          commission?: number | null
+          created_at?: string | null
+          exchange_code?: string | null
+          fill_type?: string | null
+          instrument?: string
+          investor_code?: string
+          price?: number
+          qty?: number
+          settlement_date?: string
+          side?: string | null
+          trade_date?: string
+          trade_id?: number
         }
         Relationships: []
       }

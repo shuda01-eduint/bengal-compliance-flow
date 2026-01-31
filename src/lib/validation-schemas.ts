@@ -142,6 +142,65 @@ export const InvestorRecordSchema = z.object({
 
 export type InvestorRecord = z.infer<typeof InvestorRecordSchema>;
 
+// Trade file staging schema (new EOD processing table)
+export const TradeFileRecordSchema = z.object({
+  trade_date: z.string().min(1, "Trade date is required"),
+  investor_code: z.string().min(1, "Investor code is required").max(50, "Investor code too long"),
+  instrument: z.string().min(1, "Instrument is required").max(50, "Instrument too long"),
+  side: z.enum(['BUY', 'SELL']),
+  qty: z.number().finite("Must be a valid number").min(0, "Cannot be negative"),
+  price: z.number().finite("Must be a valid number").min(0, "Cannot be negative"),
+  settlement_date: z.string().min(1, "Settlement date is required"),
+  commission: z.number().finite("Must be a valid number").default(0),
+  category: z.string().max(10, "Category too long").nullable().optional(),
+  fill_type: z.string().max(50, "Fill type too long").nullable().optional(),
+  exchange_code: z.string().max(50, "Exchange code too long").nullable().optional(),
+});
+
+export type TradeFileRecord = z.infer<typeof TradeFileRecordSchema>;
+
+// Cash ledger transaction schema (deposits/withdrawals with types)
+export const CashLedgerTxnSchema = z.object({
+  txn_date: z.string().min(1, "Transaction date is required"),
+  investor_code: z.string().min(1, "Investor code is required").max(50, "Investor code too long"),
+  type: z.enum(['DEPOSIT', 'WITHDRAW', 'TRADE_CASH', 'COMMISSION', 'INTEREST', 'OTHER']),
+  amount: z.number().finite("Must be a valid number"),
+  description: z.string().max(500, "Description too long").nullable().optional(),
+  reference: z.string().max(255, "Reference too long").nullable().optional(),
+});
+
+export type CashLedgerTxnRecord = z.infer<typeof CashLedgerTxnSchema>;
+
+// EOD investor balance schema
+export const EodInvestorBalanceSchema = z.object({
+  trade_date: z.string().min(1, "Trade date is required"),
+  investor_code: z.string().min(1, "Investor code is required").max(50, "Investor code too long"),
+  boid: z.string().max(50, "BOID too long").nullable().optional(),
+  rm_id: z.string().max(50, "RM ID too long").nullable().optional(),
+  opening_ledger_balance: z.number().finite("Must be a valid number").default(0),
+  matured_balance: z.number().finite("Must be a valid number").default(0),
+  receivable_sales: z.number().finite("Must be a valid number").default(0),
+  cheque_in_tran_hand: z.number().finite("Must be a valid number").default(0),
+  accrued_int: z.number().finite("Must be a valid number").default(0),
+  closing_ledger_balance: z.number().finite("Must be a valid number").default(0),
+  equity: z.number().finite("Must be a valid number").default(0),
+  d_e_rate: z.number().finite("Must be a valid number").nullable().optional(),
+});
+
+export type EodInvestorBalanceRecord = z.infer<typeof EodInvestorBalanceSchema>;
+
+// Investor charge configuration schema
+export const InvestorChargeConfigSchema = z.object({
+  investor_code: z.string().min(1, "Investor code is required").max(50, "Investor code too long"),
+  commission_rate: z.number().finite("Must be a valid number").min(0).max(100),
+  charge_rate: z.number().finite("Must be a valid number").min(0).max(100),
+  d_e_limit: z.number().finite("Must be a valid number").nullable().optional(),
+  effective_from: z.string().min(1, "Effective from date is required"),
+  effective_to: z.string().nullable().optional(),
+});
+
+export type InvestorChargeConfigRecord = z.infer<typeof InvestorChargeConfigSchema>;
+
 // Generic validation function
 export function validateRecords<T>(
   records: unknown[],

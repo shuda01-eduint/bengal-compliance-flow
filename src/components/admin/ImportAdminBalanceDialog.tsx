@@ -125,10 +125,11 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       setIsCheckingCount(true);
       const dateStr = format(balanceDate, "yyyy-MM-dd");
       
+      // Check eod_investor_balance table (new table)
       const { count, error } = await supabase
-        .from("eod_ledger_snapshots")
+        .from("eod_investor_balance")
         .select("*", { count: "exact", head: true })
-        .eq("eod_date", dateStr);
+        .eq("trade_date", dateStr);
 
       if (!error) {
         setExistingCount(count || 0);
@@ -362,15 +363,15 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
     const snapshotData = Array.from(uniqueInvestors.values());
 
     try {
-      // STEP 1: Clear existing EOD snapshots for this date
-      setProgressStage("Clearing existing snapshots for this date...");
+      // STEP 1: Clear existing eod_investor_balance for this date
+      setProgressStage("Clearing existing balances for this date...");
       const { error: deleteError } = await supabase
-        .from("eod_ledger_snapshots")
+        .from("eod_investor_balance")
         .delete()
-        .eq("eod_date", dateStr);
+        .eq("trade_date", dateStr);
 
       if (deleteError) {
-        importResults.errors.push(`Failed to clear existing snapshots: ${deleteError.message}`);
+        importResults.errors.push(`Failed to clear existing balances: ${deleteError.message}`);
         throw new Error(deleteError.message);
       }
       setProgress(5);
@@ -379,20 +380,20 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       if (clearAfterDate) {
         setProgressStage("Clearing EOD data after baseline date...");
         
-        // Clear eod_ledger_snapshots after this date
+        // Clear eod_investor_balance after this date
         const { data: deletedSnapshots, error: snapshotClearError } = await supabase
-          .from("eod_ledger_snapshots")
+          .from("eod_investor_balance")
           .delete()
-          .gt("eod_date", dateStr)
-          .select("id");
+          .gt("trade_date", dateStr)
+          .select("investor_code");
 
         if (snapshotClearError) {
-          importResults.errors.push(`Failed to clear future snapshots: ${snapshotClearError.message}`);
+          importResults.errors.push(`Failed to clear future balances: ${snapshotClearError.message}`);
         } else {
           importResults.eod_cleared_after = deletedSnapshots?.length || 0;
         }
 
-        // Clear eod_run_history after this date
+        // Also clear old eod_run_history if it exists
         const { error: historyClearError } = await supabase
           .from("eod_run_history")
           .delete()
@@ -404,28 +405,33 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       }
       setProgress(15);
 
-      // STEP 3: Import EOD ledger snapshots (deduplicated - one per investor)
+      // STEP 3: Import to eod_investor_balance (new table with more fields)
       setProgressStage(`Importing ${snapshotData.length} unique investor balances...`);
       for (let i = 0; i < snapshotData.length; i += batchSize) {
         const batch = snapshotData.slice(i, i + batchSize);
         
         const records = batch.map((item) => ({
-          eod_date: dateStr,
+          trade_date: dateStr,
           investor_code: item.investor_code,
-          ledger_balance: item.ledger_balance,
-          closing_balance: item.ledger_balance, // Set closing_balance for baseline
-          opening_balance: 0, // Baseline has no prior
-          investor_name: item.investor_name || null,
-          rm_email: item.rm_email || null,
+          boid: item.boid || null,
+          rm_id: item.rm_email || null, // Map rm_email to rm_id for now
+          opening_ledger_balance: 0, // Baseline has no prior
+          matured_balance: 0,
+          receivable_sales: 0,
+          cheque_in_tran_hand: 0,
+          accrued_int: 0,
+          closing_ledger_balance: item.ledger_balance,
+          equity: (item.market_value || 0) + item.ledger_balance,
+          d_e_rate: null,
         }));
 
         const { error } = await supabase
-          .from("eod_ledger_snapshots")
+          .from("eod_investor_balance")
           .insert(records);
 
         if (error) {
-          console.error("Snapshot insert error:", error);
-          importResults.errors.push(`Snapshot batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
+          console.error("Balance insert error:", error);
+          importResults.errors.push(`Balance batch ${Math.floor(i / batchSize) + 1}: ${error.message}`);
         } else {
           importResults.snapshots_imported += batch.length;
         }

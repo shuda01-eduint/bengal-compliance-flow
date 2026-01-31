@@ -25,6 +25,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Upload, FileText, AlertCircle, CheckCircle2, Loader2, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { calculateSettlementDate } from "@/lib/settlement-utils";
+import { format } from "date-fns";
 import { sanitizeString } from "@/lib/validation-schemas";
 
 interface ParsedTrade {
@@ -557,14 +559,18 @@ export function TradeImportDialog({
       setParsedTrades(trades);
       setValidationErrors(errors);
 
-      // Count existing trades for the parsed dates
+      // Count existing trades for the parsed dates in trade_file table
       if (trades.length > 0) {
-        const tradeDates = [...new Set(trades.map(t => t.trade_date))];
+        const tradeDates = [...new Set(trades.map(t => {
+          // Convert YYYYMMDD to YYYY-MM-DD for database query
+          const d = t.trade_date;
+          return d.length === 8 ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}` : d;
+        }))];
         let totalExisting = 0;
         
         for (const tradeDate of tradeDates) {
           const { count, error: countErr } = await supabase
-            .from("trade_history")
+            .from("trade_file")
             .select("*", { count: "exact", head: true })
             .eq("trade_date", tradeDate);
           
@@ -604,13 +610,22 @@ export function TradeImportDialog({
     setProgress(0);
 
     try {
+      // Convert YYYYMMDD to YYYY-MM-DD for database
+      const formatTradeDateForDb = (yyyymmdd: string): string => {
+        if (yyyymmdd.length === 8 && !yyyymmdd.includes("-")) {
+          return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
+        }
+        return yyyymmdd;
+      };
+
+      // Get unique trade dates for deletion/checking
+      const tradeDatesForDb = [...new Set(parsedTrades.map(t => formatTradeDateForDb(t.trade_date)))];
+
       // If replacing, delete existing trades for the dates first
       if (replaceExisting) {
-        const tradeDates = [...new Set(parsedTrades.map(t => t.trade_date))];
-        
-        for (const tradeDate of tradeDates) {
+        for (const tradeDate of tradeDatesForDb) {
           const { error: deleteError } = await supabase
-            .from("trade_history")
+            .from("trade_file")
             .delete()
             .eq("trade_date", tradeDate);
           
@@ -618,94 +633,31 @@ export function TradeImportDialog({
         }
       }
 
-      // Fetch investor/client data for denormalization
-      const clientCodes = [...new Set(parsedTrades.map((t) => t.full_investor_code))];
-
-      const [investorsResult, clientsResult, agentCodesResult] = await Promise.all([
-        supabase
-          .from("investors")
-          .select("investor_code, brokerage_commission, interest_rate, account_type, investor_type")
-          .in("investor_code", clientCodes),
-        supabase
-          .from("clients")
-          .select("inv_code, ledger_balance, rm_name")
-          .in("inv_code", clientCodes),
-        supabase
-          .from("agent_codes")
-          .select("investor_code, agent_id, rm_id")
-          .in("investor_code", clientCodes),
-      ]);
-
-      // Build lookup maps
-      const investorMap: Record<string, any> = {};
-      const clientMap: Record<string, any> = {};
-      const agentMap: Record<string, any> = {};
-
-      investorsResult.data?.forEach((inv) => {
-        investorMap[inv.investor_code] = inv;
-      });
-
-      clientsResult.data?.forEach((client) => {
-        clientMap[client.inv_code] = client;
-      });
-
-      agentCodesResult.data?.forEach((ac) => {
-        agentMap[ac.investor_code] = ac;
-      });
-
-      // Get department info
-      const rmNames = [...new Set(clientsResult.data?.map((c) => c.rm_name).filter(Boolean) || [])];
-      const departmentMap: Record<string, string> = {};
-
-      if (rmNames.length > 0) {
-        const { data: employees } = await supabase
-          .from("employees")
-          .select("name, department")
-          .in("name", rmNames);
-
-        employees?.forEach((emp) => {
-          if (emp.name) departmentMap[emp.name] = emp.department;
-        });
-      }
-
-      // Prepare records for insert
+      // Prepare records for trade_file table with settlement date calculation
       const records = parsedTrades.map((trade) => {
-        const investorData = investorMap[trade.full_investor_code];
-        const clientData = clientMap[trade.full_investor_code];
-        const agentData = agentMap[trade.full_investor_code];
-        const rmName = clientData?.rm_name || null;
-        const department = rmName ? departmentMap[rmName] || null : null;
+        const tradeDateStr = formatTradeDateForDb(trade.trade_date);
+        const tradeDate = new Date(tradeDateStr);
+        
+        // Calculate settlement date using category (T+2 for most, T+3 for Z category)
+        const settlementDate = calculateSettlementDate(tradeDate, trade.category_flag);
+        const settlementDateStr = format(settlementDate, "yyyy-MM-dd");
 
         return {
-          action: "EXEC",
-          status: "FILL",
+          trade_date: tradeDateStr,
+          investor_code: trade.full_investor_code,
+          instrument: sanitizeString(trade.security_code),
           side: trade.side,
-          security_code: sanitizeString(trade.security_code),
-          board: trade.cse_terminal,
-          trade_date: trade.trade_date,
-          trade_time: trade.trade_time,
-          quantity: trade.quantity,
+          qty: trade.quantity,
           price: trade.price,
-          value: trade.value,
-          client_code: trade.full_investor_code,
-          category: trade.category_flag,
+          settlement_date: settlementDateStr,
+          commission: 0, // Commission calculated during EOD processing
+          category: trade.category_flag || null,
           fill_type: "FILL",
-          exec_id: trade.exec_id,
-          file_name: trade.file_name,
-          // Denormalized data
-          brokerage_commission: investorData?.brokerage_commission ?? null,
-          interest_rate: investorData?.interest_rate ?? null,
-          account_type: investorData?.account_type ?? null,
-          investor_type: investorData?.investor_type ?? null,
-          ledger_balance_snapshot: clientData?.ledger_balance ?? null,
-          agent_id: agentData?.agent_id ?? null,
-          rm_id: agentData?.rm_id ?? null,
-          rm_name: rmName,
-          department,
+          exchange_code: trade.cse_terminal,
         };
       });
 
-      // Insert in batches (use insert if replacing, otherwise upsert)
+      // Insert in batches
       const batchSize = 1000;
       let imported = 0;
       let errorCount = 0;
@@ -713,19 +665,7 @@ export function TradeImportDialog({
       for (let i = 0; i < records.length; i += batchSize) {
         const batch = records.slice(i, i + batchSize);
 
-        let error;
-        if (replaceExisting) {
-          // Fresh insert since we deleted existing
-          const result = await supabase.from("trade_history").insert(batch);
-          error = result.error;
-        } else {
-          // Upsert to handle duplicates
-          const result = await supabase.from("trade_history").upsert(batch, {
-            onConflict: "exec_id,trade_date,client_code,board",
-            ignoreDuplicates: false,
-          });
-          error = result.error;
-        }
+        const { error } = await supabase.from("trade_file").insert(batch);
 
         if (error) {
           console.error("Batch insert error:", error);
@@ -751,8 +691,8 @@ export function TradeImportDialog({
 
       toast.success("Import complete", {
         description: replaceExisting 
-          ? `Replaced data and imported ${imported} trades`
-          : `${imported} trades imported successfully`,
+          ? `Replaced data and imported ${imported} trades to staging`
+          : `${imported} trades imported to staging`,
       });
 
       onImportComplete?.();
