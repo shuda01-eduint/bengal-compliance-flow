@@ -14,6 +14,7 @@ import { EodSummaryCards } from "@/components/eod/EodSummaryCards";
 import { EodLogTable } from "@/components/eod/EodLogTable";
 import { EodProgressBar } from "@/components/eod/EodProgressBar";
 import { TradeImportDialog } from "@/components/eod/TradeImportDialog";
+import { DepositsImportDialog } from "@/components/eod/DepositsImportDialog";
 
 interface BatchEodResult {
   success: boolean;
@@ -52,6 +53,7 @@ export default function EodPage() {
 
   // Import dialog state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [depositsDialogOpen, setDepositsDialogOpen] = useState(false);
 
   // Date selection
   const [mode, setMode] = useState<EodMode>("single");
@@ -263,6 +265,10 @@ export default function EodPage() {
     setImportDialogOpen(true);
   };
 
+  const handleImportDeposits = () => {
+    setDepositsDialogOpen(true);
+  };
+
   const handleProcessStaged = () => {
     toast.info("Process Staged Trades - Coming soon");
   };
@@ -301,6 +307,7 @@ export default function EodPage() {
         {/* Action Buttons */}
         <EodActionButtons
           onImportTrades={handleImportTrades}
+          onImportDeposits={handleImportDeposits}
           onProcessStaged={handleProcessStaged}
           onCalculateSettlements={handleCalculateSettlements}
           onRunFullEod={handleRunFullEod}
@@ -318,6 +325,16 @@ export default function EodPage() {
           open={importDialogOpen}
           onOpenChange={setImportDialogOpen}
           onImportComplete={() => queryClient.invalidateQueries({ queryKey: ["eod-run-history"] })}
+        />
+
+        {/* Deposits/Withdrawals Import Dialog */}
+        <DepositsImportDialog
+          open={depositsDialogOpen}
+          onOpenChange={setDepositsDialogOpen}
+          onImportComplete={() => {
+            queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
+            toast.success("Deposits/Withdrawals ready for EOD");
+          }}
         />
 
         {/* Progress Bar */}

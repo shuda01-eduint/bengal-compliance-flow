@@ -7,10 +7,12 @@ import {
   Loader2,
   Square,
   Trash2,
+  Wallet,
 } from "lucide-react";
 
 interface EodActionButtonsProps {
   onImportTrades: () => void;
+  onImportDeposits: () => void;
   onProcessStaged: () => void;
   onCalculateSettlements: () => void;
   onRunFullEod: () => void;
@@ -26,6 +28,7 @@ interface EodActionButtonsProps {
 
 export function EodActionButtons({
   onImportTrades,
+  onImportDeposits,
   onProcessStaged,
   onCalculateSettlements,
   onRunFullEod,
@@ -46,7 +49,16 @@ export function EodActionButtons({
         disabled={disabled || isRunning}
       >
         <Upload className="mr-2 h-4 w-4" />
-        Import Trade Data
+        Import Trades
+      </Button>
+
+      <Button
+        variant="outline"
+        onClick={onImportDeposits}
+        disabled={disabled || isRunning}
+      >
+        <Wallet className="mr-2 h-4 w-4" />
+        Import Deposits/Withdrawals
       </Button>
 
       <Button
