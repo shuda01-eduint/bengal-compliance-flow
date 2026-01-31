@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, Users, FileText, AlertTriangle } from "lucide-react";
+import { TrendingUp, TrendingDown, Users, FileText, AlertTriangle, Percent, DollarSign, BarChart3, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface EodSummaryCardsProps {
@@ -12,6 +12,14 @@ interface EodSummaryCardsProps {
   totalWithdrawals?: number;
   errorsCount?: number;
   warningsCount?: number;
+  // New props for enhanced metrics
+  positionsCaptured?: number;
+  totalMarketValue?: number;
+  marginAccounts?: number;
+  marginExposure?: number;
+  dailyInterestTotal?: number;
+  totalEquity?: number;
+  negativeEquityCount?: number;
   visible?: boolean;
 }
 
@@ -25,6 +33,13 @@ export function EodSummaryCards({
   totalWithdrawals = 0,
   errorsCount = 0,
   warningsCount = 0,
+  positionsCaptured = 0,
+  totalMarketValue = 0,
+  marginAccounts = 0,
+  marginExposure = 0,
+  dailyInterestTotal = 0,
+  totalEquity = 0,
+  negativeEquityCount = 0,
   visible = true,
 }: EodSummaryCardsProps) {
   if (!visible) return null;
@@ -42,7 +57,7 @@ export function EodSummaryCards({
     return value.toLocaleString();
   };
 
-  const cards = [
+  const tradingCards = [
     {
       title: "Total Trades",
       value: totalTrades.toLocaleString(),
@@ -81,11 +96,52 @@ export function EodSummaryCards({
     },
   ];
 
+  const marginCards = [
+    {
+      title: "Positions",
+      value: positionsCaptured.toLocaleString(),
+      icon: BarChart3,
+      color: "text-foreground",
+    },
+    {
+      title: "Total MV",
+      value: `৳${formatCurrency(totalMarketValue)}`,
+      icon: DollarSign,
+      color: "text-primary",
+    },
+    {
+      title: "Margin Accounts",
+      value: marginAccounts.toLocaleString(),
+      icon: Building2,
+      color: "text-amber-600",
+    },
+    {
+      title: "Margin Exposure",
+      value: `৳${formatCurrency(marginExposure)}`,
+      icon: TrendingDown,
+      color: "text-red-600",
+    },
+    {
+      title: "Daily Interest",
+      value: `৳${formatCurrency(dailyInterestTotal)}`,
+      icon: Percent,
+      color: "text-amber-600",
+    },
+    {
+      title: "Total Equity",
+      value: `৳${formatCurrency(totalEquity)}`,
+      icon: TrendingUp,
+      color: totalEquity >= 0 ? "text-green-600" : "text-red-600",
+    },
+  ];
+
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-semibold">EOD Summary</h3>
+      
+      {/* Trading Cards */}
       <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
-        {cards.map((card) => (
+        {tradingCards.map((card) => (
           <Card key={card.title}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-xs font-medium text-muted-foreground">
@@ -102,7 +158,28 @@ export function EodSummaryCards({
         ))}
       </div>
 
-      {(errorsCount > 0 || warningsCount > 0) && (
+      {/* Margin & Position Cards */}
+      {(positionsCaptured > 0 || totalMarketValue > 0) && (
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+          {marginCards.map((card) => (
+            <Card key={card.title}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-xs font-medium text-muted-foreground">
+                  {card.title}
+                </CardTitle>
+                <card.icon className={cn("h-4 w-4", card.color)} />
+              </CardHeader>
+              <CardContent>
+                <div className={cn("text-lg font-bold", card.color)}>
+                  {card.value}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {(errorsCount > 0 || warningsCount > 0 || negativeEquityCount > 0) && (
         <div className="flex gap-4">
           {errorsCount > 0 && (
             <div className="flex items-center gap-2 text-sm text-destructive">
@@ -114,6 +191,12 @@ export function EodSummaryCards({
             <div className="flex items-center gap-2 text-sm text-amber-600">
               <AlertTriangle className="h-4 w-4" />
               {warningsCount} warning{warningsCount !== 1 ? "s" : ""}
+            </div>
+          )}
+          {negativeEquityCount > 0 && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <AlertTriangle className="h-4 w-4" />
+              {negativeEquityCount} account{negativeEquityCount !== 1 ? "s" : ""} with negative equity
             </div>
           )}
         </div>
