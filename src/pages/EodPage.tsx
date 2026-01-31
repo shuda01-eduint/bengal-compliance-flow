@@ -1,8 +1,7 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { format, eachDayOfInterval } from "date-fns";
 import { rpcWithRetry, formatRpcError } from "@/lib/rpc-utils";
@@ -14,6 +13,7 @@ import { EodActionButtons } from "@/components/eod/EodActionButtons";
 import { EodSummaryCards } from "@/components/eod/EodSummaryCards";
 import { EodLogTable } from "@/components/eod/EodLogTable";
 import { EodProgressBar } from "@/components/eod/EodProgressBar";
+import { TradeImportDialog } from "@/components/eod/TradeImportDialog";
 
 interface BatchEodResult {
   success: boolean;
@@ -48,9 +48,10 @@ interface DayResult {
 }
 
 export default function EodPage() {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Import dialog state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   // Date selection
   const [mode, setMode] = useState<EodMode>("single");
@@ -259,16 +260,7 @@ export default function EodPage() {
   };
 
   const handleImportTrades = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    // TODO: Implement file upload logic
-    toast.info(`Selected ${files.length} file(s) for import`);
-    e.target.value = "";
+    setImportDialogOpen(true);
   };
 
   const handleProcessStaged = () => {
@@ -321,14 +313,11 @@ export default function EodPage() {
           hasDateSelected={hasDateSelected}
         />
 
-        {/* Hidden file input */}
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          accept=".xml"
-          multiple
-          className="hidden"
+        {/* Trade Import Dialog */}
+        <TradeImportDialog
+          open={importDialogOpen}
+          onOpenChange={setImportDialogOpen}
+          onImportComplete={() => queryClient.invalidateQueries({ queryKey: ["eod-run-history"] })}
         />
 
         {/* Progress Bar */}
