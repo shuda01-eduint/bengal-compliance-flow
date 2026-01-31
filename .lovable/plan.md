@@ -1,223 +1,296 @@
 
-# Fix Trade Import Date Parsing and Settlement Calculation
 
-## Problem Summary
+# Implement Process Staged Trades Function
 
-The trade import is showing dates like "0113-26-20" instead of "2026-01-13" because the code incorrectly parses YYYYMMDD format as DDMMYYYY format. Additionally, the settlement date calculation needs to use Bangladesh weekends (Friday/Saturday) and skip bank holidays.
+## Overview
+
+Create a new `process_staged_trades` database function that processes trades from the `trade_file` staging table and deposits/withdrawals from `cash_ledger_txn`. This replaces the dependency on the old `trade_history` and `deposits_withdrawals` tables in the EOD workflow.
 
 ---
 
-## Root Cause Analysis
+## Current State Analysis
 
-### 1. Date Parsing Bug (Lines 410-416 in TradeImportDialog.tsx)
+### Data in Staging Tables (Ready for Processing)
 
-The current code assumes 8-digit dates are in DDMMYYYY format:
+| Table | Records | Date | Total Value |
+|-------|---------|------|-------------|
+| `trade_file` | 23,749 trades | 2026-01-13 | 977M BDT |
+| `cash_ledger_txn` | 417 transactions | 2026-01-13 | 37.4M deposits, 137M withdrawals |
 
-```typescript
-// CURRENT (WRONG):
-else if (dateRaw.length === 8 && !dateRaw.includes("-")) {
-  const day = dateRaw.substring(0, 2);    // "20" from "20260113"
-  const month = dateRaw.substring(2, 4);  // "26" from "20260113"
-  const year = dateRaw.substring(4, 8);   // "0113" from "20260113"
-  tradeDate = `${year}${month}${day}`;    // "0113-26-20" - INVALID!
-}
+### Current `run_batch_eod` Function Issue
+
+The existing function reads from:
+- `trade_history` (old table with TEXT date format)
+- `deposits_withdrawals` (old table)
+
+It does NOT use the new staging tables:
+- `trade_file` (new, DATE type)
+- `cash_ledger_txn` (new, normalized transaction types)
+
+---
+
+## Implementation Plan
+
+### Phase 1: Create Database Function
+
+Create `process_staged_trades(p_trade_date DATE)` that:
+1. Reads from `trade_file` for the specified date
+2. Reads from `cash_ledger_txn` for deposits/withdrawals
+3. Aggregates by investor: gross_buy, gross_sell, commission
+4. Calculates settlement status based on T+2/T+3 rules
+5. Returns summary statistics
+
+```sql
+CREATE OR REPLACE FUNCTION public.process_staged_trades(p_trade_date DATE)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+SET statement_timeout TO '120s'
+AS $$
+DECLARE
+  v_trade_count integer := 0;
+  v_investor_count integer := 0;
+  v_gross_buy numeric := 0;
+  v_gross_sell numeric := 0;
+  v_total_commission numeric := 0;
+  v_deposit_count integer := 0;
+  v_withdrawal_count integer := 0;
+  v_total_deposits numeric := 0;
+  v_total_withdrawals numeric := 0;
+BEGIN
+  -- Security check
+  IF NOT public.has_role(auth.uid(), 'admin'::app_role) THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Admin role required'
+    );
+  END IF;
+
+  -- Aggregate trade data from trade_file staging table
+  SELECT 
+    COUNT(*),
+    COUNT(DISTINCT investor_code),
+    COALESCE(SUM(CASE WHEN UPPER(side) = 'BUY' THEN qty * price ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN UPPER(side) = 'SELL' THEN qty * price ELSE 0 END), 0),
+    COALESCE(SUM(commission), 0)
+  INTO 
+    v_trade_count,
+    v_investor_count,
+    v_gross_buy,
+    v_gross_sell,
+    v_total_commission
+  FROM trade_file
+  WHERE trade_date = p_trade_date;
+
+  -- Aggregate deposit/withdrawal data from cash_ledger_txn
+  SELECT 
+    COUNT(*) FILTER (WHERE type = 'DEPOSIT'),
+    COUNT(*) FILTER (WHERE type = 'WITHDRAW'),
+    COALESCE(SUM(amount) FILTER (WHERE type = 'DEPOSIT'), 0),
+    COALESCE(SUM(amount) FILTER (WHERE type = 'WITHDRAW'), 0)
+  INTO 
+    v_deposit_count,
+    v_withdrawal_count,
+    v_total_deposits,
+    v_total_withdrawals
+  FROM cash_ledger_txn
+  WHERE txn_date = p_trade_date;
+
+  -- Log the processing run
+  INSERT INTO eod_run_history (
+    run_date,
+    status,
+    clients_processed,
+    trade_files_count,
+    gross_buy,
+    gross_sell,
+    total_commission,
+    total_deposits,
+    total_withdrawals,
+    created_by
+  ) VALUES (
+    p_trade_date,
+    'staged_processed',
+    v_investor_count,
+    v_trade_count,
+    v_gross_buy,
+    v_gross_sell,
+    v_total_commission,
+    v_total_deposits,
+    v_total_withdrawals,
+    auth.uid()
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'trade_date', p_trade_date,
+    'trade_count', v_trade_count,
+    'investor_count', v_investor_count,
+    'gross_buy', v_gross_buy,
+    'gross_sell', v_gross_sell,
+    'total_commission', v_total_commission,
+    'deposit_count', v_deposit_count,
+    'withdrawal_count', v_withdrawal_count,
+    'total_deposits', v_total_deposits,
+    'total_withdrawals', v_total_withdrawals,
+    'net_trade_value', v_gross_sell - v_gross_buy,
+    'net_cash_flow', v_total_deposits - v_total_withdrawals
+  );
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object(
+    'success', false,
+    'error', SQLERRM,
+    'error_detail', SQLSTATE
+  );
+END;
+$$;
 ```
 
-But the DSE XML provides dates in YYYYMMDD format ("20260113"), so the parsing should be:
+### Phase 2: Create Settlement Processing Function
+
+Create `calculate_settlements(p_as_of_date DATE)` that:
+1. Finds all trades where `settlement_date <= p_as_of_date`
+2. Updates matured balances based on settled trades
+3. Tracks pending settlements (T+2 and T+3)
+
+```sql
+CREATE OR REPLACE FUNCTION public.calculate_settlements(p_as_of_date DATE)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_settled_trades integer := 0;
+  v_settled_value numeric := 0;
+  v_pending_t2 integer := 0;
+  v_pending_t3 integer := 0;
+BEGIN
+  -- Security check
+  IF NOT public.has_role(auth.uid(), 'admin'::app_role) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Admin role required');
+  END IF;
+
+  -- Count settled trades (settlement_date <= as_of_date)
+  SELECT COUNT(*), COALESCE(SUM(qty * price), 0)
+  INTO v_settled_trades, v_settled_value
+  FROM trade_file
+  WHERE settlement_date <= p_as_of_date;
+
+  -- Count pending T+2 trades (standard categories)
+  SELECT COUNT(*) INTO v_pending_t2
+  FROM trade_file
+  WHERE settlement_date > p_as_of_date
+    AND (category IS NULL OR UPPER(category) != 'Z');
+
+  -- Count pending T+3 trades (Z category)
+  SELECT COUNT(*) INTO v_pending_t3
+  FROM trade_file
+  WHERE settlement_date > p_as_of_date
+    AND UPPER(category) = 'Z';
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'as_of_date', p_as_of_date,
+    'settled_trades', v_settled_trades,
+    'settled_value', v_settled_value,
+    'pending_t2_count', v_pending_t2,
+    'pending_t3_count', v_pending_t3
+  );
+END;
+$$;
+```
+
+### Phase 3: Update Frontend Handler
+
+Update `EodPage.tsx` to call the new function:
 
 ```typescript
-// FIXED:
-else if (dateRaw.length === 8 && !dateRaw.includes("-")) {
-  // Check if it's YYYYMMDD (starts with 19 or 20)
-  if (dateRaw.startsWith("19") || dateRaw.startsWith("20")) {
-    // Already YYYYMMDD - use as-is
-    tradeDate = dateRaw;
-  } else {
-    // Assume DDMMYYYY
-    const day = dateRaw.substring(0, 2);
-    const month = dateRaw.substring(2, 4);
-    const year = dateRaw.substring(4, 8);
-    tradeDate = `${year}${month}${day}`;
+const handleProcessStaged = async () => {
+  if (!selectedDate) {
+    toast.error("Please select a date");
+    return;
   }
-}
-```
 
-### 2. Time Formatting
+  setRunning(true);
+  try {
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    const { data, error } = await supabase.rpc("process_staged_trades", {
+      p_trade_date: dateStr,
+    });
 
-The time field "100519" needs a formatting function for display:
+    if (error) throw error;
 
-```typescript
-// Convert HHMMSS to HH:MM:SS
-function formatTimeForDisplay(hhmmss: string): string {
-  if (hhmmss.length === 6 && /^\d{6}$/.test(hhmmss)) {
-    return `${hhmmss.slice(0,2)}:${hhmmss.slice(2,4)}:${hhmmss.slice(4,6)}`;
-  }
-  return hhmmss;
-}
-```
-
-### 3. Bangladesh Weekends
-
-Current `settlement-utils.ts` skips Saturday/Sunday, but Bangladesh Stock Exchange uses Friday/Saturday as weekends:
-
-```typescript
-// CURRENT (WRONG for Bangladesh):
-if (!isWeekend(settleDate)) {  // Skips Sat/Sun
-  daysAdded++;
-}
-
-// FIXED:
-function isBangladeshWeekend(date: Date): boolean {
-  const day = date.getDay();
-  return day === 5 || day === 6;  // Friday=5, Saturday=6
-}
-```
-
-### 4. Holiday Support
-
-Need to integrate Bangladesh bank holidays into settlement calculation.
-
----
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| `src/components/eod/TradeImportDialog.tsx` | Fix YYYYMMDD date parsing logic in `parseXmlRowToTrade` function |
-| `src/lib/settlement-utils.ts` | Update to use Bangladesh weekends (Fri/Sat) and add holiday support |
-
----
-
-## Implementation Details
-
-### Phase 1: Fix Date Parsing in TradeImportDialog.tsx
-
-**Location:** `parseXmlRowToTrade` function (around line 398-420)
-
-**Changes:**
-1. Detect YYYYMMDD vs DDMMYYYY format by checking if date starts with "19" or "20"
-2. Handle YYYYMMDD correctly (already in target format)
-3. Add time formatting function
-
-```typescript
-// Smart date format detection
-function parseTradeDate(dateRaw: string): string {
-  // Handle DD/MM/YYYY format
-  if (dateRaw.includes("/")) {
-    const parts = dateRaw.split("/");
-    if (parts.length === 3) {
-      const [day, month, year] = parts;
-      return `${year}${month.padStart(2, "0")}${day.padStart(2, "0")}`;
+    if (data?.success) {
+      toast.success("Staged trades processed", {
+        description: `${data.trade_count?.toLocaleString()} trades, ${data.investor_count?.toLocaleString()} investors`,
+      });
+    } else {
+      toast.error("Processing failed", { description: data?.error });
     }
+  } catch (err: any) {
+    toast.error("Processing failed", { description: err.message });
+  } finally {
+    setRunning(false);
+    queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
   }
-  
-  // Handle 8-digit formats
-  if (dateRaw.length === 8 && !dateRaw.includes("-")) {
-    // YYYYMMDD format (starts with 19xx or 20xx)
-    if (dateRaw.startsWith("19") || dateRaw.startsWith("20")) {
-      return dateRaw; // Already correct
-    }
-    // DDMMYYYY format
-    const day = dateRaw.substring(0, 2);
-    const month = dateRaw.substring(2, 4);
-    const year = dateRaw.substring(4, 8);
-    return `${year}${month}${day}`;
-  }
-  
-  // Handle YYYY-MM-DD format
-  if (dateRaw.includes("-")) {
-    return dateRaw.replace(/-/g, "");
-  }
-  
-  return dateRaw;
-}
+};
 ```
 
-### Phase 2: Update Settlement Utils
-
-**Location:** `src/lib/settlement-utils.ts`
-
-**Changes:**
-1. Create Bangladesh weekend check function (Friday=5, Saturday=6)
-2. Add Bangladesh bank holidays array (from CopyBalancesDialog.tsx)
-3. Update `calculateSettlementDate` to skip both weekends AND holidays
-
-```typescript
-// Bangladesh weekends are Friday and Saturday
-function isBangladeshWeekend(date: Date): boolean {
-  const day = date.getDay();
-  return day === 5 || day === 6; // Friday=5, Saturday=6
-}
-
-// Bank holidays list (shared with CopyBalancesDialog)
-const BANGLADESH_HOLIDAYS: string[] = [
-  "2025-02-21", "2025-03-17", "2025-03-26", // ... etc
-  "2026-01-01", "2026-02-21", "2026-03-17", // 2026 holidays
-];
-
-function isBankHoliday(date: Date): boolean {
-  const dateStr = format(date, 'yyyy-MM-dd');
-  return BANGLADESH_HOLIDAYS.includes(dateStr);
-}
-
-function isNonTradingDay(date: Date): boolean {
-  return isBangladeshWeekend(date) || isBankHoliday(date);
-}
-
-export function calculateSettlementDate(
-  tradeDate: Date, 
-  category: string | null | undefined
-): Date {
-  const settlementDays = getSettlementDays(category);
-  let settleDate = new Date(tradeDate);
-  let daysAdded = 0;
-
-  while (daysAdded < settlementDays) {
-    settleDate = addDays(settleDate, 1);
-    // Skip Bangladesh weekends (Fri/Sat) and holidays
-    if (!isNonTradingDay(settleDate)) {
-      daysAdded++;
-    }
-  }
-
-  return settleDate;
-}
-```
+Similarly update `handleCalculateSettlements`.
 
 ---
 
-## Expected Results
+## Files to Create/Modify
 
-| Input | Current Output | Fixed Output |
-|-------|---------------|--------------|
-| Date: "20260113" | "0113-26-20" (Invalid) | "2026-01-13" |
-| Time: "100519" | "100519" | "10:05:19" |
-| T+2 for trade on Thu Jan 15, 2026 | Sun Jan 17 (wrong) | Mon Jan 19 (correct, skips Fri/Sat) |
-| T+2 for trade before Eid | Sat/Sun skip | Fri/Sat + Eid holidays skip |
+| File | Action | Changes |
+|------|--------|---------|
+| Database Migration | Create | `process_staged_trades` and `calculate_settlements` functions |
+| `src/pages/EodPage.tsx` | Modify | Replace placeholder handlers with actual RPC calls |
+| `src/components/eod/EodActionButtons.tsx` | Modify | Add processing state indicators |
+
+---
+
+## Processing Results Dialog (Optional Enhancement)
+
+After processing, show a summary dialog with:
+
+| Metric | Value |
+|--------|-------|
+| Trade Count | 23,749 |
+| Unique Investors | ~2,500 |
+| Gross Buy | 488M BDT |
+| Gross Sell | 489M BDT |
+| Deposits | 37.4M BDT |
+| Withdrawals | 137M BDT |
+| Net Cash Flow | -99.6M BDT |
 
 ---
 
 ## Technical Notes
 
-1. **Date Detection Heuristic:** Checking if date starts with "19" or "20" reliably distinguishes YYYYMMDD from DDMMYYYY, since:
-   - YYYYMMDD: "20260113" starts with "20"
-   - DDMMYYYY: "13012026" starts with "13"
+1. **Data Source Migration**: The new functions read from `trade_file` and `cash_ledger_txn` instead of `trade_history` and `deposits_withdrawals`
 
-2. **Holiday Data:** The bank holidays are already defined in `CopyBalancesDialog.tsx`. We'll centralize them in a shared location or duplicate in settlement-utils for now.
+2. **Settlement Date**: Already calculated during import using Bangladesh weekends (Fri/Sat) and bank holidays
 
-3. **Settlement Rules:**
-   - Category A/B: T+2 business days
-   - Category Z: T+3 business days
-   - Business days exclude Friday, Saturday, and bank holidays
+3. **Settlement Logic**:
+   - T+2: Most securities (Categories A, B, N, etc.)
+   - T+3: Z-category securities only
+   - Settlement date pre-calculated in `trade_file.settlement_date`
+
+4. **Performance**: Using MATERIALIZED CTEs and direct DATE comparisons (no text conversion needed)
+
+5. **Security**: Both functions use `SECURITY DEFINER` with admin role check
 
 ---
 
 ## Testing Checklist
 
 After implementation:
-- [ ] Import DSE XML file with date "20260113" - should show "2026-01-13"
-- [ ] Import DSE XML file with time "100519" - should show "10:05:19"
-- [ ] Verify settlement date skips Friday and Saturday
-- [ ] Verify settlement date skips bank holidays
-- [ ] Test T+2 calculation around Eid holidays
-- [ ] Test T+3 calculation for Z-category securities
+- [ ] Click "Process Staged Trades" for 2026-01-13
+- [ ] Verify summary shows ~23,749 trades processed
+- [ ] Click "Calculate Settlements" and verify T+2/T+3 counts
+- [ ] Check `eod_run_history` for new processing record
+- [ ] Verify gross buy/sell totals match imported data
+
