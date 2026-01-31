@@ -163,8 +163,8 @@ function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: stri
     if (!investorCode) {
       return { line: lineNumber, message: `Missing investor code`, raw: trimmed.substring(0, 60) };
     }
-    // Full investor code = DP code + investor code (e.g., "01" + "GZ44" = "01GZ44")
-    const fullInvestorCode = dpCode + investorCode;
+    // Use raw investor code (exchange tracked via cse_terminal column)
+    const fullInvestorCode = investorCode;
 
     // Fields 7-8: Empty (unused)
     
