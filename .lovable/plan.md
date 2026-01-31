@@ -1,296 +1,248 @@
 
 
-# Implement Process Staged Trades Function
+# Enhanced EOD Processing with Accrued Interest and Equity
 
 ## Overview
 
-Create a new `process_staged_trades` database function that processes trades from the `trade_file` staging table and deposits/withdrawals from `cash_ledger_txn`. This replaces the dependency on the old `trade_history` and `deposits_withdrawals` tables in the EOD workflow.
+Expand the `process_staged_trades` function to include:
+1. **Daily Accrued Interest** - Calculated for margin accounts (negative balance)
+2. **Cumulative Interest** - Running total of accrued interest
+3. **Equity Calculation** - Portfolio value minus loan minus accrued interest
 
 ---
 
-## Current State Analysis
+## Current Data Analysis
 
-### Data in Staging Tables (Ready for Processing)
+### Margin Account Statistics (Jan 12 Baseline)
 
-| Table | Records | Date | Total Value |
-|-------|---------|------|-------------|
-| `trade_file` | 23,749 trades | 2026-01-13 | 977M BDT |
-| `cash_ledger_txn` | 417 transactions | 2026-01-13 | 37.4M deposits, 137M withdrawals |
+| Metric | Value |
+|--------|-------|
+| Total Investors | 23,677 |
+| Margin Investors (negative balance) | 5,229 |
+| Total Margin Exposure | 7.07B BDT |
+| Investors with Interest Rate > 0 | 1,379 |
+| Interest Rate Range | 0% - 20.85% |
+| Average Interest Rate | 0.79% (overall), ~18% (margin accounts) |
 
-### Current `run_batch_eod` Function Issue
+### Sample Daily Interest Calculation
 
-The existing function reads from:
-- `trade_history` (old table with TEXT date format)
-- `deposits_withdrawals` (old table)
-
-It does NOT use the new staging tables:
-- `trade_file` (new, DATE type)
-- `cash_ledger_txn` (new, normalized transaction types)
+| Investor | Balance | Rate | Daily Interest |
+|----------|---------|------|----------------|
+| MR. MAKSUDUR RAHMAN | -673.6M | 17.85% | 329,443 BDT |
+| ARCOM ASSET MANAGEMENT | -436.9M | 18.75% | 224,458 BDT |
+| DESH IDEAL TRUST | -292.5M | 19.35% | 155,078 BDT |
+| Shakib Al Hasan | -286.5M | 19.35% | 151,879 BDT |
+| MD. ABUL HASEM RAIHAN | -270.2M | 16.50% | 122,140 BDT |
 
 ---
 
-## Implementation Plan
+## Calculation Formulas
 
-### Phase 1: Create Database Function
+### Daily Accrued Interest
 
-Create `process_staged_trades(p_trade_date DATE)` that:
-1. Reads from `trade_file` for the specified date
-2. Reads from `cash_ledger_txn` for deposits/withdrawals
-3. Aggregates by investor: gross_buy, gross_sell, commission
-4. Calculates settlement status based on T+2/T+3 rules
-5. Returns summary statistics
+```text
+daily_interest = (interest_rate / 365 / 100) × ABS(closing_balance)
+```
+
+Only calculated when:
+- `closing_balance < 0` (investor owes broker)
+- `interest_rate > 0` (from investors table)
+
+### Cumulative Interest
+
+```text
+cumulative_interest = previous_cumulative_interest + daily_interest
+```
+
+For first EOD run, cumulative interest starts at 0 (or from baseline if provided).
+
+### Equity Calculation
+
+```text
+equity = portfolio_value - ABS(ledger_balance) - cumulative_interest
+```
+
+Where:
+- `portfolio_value` = total market value of holdings
+- `ABS(ledger_balance)` = loan amount (for negative balances)
+- `cumulative_interest` = total interest accrued to date
+
+---
+
+## Implementation Details
+
+### Enhanced Data Flow
+
+```text
+balances_raw (Jan 12)           investors table
+├─ investor_code                 ├─ investor_code
+├─ ledger_balance               ├─ interest_rate ─────┐
+├─ total_mv (portfolio)         ├─ account_type       │
+└─ matured_balance              └─ brokerage_commission│
+         │                                            │
+         ▼                                            │
+┌─────────────────────────────────────────────────────┴─────┐
+│            process_staged_trades(Jan 13)                  │
+│                                                           │
+│  Calculations:                                            │
+│  ├─ closing_balance = opening + deposits - withdrawals    │
+│  │                    + sells - buys - commission         │
+│  │                                                        │
+│  ├─ daily_interest = (rate/365/100) × ABS(closing)       │
+│  │                   (only if closing < 0)                │
+│  │                                                        │
+│  ├─ cumulative_interest = prev_cumulative + daily         │
+│  │                                                        │
+│  └─ equity = portfolio_value - ABS(closing) - cumulative  │
+└───────────────────────────────────────────────────────────┘
+         │
+         ▼
+eod_ledger_snapshots
+├─ closing_balance
+├─ accrued_interest (daily)
+├─ cumulative_interest (running total)
+├─ total_mv (portfolio value)
+├─ interest_rate
+└─ [equity calculated on read or stored]
+```
+
+### SQL Logic for Interest and Equity
 
 ```sql
-CREATE OR REPLACE FUNCTION public.process_staged_trades(p_trade_date DATE)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public'
-SET statement_timeout TO '120s'
-AS $$
-DECLARE
-  v_trade_count integer := 0;
-  v_investor_count integer := 0;
-  v_gross_buy numeric := 0;
-  v_gross_sell numeric := 0;
-  v_total_commission numeric := 0;
-  v_deposit_count integer := 0;
-  v_withdrawal_count integer := 0;
-  v_total_deposits numeric := 0;
-  v_total_withdrawals numeric := 0;
-BEGIN
-  -- Security check
-  IF NOT public.has_role(auth.uid(), 'admin'::app_role) THEN
-    RETURN jsonb_build_object(
-      'success', false,
-      'error', 'Admin role required'
-    );
-  END IF;
+-- Get interest rate from investors table
+WITH investor_config AS (
+  SELECT investor_code, interest_rate, account_type, brokerage_commission
+  FROM investors
+),
 
-  -- Aggregate trade data from trade_file staging table
-  SELECT 
-    COUNT(*),
-    COUNT(DISTINCT investor_code),
-    COALESCE(SUM(CASE WHEN UPPER(side) = 'BUY' THEN qty * price ELSE 0 END), 0),
-    COALESCE(SUM(CASE WHEN UPPER(side) = 'SELL' THEN qty * price ELSE 0 END), 0),
-    COALESCE(SUM(commission), 0)
-  INTO 
-    v_trade_count,
-    v_investor_count,
-    v_gross_buy,
-    v_gross_sell,
-    v_total_commission
-  FROM trade_file
-  WHERE trade_date = p_trade_date;
+-- Calculate closing balance first
+balances AS (
+  SELECT
+    investor_code,
+    opening_balance + deposits - withdrawals + gross_sell - gross_buy - commission as closing_balance,
+    total_mv as portfolio_value
+  FROM computed_values
+),
 
-  -- Aggregate deposit/withdrawal data from cash_ledger_txn
-  SELECT 
-    COUNT(*) FILTER (WHERE type = 'DEPOSIT'),
-    COUNT(*) FILTER (WHERE type = 'WITHDRAW'),
-    COALESCE(SUM(amount) FILTER (WHERE type = 'DEPOSIT'), 0),
-    COALESCE(SUM(amount) FILTER (WHERE type = 'WITHDRAW'), 0)
-  INTO 
-    v_deposit_count,
-    v_withdrawal_count,
-    v_total_deposits,
-    v_total_withdrawals
-  FROM cash_ledger_txn
-  WHERE txn_date = p_trade_date;
+-- Calculate daily interest (only for negative balances)
+interest_calc AS (
+  SELECT
+    b.investor_code,
+    b.closing_balance,
+    b.portfolio_value,
+    CASE 
+      WHEN b.closing_balance < 0 AND ic.interest_rate > 0 THEN
+        ROUND((ic.interest_rate / 365 / 100) * ABS(b.closing_balance), 2)
+      ELSE 0
+    END as daily_interest,
+    -- Get previous cumulative from last snapshot or baseline (0 for first run)
+    COALESCE(prev.cumulative_interest, 0) as prev_cumulative,
+    ic.interest_rate
+  FROM balances b
+  LEFT JOIN investor_config ic ON b.investor_code = ic.investor_code
+  LEFT JOIN eod_ledger_snapshots prev 
+    ON b.investor_code = prev.investor_code 
+    AND prev.eod_date = p_trade_date - 1
+),
 
-  -- Log the processing run
-  INSERT INTO eod_run_history (
-    run_date,
-    status,
-    clients_processed,
-    trade_files_count,
-    gross_buy,
-    gross_sell,
-    total_commission,
-    total_deposits,
-    total_withdrawals,
-    created_by
-  ) VALUES (
-    p_trade_date,
-    'staged_processed',
-    v_investor_count,
-    v_trade_count,
-    v_gross_buy,
-    v_gross_sell,
-    v_total_commission,
-    v_total_deposits,
-    v_total_withdrawals,
-    auth.uid()
-  );
-
-  RETURN jsonb_build_object(
-    'success', true,
-    'trade_date', p_trade_date,
-    'trade_count', v_trade_count,
-    'investor_count', v_investor_count,
-    'gross_buy', v_gross_buy,
-    'gross_sell', v_gross_sell,
-    'total_commission', v_total_commission,
-    'deposit_count', v_deposit_count,
-    'withdrawal_count', v_withdrawal_count,
-    'total_deposits', v_total_deposits,
-    'total_withdrawals', v_total_withdrawals,
-    'net_trade_value', v_gross_sell - v_gross_buy,
-    'net_cash_flow', v_total_deposits - v_total_withdrawals
-  );
-EXCEPTION WHEN OTHERS THEN
-  RETURN jsonb_build_object(
-    'success', false,
-    'error', SQLERRM,
-    'error_detail', SQLSTATE
-  );
-END;
-$$;
+-- Final calculation with equity
+final_calc AS (
+  SELECT
+    investor_code,
+    closing_balance,
+    portfolio_value,
+    daily_interest as accrued_interest,
+    prev_cumulative + daily_interest as cumulative_interest,
+    interest_rate,
+    -- Equity calculation
+    portfolio_value - ABS(LEAST(closing_balance, 0)) - (prev_cumulative + daily_interest) as equity
+  FROM interest_calc
+)
 ```
 
-### Phase 2: Create Settlement Processing Function
+---
 
-Create `calculate_settlements(p_as_of_date DATE)` that:
-1. Finds all trades where `settlement_date <= p_as_of_date`
-2. Updates matured balances based on settled trades
-3. Tracks pending settlements (T+2 and T+3)
+## Existing Schema Alignment
 
-```sql
-CREATE OR REPLACE FUNCTION public.calculate_settlements(p_as_of_date DATE)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public'
-AS $$
-DECLARE
-  v_settled_trades integer := 0;
-  v_settled_value numeric := 0;
-  v_pending_t2 integer := 0;
-  v_pending_t3 integer := 0;
-BEGIN
-  -- Security check
-  IF NOT public.has_role(auth.uid(), 'admin'::app_role) THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Admin role required');
-  END IF;
+The `eod_ledger_snapshots` table already has all required columns:
 
-  -- Count settled trades (settlement_date <= as_of_date)
-  SELECT COUNT(*), COALESCE(SUM(qty * price), 0)
-  INTO v_settled_trades, v_settled_value
-  FROM trade_file
-  WHERE settlement_date <= p_as_of_date;
+| Column | Type | Purpose |
+|--------|------|---------|
+| `accrued_interest` | numeric | Daily interest for this EOD date |
+| `cumulative_interest` | numeric | Running total of interest |
+| `interest_rate` | numeric | Rate used for calculation |
+| `total_mv` | numeric | Portfolio market value |
+| `account_type` | text | Margin/Cash classification |
 
-  -- Count pending T+2 trades (standard categories)
-  SELECT COUNT(*) INTO v_pending_t2
-  FROM trade_file
-  WHERE settlement_date > p_as_of_date
-    AND (category IS NULL OR UPPER(category) != 'Z');
+Note: Equity is currently calculated on-the-fly in frontend rather than stored. We can either:
+1. Calculate and store equity in snapshots
+2. Continue calculating in frontend using: `equity = total_mv - ABS(closing_balance) - cumulative_interest`
 
-  -- Count pending T+3 trades (Z category)
-  SELECT COUNT(*) INTO v_pending_t3
-  FROM trade_file
-  WHERE settlement_date > p_as_of_date
-    AND UPPER(category) = 'Z';
+---
 
-  RETURN jsonb_build_object(
-    'success', true,
-    'as_of_date', p_as_of_date,
-    'settled_trades', v_settled_trades,
-    'settled_value', v_settled_value,
-    'pending_t2_count', v_pending_t2,
-    'pending_t3_count', v_pending_t3
-  );
-END;
-$$;
+## Enhanced Return Object
+
+```json
+{
+  "success": true,
+  "trade_date": "2026-01-13",
+  
+  "trade_count": 23749,
+  "investor_count": 23677,
+  "gross_buy": 488000000,
+  "gross_sell": 489000000,
+  "total_commission": 1200000,
+  
+  "deposit_count": 200,
+  "withdrawal_count": 217,
+  "total_deposits": 37400000,
+  "total_withdrawals": 137000000,
+  
+  "instruments_priced": 542,
+  "positions_captured": 75000,
+  "total_market_value": 59000000000,
+  
+  "margin_accounts": 5229,
+  "margin_exposure": 7065000000,
+  "daily_interest_total": 3450000,
+  "cumulative_interest_total": 3450000,
+  
+  "total_equity": 52000000000,
+  "negative_equity_count": 12
+}
 ```
-
-### Phase 3: Update Frontend Handler
-
-Update `EodPage.tsx` to call the new function:
-
-```typescript
-const handleProcessStaged = async () => {
-  if (!selectedDate) {
-    toast.error("Please select a date");
-    return;
-  }
-
-  setRunning(true);
-  try {
-    const dateStr = format(selectedDate, "yyyy-MM-dd");
-    const { data, error } = await supabase.rpc("process_staged_trades", {
-      p_trade_date: dateStr,
-    });
-
-    if (error) throw error;
-
-    if (data?.success) {
-      toast.success("Staged trades processed", {
-        description: `${data.trade_count?.toLocaleString()} trades, ${data.investor_count?.toLocaleString()} investors`,
-      });
-    } else {
-      toast.error("Processing failed", { description: data?.error });
-    }
-  } catch (err: any) {
-    toast.error("Processing failed", { description: err.message });
-  } finally {
-    setRunning(false);
-    queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
-  }
-};
-```
-
-Similarly update `handleCalculateSettlements`.
 
 ---
 
 ## Files to Create/Modify
 
-| File | Action | Changes |
-|------|--------|---------|
-| Database Migration | Create | `process_staged_trades` and `calculate_settlements` functions |
-| `src/pages/EodPage.tsx` | Modify | Replace placeholder handlers with actual RPC calls |
-| `src/components/eod/EodActionButtons.tsx` | Modify | Add processing state indicators |
+| File | Action | Description |
+|------|--------|-------------|
+| Database Migration | Create | `process_staged_trades` function with interest and equity |
+| Database Migration | Create | `calculate_settlements` function |
+| `src/pages/EodPage.tsx` | Modify | Add RPC calls and display interest/equity metrics |
+| `src/components/eod/EodSummaryCards.tsx` | Modify | Add cards for interest and equity totals |
 
 ---
 
-## Processing Results Dialog (Optional Enhancement)
+## Edge Cases Handled
 
-After processing, show a summary dialog with:
-
-| Metric | Value |
-|--------|-------|
-| Trade Count | 23,749 |
-| Unique Investors | ~2,500 |
-| Gross Buy | 488M BDT |
-| Gross Sell | 489M BDT |
-| Deposits | 37.4M BDT |
-| Withdrawals | 137M BDT |
-| Net Cash Flow | -99.6M BDT |
-
----
-
-## Technical Notes
-
-1. **Data Source Migration**: The new functions read from `trade_file` and `cash_ledger_txn` instead of `trade_history` and `deposits_withdrawals`
-
-2. **Settlement Date**: Already calculated during import using Bangladesh weekends (Fri/Sat) and bank holidays
-
-3. **Settlement Logic**:
-   - T+2: Most securities (Categories A, B, N, etc.)
-   - T+3: Z-category securities only
-   - Settlement date pre-calculated in `trade_file.settlement_date`
-
-4. **Performance**: Using MATERIALIZED CTEs and direct DATE comparisons (no text conversion needed)
-
-5. **Security**: Both functions use `SECURITY DEFINER` with admin role check
+1. **First EOD Run**: Cumulative interest starts at 0 (no previous snapshot)
+2. **Cash Accounts**: interest_rate = 0, so daily_interest = 0
+3. **Positive Balance**: No interest charged (closing_balance >= 0)
+4. **Missing Interest Rate**: Default to 0 from investors table
+5. **Negative Equity**: Flag accounts where equity < 0 for margin call review
 
 ---
 
 ## Testing Checklist
 
 After implementation:
-- [ ] Click "Process Staged Trades" for 2026-01-13
-- [ ] Verify summary shows ~23,749 trades processed
-- [ ] Click "Calculate Settlements" and verify T+2/T+3 counts
-- [ ] Check `eod_run_history` for new processing record
-- [ ] Verify gross buy/sell totals match imported data
+- [ ] Process staged trades for 2026-01-13
+- [ ] Verify daily_interest calculated for 5,229 margin accounts
+- [ ] Check total daily interest is ~3.4M BDT (based on sample calculation)
+- [ ] Verify cumulative_interest = daily_interest for first run
+- [ ] Check equity = total_mv - ABS(closing) - cumulative
+- [ ] Identify any accounts with negative equity
+- [ ] Run for subsequent days and verify cumulative interest accumulates
 
