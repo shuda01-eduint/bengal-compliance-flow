@@ -218,6 +218,235 @@ function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: stri
   }
 }
 
+// Pre-compiled regex for performance
+const normalizeKeyRegex = /[\s_-]+/g;
+const commaRegex = /,/g;
+
+// Parse DSE XML content (Excel-style Row/Cell or Detail attributes)
+function parseDseXmlContent(
+  content: string,
+  fileName: string
+): { trades: ParsedTrade[]; errors: ValidationError[] } {
+  const trades: ParsedTrade[] = [];
+  const errors: ValidationError[] = [];
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(content, "text/xml");
+
+  // Check for parse errors
+  const parseError = doc.querySelector("parsererror");
+  if (parseError) {
+    errors.push({
+      line: 0,
+      message: "Invalid XML format - file may be HTML or corrupted",
+    });
+    return { trades, errors };
+  }
+
+  const allRowData: Record<string, unknown>[] = [];
+
+  // Try Row/Cell format (Excel XML)
+  let rows = doc.getElementsByTagName("Row");
+  if (rows.length === 0) {
+    rows = doc.getElementsByTagName("row");
+  }
+
+  if (rows.length > 0) {
+    // Extract headers from first row
+    const headerRow = rows[0];
+    const headerCells = headerRow.getElementsByTagName("Cell");
+    const headers: string[] = [];
+
+    let headerIndex = 0;
+    for (let i = 0; i < headerCells.length; i++) {
+      const cell = headerCells[i];
+      const indexAttr = cell.getAttribute("ss:Index");
+      if (indexAttr) {
+        headerIndex = parseInt(indexAttr) - 1;
+      }
+      const dataEl = cell.getElementsByTagName("Data")[0];
+      headers[headerIndex] = dataEl?.textContent?.trim() || "";
+      headerIndex++;
+    }
+
+    // Parse data rows
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const cells = row.getElementsByTagName("Cell");
+      const rowData: Record<string, unknown> = {};
+
+      let currentIndex = 0;
+      for (let j = 0; j < cells.length; j++) {
+        const cell = cells[j];
+        const indexAttr = cell.getAttribute("ss:Index");
+        if (indexAttr) {
+          currentIndex = parseInt(indexAttr) - 1;
+        }
+        const dataEl = cell.getElementsByTagName("Data")[0];
+        if (headers[currentIndex]) {
+          rowData[headers[currentIndex]] = dataEl?.textContent?.trim() || "";
+        }
+        currentIndex++;
+      }
+      allRowData.push(rowData);
+    }
+  } else {
+    // Try Detail elements (attribute-based)
+    const detailElements = doc.getElementsByTagName("Detail");
+
+    if (detailElements.length > 0) {
+      for (let i = 0; i < detailElements.length; i++) {
+        const element = detailElements[i];
+        const rowData: Record<string, unknown> = {};
+        for (let j = 0; j < element.attributes.length; j++) {
+          const attr = element.attributes[j];
+          rowData[attr.name] = attr.value;
+        }
+        allRowData.push(rowData);
+      }
+    } else {
+      // Try generic elements (Trade, Record, Item)
+      const tradeElements = doc.querySelectorAll(
+        "Trade, trade, Record, record, Item, item"
+      );
+      tradeElements.forEach((element) => {
+        const rowData: Record<string, unknown> = {};
+        Array.from(element.attributes).forEach((attr) => {
+          rowData[attr.name] = attr.value;
+        });
+        element.childNodes.forEach((node) => {
+          if (node.nodeType === 1) {
+            const el = node as Element;
+            rowData[el.tagName] = el.textContent?.trim() || "";
+          }
+        });
+        allRowData.push(rowData);
+      });
+    }
+  }
+
+  // Process each row and convert to ParsedTrade
+  for (let i = 0; i < allRowData.length; i++) {
+    const row = allRowData[i];
+    const trade = parseXmlRowToTrade(row, i + 1, fileName);
+
+    if (trade) {
+      trades.push(trade);
+    }
+
+    // Yield to UI every 10,000 rows for large files
+    if (i % 10000 === 0 && i > 0) {
+      // Synchronous processing for speed - progress updates handled elsewhere
+    }
+  }
+
+  return { trades, errors };
+}
+
+// Parse a single XML row to ParsedTrade
+function parseXmlRowToTrade(
+  row: Record<string, unknown>,
+  lineNumber: number,
+  fileName: string
+): ParsedTrade | null {
+  // Create normalized key mapping
+  const rowNormalized: Record<string, unknown> = {};
+  const keys = Object.keys(row);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    rowNormalized[key.toLowerCase().replace(normalizeKeyRegex, "")] = row[key];
+  }
+
+  const getString = (key: string) => {
+    const normalizedKey = key.toLowerCase().replace(normalizeKeyRegex, "");
+    const val = String(rowNormalized[normalizedKey] ?? row[key] ?? "").trim();
+    return val === "-" ? "" : val;
+  };
+
+  const getNumber = (key: string) => {
+    const normalizedKey = key.toLowerCase().replace(normalizeKeyRegex, "");
+    const val = rowNormalized[normalizedKey] ?? row[key];
+    if (typeof val === "number") return val;
+    const strVal = String(val ?? "0").replace(commaRegex, "");
+    return strVal === "-" ? 0 : parseFloat(strVal) || 0;
+  };
+
+  // Filter: only include EXEC actions
+  const action = getString("Action").toUpperCase();
+  if (action !== "EXEC") return null;
+
+  // Filter: must have fill_type
+  const fillType = getString("FillType");
+  if (!fillType) return null;
+
+  const clientCode = getString("ClientCode");
+  const securityCode = getString("SecurityCode");
+  if (!clientCode || !securityCode) return null;
+
+  const sideRaw = getString("Side").toUpperCase();
+  const side: "BUY" | "SELL" = sideRaw === "S" ? "SELL" : "BUY";
+
+  const quantity = getNumber("Quantity");
+  const price = getNumber("Price");
+  const value = getNumber("Value") || quantity * price;
+
+  // Parse date - DSE uses various formats
+  const dateRaw = getString("Date");
+  let tradeDate = dateRaw;
+
+  // Handle DD/MM/YYYY format
+  if (dateRaw.includes("/")) {
+    const parts = dateRaw.split("/");
+    if (parts.length === 3) {
+      const [day, month, year] = parts;
+      tradeDate = `${year}${month.padStart(2, "0")}${day.padStart(2, "0")}`;
+    }
+  }
+  // Handle DDMMYYYY format
+  else if (dateRaw.length === 8 && !dateRaw.includes("-")) {
+    const day = dateRaw.substring(0, 2);
+    const month = dateRaw.substring(2, 4);
+    const year = dateRaw.substring(4, 8);
+    tradeDate = `${year}${month}${day}`;
+  }
+  // Handle YYYY-MM-DD format
+  else if (dateRaw.includes("-")) {
+    tradeDate = dateRaw.replace(/-/g, "");
+  }
+
+  const tradeTime = getString("Time");
+  const execIdRaw = getString("ExecID");
+  const board = getString("Board");
+  const category = getString("Category");
+
+  // Generate unique exec_id
+  const execId =
+    execIdRaw ||
+    `DSE_${clientCode}_${securityCode}_${tradeDate}_${tradeTime}_${quantity}_${price}`.replace(
+      /[^a-zA-Z0-9_]/g,
+      ""
+    );
+
+  return {
+    cse_terminal: board || "DSE",
+    dp_code: "",
+    investor_code: clientCode,
+    full_investor_code: clientCode,
+    security_code: securityCode.toUpperCase(),
+    side,
+    quantity,
+    price,
+    value,
+    trade_date: tradeDate,
+    trade_time: tradeTime,
+    settlement_date: tradeDate,
+    settlement_time: "",
+    category_flag: category || "N",
+    exec_id: execId,
+    file_name: fileName,
+  };
+}
+
 export function TradeImportDialog({
   open,
   onOpenChange,
@@ -258,9 +487,13 @@ export function TradeImportDialog({
     const selectedFile = event.target.files?.[0];
     if (!selectedFile) return;
 
-    if (!selectedFile.name.toLowerCase().endsWith(".txt")) {
+    const fileNameLower = selectedFile.name.toLowerCase();
+    const isTxt = fileNameLower.endsWith(".txt");
+    const isXml = fileNameLower.endsWith(".xml");
+
+    if (!isTxt && !isXml) {
       toast.error("Invalid file type", {
-        description: "Please upload a .txt file with CSE trade data",
+        description: "Please upload a .txt (CSE) or .xml (DSE) trade file",
       });
       return;
     }
@@ -272,49 +505,71 @@ export function TradeImportDialog({
   const parseFile = async (file: File) => {
     try {
       const content = await file.text();
-      const lines = content.split("\n").filter((line) => line.trim());
-
-      if (lines.length === 0) {
-        toast.error("Empty file", { description: "The file contains no data" });
-        return;
-      }
-
-      const trades: ParsedTrade[] = [];
-      const errors: ValidationError[] = [];
+      const fileNameLower = file.name.toLowerCase();
+      const isXml = fileNameLower.endsWith(".xml");
       const fileName = file.name;
 
-      // Process each line using pipe-delimited parser
-      for (let i = 0; i < lines.length; i++) {
-        const result = parsePipeDelimitedLine(lines[i], i + 1, fileName);
-        
-        if ('message' in result) {
-          // It's an error
-          if (errors.length < 50) {
-            errors.push(result);
-          }
+      if (isXml) {
+        // DSE XML parser
+        const { trades, errors } = parseDseXmlContent(content, fileName);
+        setParsedTrades(trades);
+        setValidationErrors(errors);
+        setStep("preview");
+
+        if (trades.length === 0 && errors.length > 0) {
+          toast.error("No valid trades found", {
+            description: `${errors.length} validation errors detected`,
+          });
         } else {
-          // It's a valid trade
-          trades.push(result);
+          toast.success(`Parsed ${trades.length} DSE trades`, {
+            description: errors.length > 0 ? `${errors.length} lines with errors` : undefined,
+          });
         }
-
-        // Yield to UI periodically for large files
-        if (i % 5000 === 0 && i > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-      }
-
-      setParsedTrades(trades);
-      setValidationErrors(errors);
-      setStep("preview");
-
-      if (trades.length === 0 && errors.length > 0) {
-        toast.error("No valid trades found", {
-          description: `${errors.length} validation errors detected`,
-        });
       } else {
-        toast.success(`Parsed ${trades.length} trades`, {
-          description: errors.length > 0 ? `${errors.length} lines with errors` : undefined,
-        });
+        // CSE pipe-delimited parser
+        const lines = content.split("\n").filter((line) => line.trim());
+
+        if (lines.length === 0) {
+          toast.error("Empty file", { description: "The file contains no data" });
+          return;
+        }
+
+        const trades: ParsedTrade[] = [];
+        const errors: ValidationError[] = [];
+
+        // Process each line using pipe-delimited parser
+        for (let i = 0; i < lines.length; i++) {
+          const result = parsePipeDelimitedLine(lines[i], i + 1, fileName);
+
+          if ("message" in result) {
+            // It's an error
+            if (errors.length < 50) {
+              errors.push(result);
+            }
+          } else {
+            // It's a valid trade
+            trades.push(result);
+          }
+
+          // Yield to UI periodically for large files
+          if (i % 5000 === 0 && i > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+        }
+
+        setParsedTrades(trades);
+        setValidationErrors(errors);
+        setStep("preview");
+
+        if (trades.length === 0 && errors.length > 0) {
+          toast.error("No valid trades found", {
+            description: `${errors.length} validation errors detected`,
+          });
+        } else {
+          toast.success(`Parsed ${trades.length} CSE trades`, {
+            description: errors.length > 0 ? `${errors.length} lines with errors` : undefined,
+          });
+        }
       }
     } catch (error: any) {
       toast.error("Failed to parse file", { description: error.message });
@@ -472,9 +727,9 @@ export function TradeImportDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-5xl max-h-[90vh]">
         <DialogHeader>
-          <DialogTitle>Import CSE Trade Data</DialogTitle>
+          <DialogTitle>Import Trade Data</DialogTitle>
           <DialogDescription>
-            Upload a .txt file with CSE pipe-delimited trade data
+            Upload a CSE (.txt) or DSE (.xml) trade file
           </DialogDescription>
         </DialogHeader>
 
@@ -488,39 +743,49 @@ export function TradeImportDialog({
               <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <p className="text-lg font-medium">Click to upload or drag and drop</p>
               <p className="text-sm text-muted-foreground mt-2">
-                CSE pipe-delimited .txt file
+                CSE (.txt) or DSE (.xml) trade files
               </p>
               <input
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileSelect}
-                accept=".txt"
+                accept=".txt,.xml"
                 className="hidden"
               />
             </div>
 
-            <div className="bg-muted/50 rounded-lg p-4">
-              <h4 className="font-medium mb-2">Expected CSE Format (Pipe-Delimited)</h4>
-              <p className="text-sm text-muted-foreground mb-2">
-                Each line contains trade data with pipe (|) separators:
-              </p>
-              <code className="text-xs block bg-background p-2 rounded font-mono break-all">
-                DHK01|14028|LOVELLO|S|35000|65.00|GZ44|||22|13/01/2026|10:11:38|13/01/2026|10:11:38|B
-              </code>
-              <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
-                <div>• Field 1: CSE Terminal (DHK01, DHK07)</div>
-                <div>• Field 2: ID (ignored)</div>
-                <div>• Field 3: Security Code (LOVELLO)</div>
-                <div>• Field 4: Side (B=Buy, S=Sell)</div>
-                <div>• Field 5: Quantity (35000)</div>
-                <div>• Field 6: Price (65.00)</div>
-                <div>• Field 7: Investor Code (GZ44, NJ21)</div>
-                <div>• Field 8-9: Empty</div>
-                <div>• Field 10: Trade Sequence (22)</div>
-                <div>• Field 11: Trade Date (DD/MM/YYYY)</div>
-                <div>• Field 12: Trade Time (HH:MM:SS)</div>
-                <div>• Field 13-14: Settlement Date/Time</div>
-                <div>• Field 15: Category (B/N)</div>
+            <div className="bg-muted/50 rounded-lg p-4 space-y-4">
+              <div>
+                <h4 className="font-medium mb-2">CSE Format (.txt - Pipe-Delimited)</h4>
+                <p className="text-sm text-muted-foreground mb-2">
+                  Each line contains trade data with pipe (|) separators:
+                </p>
+                <code className="text-xs block bg-background p-2 rounded font-mono break-all">
+                  DHK01|14028|LOVELLO|S|35000|65.00|GZ44|||22|13/01/2026|10:11:38|13/01/2026|10:11:38|B
+                </code>
+                <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
+                  <div>• Field 1: CSE Terminal (DHK01)</div>
+                  <div>• Field 3: Security Code</div>
+                  <div>• Field 4: Side (B/S)</div>
+                  <div>• Field 5-6: Qty, Price</div>
+                  <div>• Field 7: Investor Code</div>
+                  <div>• Field 11: Trade Date</div>
+                </div>
+              </div>
+              <div className="border-t pt-4">
+                <h4 className="font-medium mb-2">DSE Format (.xml - Excel/Detail)</h4>
+                <p className="text-sm text-muted-foreground mb-2">
+                  Excel-style XML with Row/Cell elements or Detail attributes:
+                </p>
+                <code className="text-xs block bg-background p-2 rounded font-mono break-all">
+                  &lt;Detail Action="EXEC" ClientCode="12345" SecurityCode="STOCK" Side="B" Quantity="100" Price="50.00" FillType="FILL" /&gt;
+                </code>
+                <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
+                  <div>• Action: Must be "EXEC"</div>
+                  <div>• FillType: Must have value</div>
+                  <div>• ClientCode: Investor ID</div>
+                  <div>• SecurityCode, Side, Qty, Price</div>
+                </div>
               </div>
             </div>
           </div>
@@ -613,7 +878,7 @@ export function TradeImportDialog({
                           {trade.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
-                          {formatDateForDisplay(trade.trade_date.replace(/(\d{4})(\d{2})(\d{2})/, "$3$2$1"))}
+                          {formatDateForDisplay(trade.trade_date)}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           {formatTimeForDisplay(trade.trade_time)}
