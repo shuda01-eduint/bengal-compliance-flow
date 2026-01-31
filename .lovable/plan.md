@@ -1,180 +1,327 @@
 
-# Add Duplicate Handling with "Replace Existing Data" Option
 
-## Summary
+# Create New EOD Processing Tables & Update Import Functions
 
-Add a "Replace existing data for this date" option to both the Deposits/Withdrawals and Trades import dialogs. When duplicates are detected, users will be able to choose between:
-1. **Skip duplicates (default)**: Current behavior - only import new records
-2. **Replace duplicates**: Delete existing records for the date(s) and import all new records
+## Overview
 
----
-
-## Scope of Changes
-
-### 1. ImportPreviewDialog.tsx (Shared Component)
-
-Extend the preview dialog to support the new replace option:
-
-**New Props:**
-- `existingRecordsCount`: Number of existing records that would be deleted if replacing
-- `showReplaceOption`: Whether to show the replace checkbox (only when duplicates exist)
-- `replaceExisting`: Current checkbox state
-- `onReplaceChange`: Callback when checkbox is toggled
-
-**UI Changes:**
-- Add a checkbox with label "Replace existing data for this date"
-- Show warning: "This will delete X existing records and import Y new records"
-- Warning uses destructive colors (red/orange) to indicate destructive action
-- Checkbox only appears when there are duplicates detected
+This plan creates the new staging/processing tables from your SQL schema and updates the import dialogs to use them instead of the current tables. We'll handle the schema conflicts carefully to preserve your existing 32,099 investors and 299 employees.
 
 ---
 
-### 2. DepositsImportDialog.tsx
+## Phase 1: Database Migration
 
-**State Changes:**
-- Add `replaceExisting` state (boolean, default false)
-- Add `existingRecordsCount` state to track how many records exist for the date(s)
+### Tables to Create (New)
 
-**Analysis Phase Changes:**
-- Query total count of existing records for the import date(s) to show in warning
-- Pass this count to the preview dialog
+These tables don't exist and will be created:
 
-**Import Logic Changes:**
-- If `replaceExisting` is true:
-  1. Delete all existing `deposits_withdrawals` records for the detected date(s)
-  2. Import all valid records (skip the duplicate filtering)
-- If `replaceExisting` is false:
-  - Keep current behavior (filter out duplicates before import)
+| Table | Purpose |
+|-------|---------|
+| `trade_file` | Trade staging table for import |
+| `cash_ledger_txn` | Deposits/withdrawals with transaction types |
+| `cheque_in_hand` | Pending cheques tracking |
+| `instrument_prices_eod` | Daily closing prices |
+| `eod_instrument_position` | EOD holdings per investor/instrument |
+| `eod_investor_balance` | EOD balance summary per investor |
+| `investor_charge_config` | Commission/interest rates with effective dates |
+| `investor_change_logs` | Audit trail for investor changes |
 
-**Flow:**
-```text
-File Upload -> Analyze -> Preview Dialog
-                            |
-            [checkbox off]  |  [checkbox on]
-                 |          |         |
-         Skip dupes    Replace all data
-              |               |
-        Import new only   Delete existing,
-                          Import all new
+### Tables to Skip (Already Exist)
+
+- `employees` - Already exists with 299 records and different schema
+- `investors` - Already exists with 32,099 records and different schema
+
+### Modified SQL (Removing Duplicates & Conflicts)
+
+```sql
+-- Trade staging table
+CREATE TABLE public.trade_file (
+  trade_id bigserial PRIMARY KEY,
+  trade_date date NOT NULL,
+  investor_code text NOT NULL,
+  instrument text NOT NULL,
+  side text CHECK (side IN ('BUY','SELL')),
+  qty numeric(18,4) NOT NULL,
+  price numeric(18,6) NOT NULL,
+  settlement_date date NOT NULL,
+  commission numeric(18,6) DEFAULT 0,
+  category text,
+  fill_type text,
+  exchange_code text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Cash ledger transactions
+CREATE TABLE public.cash_ledger_txn (
+  txn_id bigserial PRIMARY KEY,
+  txn_date date NOT NULL,
+  investor_code text NOT NULL,
+  type text CHECK (type IN ('DEPOSIT','WITHDRAW','TRADE_CASH','COMMISSION','INTEREST','OTHER')),
+  amount numeric(18,2) NOT NULL,
+  description text,
+  reference text,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Cheque tracking
+CREATE TABLE public.cheque_in_hand (
+  id bigserial PRIMARY KEY,
+  investor_code text NOT NULL,
+  amount numeric(18,2) NOT NULL,
+  cheque_date date NOT NULL,
+  status text CHECK (status IN ('PENDING','CLEARED','BOUNCED')) DEFAULT 'PENDING',
+  created_at timestamptz DEFAULT now()
+);
+
+-- Daily instrument prices
+CREATE TABLE public.instrument_prices_eod (
+  trade_date date NOT NULL,
+  instrument text NOT NULL,
+  eod_price numeric(18,6) NOT NULL,
+  PRIMARY KEY (trade_date, instrument)
+);
+
+-- EOD instrument positions
+CREATE TABLE public.eod_instrument_position (
+  trade_date date NOT NULL,
+  investor_code text NOT NULL,
+  instrument text NOT NULL,
+  total_stock numeric(18,4) NOT NULL,
+  saleable numeric(18,4) NOT NULL,
+  avg_cost numeric(18,6) NOT NULL,
+  total_cost numeric(18,2) NOT NULL,
+  total_market_value numeric(18,2) NOT NULL,
+  PRIMARY KEY (trade_date, investor_code, instrument)
+);
+
+-- EOD investor balance summary
+CREATE TABLE public.eod_investor_balance (
+  trade_date date NOT NULL,
+  investor_code text NOT NULL,
+  boid text,
+  rm_id text,
+  opening_ledger_balance numeric(18,2) NOT NULL DEFAULT 0,
+  matured_balance numeric(18,2) NOT NULL DEFAULT 0,
+  receivable_sales numeric(18,2) NOT NULL DEFAULT 0,
+  cheque_in_tran_hand numeric(18,2) NOT NULL DEFAULT 0,
+  accrued_int numeric(18,2) NOT NULL DEFAULT 0,
+  closing_ledger_balance numeric(18,2) NOT NULL DEFAULT 0,
+  equity numeric(18,2) NOT NULL DEFAULT 0,
+  d_e_rate numeric(18,6),
+  PRIMARY KEY (trade_date, investor_code)
+);
+
+-- Investor charge configuration
+CREATE TABLE public.investor_charge_config (
+  id bigserial PRIMARY KEY,
+  investor_code text NOT NULL,
+  commission_rate numeric(10,4) NOT NULL,
+  charge_rate numeric(10,4) NOT NULL,
+  d_e_limit numeric(18,6),
+  effective_from date NOT NULL,
+  effective_to date,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Investor change audit log
+CREATE TABLE public.investor_change_logs (
+  id bigserial PRIMARY KEY,
+  investor_code text NOT NULL,
+  field_name text NOT NULL,
+  old_value text,
+  new_value text,
+  changed_by text NOT NULL,
+  changed_at timestamptz DEFAULT now(),
+  approval_status text DEFAULT 'PENDING',
+  approved_by text,
+  approved_at timestamptz
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_trade_file_date ON public.trade_file(trade_date);
+CREATE INDEX idx_trade_file_investor ON public.trade_file(investor_code);
+CREATE INDEX idx_cash_ledger_date ON public.cash_ledger_txn(txn_date);
+CREATE INDEX idx_cash_ledger_investor ON public.cash_ledger_txn(investor_code);
+CREATE INDEX idx_eod_investor_balance_date ON public.eod_investor_balance(trade_date);
+CREATE INDEX idx_eod_instrument_position_date ON public.eod_instrument_position(trade_date);
+```
+
+### RLS Policies
+
+Enable RLS and create admin policies for all new tables:
+
+```sql
+-- Enable RLS
+ALTER TABLE public.trade_file ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cash_ledger_txn ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cheque_in_hand ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.instrument_prices_eod ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.eod_instrument_position ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.eod_investor_balance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.investor_charge_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.investor_change_logs ENABLE ROW LEVEL SECURITY;
+
+-- Admin policies (manage all)
+CREATE POLICY "Admins manage trade_file" ON public.trade_file FOR ALL USING (has_role(auth.uid(), 'admin'));
+CREATE POLICY "Admins manage cash_ledger_txn" ON public.cash_ledger_txn FOR ALL USING (has_role(auth.uid(), 'admin'));
+-- ... (similar for all tables)
+
+-- Approved users view policies
+CREATE POLICY "Approved users view trade_file" ON public.trade_file FOR SELECT 
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_approved = true));
+-- ... (similar for all tables)
 ```
 
 ---
 
-### 3. TradeImportDialog.tsx
+## Phase 2: Update Import Functions
 
-**State Changes:**
-- Add `replaceExisting` state (boolean, default false)
-- Add `existingTradeCount` state for existing records count
-- Add logic to count existing trades for the parsed trade dates
+### 1. TradeImportDialog.tsx
 
-**Preview Phase Changes:**
-- After parsing, query `trade_history` table to count existing records for the trade date(s)
-- Show the count in a new warning section if duplicates would occur
+**Current:** Imports to `trade_history` table
+**Change to:** Import to `trade_file` table
 
-**Import Logic Changes:**
-- If `replaceExisting` is true:
-  1. Delete all existing `trade_history` records for the import date(s) and board(s)
-  2. Insert all parsed trades (no upsert, fresh insert)
-- If `replaceExisting` is false:
-  - Keep current upsert behavior (update existing, insert new)
+**Field Mapping:**
 
-**UI Changes:**
-- Add a warning card in the preview step showing:
-  - "X existing trades found for this date"
-  - Checkbox: "Replace existing data for this date"
-  - Warning text when checked: "This will delete X existing records and import Y new records"
+| Current Field | New Field |
+|--------------|-----------|
+| `client_code` | `investor_code` |
+| `security_code` | `instrument` |
+| `trade_date` (text YYYYMMDD) | `trade_date` (date) |
+| `side` | `side` |
+| `quantity` | `qty` |
+| `price` | `price` |
+| `value` | (calculated) |
+| `category` | `category` |
+| `fill_type` | `fill_type` |
+| `board` | `exchange_code` |
+| *(new)* | `settlement_date` (T+2) |
+| *(new)* | `commission` |
+
+**Changes:**
+- Convert `trade_date` from YYYYMMDD text to DATE type
+- Calculate `settlement_date` as T+2
+- Store `exchange_code` (CSE01, DSE, etc.)
+- Remove denormalized fields (rm_name, department, etc.)
+
+### 2. DepositsImportDialog.tsx
+
+**Current:** Imports to `deposits_withdrawals` table
+**Change to:** Import to `cash_ledger_txn` table
+
+**Field Mapping:**
+
+| Current Field | New Field |
+|--------------|-----------|
+| `investor_code` | `investor_code` |
+| `transaction_date` | `txn_date` |
+| `transaction_type` (Deposit/Withdrawal) | `type` (DEPOSIT/WITHDRAW) |
+| `amount` | `amount` |
+| `remarks` | `description` |
+
+**Changes:**
+- Normalize transaction_type to uppercase enum values
+- Use `txn_date` instead of `transaction_date`
+- Use `description` instead of `remarks`
+
+### 3. ImportAdminBalanceDialog.tsx
+
+**Current:** Imports to `eod_ledger_snapshots` table
+**Change to:** Import to `eod_investor_balance` table
+
+**Field Mapping:**
+
+| Current Field | New Field |
+|--------------|-----------|
+| `eod_date` | `trade_date` |
+| `investor_code` | `investor_code` |
+| `ledger_balance` | `closing_ledger_balance` |
+| *(new)* | `boid` |
+| *(new)* | `rm_id` |
+| *(new)* | `opening_ledger_balance` |
+| *(new)* | `matured_balance` |
+| *(new)* | `receivable_sales` |
+| *(new)* | `cheque_in_tran_hand` |
+| *(new)* | `accrued_int` |
+| *(new)* | `equity` |
+| *(new)* | `d_e_rate` |
+
+**Changes:**
+- Update column mappings for additional balance fields
+- Parse matured_balance, receivable_sales, etc. from Excel
+- Use composite primary key (trade_date, investor_code) for upsert
+
+---
+
+## Phase 3: Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/components/eod/TradeImportDialog.tsx` | Change target table to `trade_file`, update field mapping, add settlement_date calculation |
+| `src/components/eod/DepositsImportDialog.tsx` | Change target table to `cash_ledger_txn`, update field names |
+| `src/components/admin/ImportAdminBalanceDialog.tsx` | Change target table to `eod_investor_balance`, add new balance fields |
+| `src/lib/validation-schemas.ts` | Update or add new validation schemas for the new table structures |
 
 ---
 
 ## Technical Details
 
-### Database Operations
-
-**For Deposits/Withdrawals:**
-```sql
--- When replacing, delete by date(s)
-DELETE FROM deposits_withdrawals 
-WHERE transaction_date IN (date1, date2, ...)
-```
-
-**For Trades:**
-```sql
--- When replacing, delete by date(s)
-DELETE FROM trade_history 
-WHERE trade_date IN ('YYYYMMDD', ...)
-```
-
-### Import Preview Data Interface Update
-
+### Trade Date Conversion
 ```typescript
-// Extended ImportPreviewData
-export interface ImportPreviewData {
-  // ... existing fields ...
-  
-  // New fields for replace functionality
-  existingRecordsCount?: number;  // Records that exist for this date
-}
-
-// New props for ImportPreviewDialog
-interface ImportPreviewDialogProps {
-  // ... existing props ...
-  
-  showReplaceOption?: boolean;
-  replaceExisting?: boolean;
-  onReplaceChange?: (replace: boolean) => void;
+// Convert YYYYMMDD to DATE
+function formatTradeDate(yyyymmdd: string): string {
+  // "20260115" -> "2026-01-15"
+  const year = yyyymmdd.substring(0, 4);
+  const month = yyyymmdd.substring(4, 6);
+  const day = yyyymmdd.substring(6, 8);
+  return `${year}-${month}-${day}`;
 }
 ```
 
-### Warning Messages
+### Settlement Date Calculation (T+2)
+```typescript
+function calculateSettlementDate(tradeDate: Date): Date {
+  let settlement = new Date(tradeDate);
+  let businessDays = 0;
+  while (businessDays < 2) {
+    settlement.setDate(settlement.getDate() + 1);
+    // Skip weekends (Saturday=6, Sunday=0)
+    if (settlement.getDay() !== 0 && settlement.getDay() !== 6) {
+      businessDays++;
+    }
+  }
+  return settlement;
+}
+```
 
-**Deposits Dialog:**
-- When duplicates detected: "X duplicate records found"
-- Checkbox label: "Replace existing data for this date"
-- Warning when checked: "This will delete X existing records and import Y new records"
-
-**Trades Dialog:**
-- When existing trades found: "X existing trades found for these dates"
-- Checkbox label: "Replace existing trade data"
-- Warning when checked: "This will delete X existing trades and import Y new trades"
+### Transaction Type Normalization
+```typescript
+function normalizeTransactionType(type: string): string {
+  const lower = type.toLowerCase();
+  if (lower.includes('deposit') || lower.includes('receipt')) return 'DEPOSIT';
+  if (lower.includes('withdraw') || lower.includes('payment')) return 'WITHDRAW';
+  return 'OTHER';
+}
+```
 
 ---
 
-## Files to Modify
+## Implementation Order
 
-| File | Changes |
-|------|---------|
-| `src/components/trade-history/ImportPreviewDialog.tsx` | Add checkbox, warning display, new props |
-| `src/components/eod/DepositsImportDialog.tsx` | Add replace state, count existing, conditional delete logic |
-| `src/components/eod/TradeImportDialog.tsx` | Add replace state, count existing, add warning UI, conditional delete logic |
+1. **Create database tables** via migration tool
+2. **Update TradeImportDialog** to use `trade_file`
+3. **Update DepositsImportDialog** to use `cash_ledger_txn`
+4. **Update ImportAdminBalanceDialog** to use `eod_investor_balance`
+5. **Test imports** with sample data
 
 ---
 
-## User Flow Example
+## Questions Before Implementation
 
-**Deposits Import with Replace:**
+Before I proceed, I'd like to confirm:
 
-1. User uploads Excel file with 100 transactions for Jan 15, 2026
-2. System detects 30 duplicates, 70 new records
-3. Preview shows:
-   - "100 records in file"
-   - "30 duplicates detected (will skip)"
-   - "70 new records to import"
-   - "42 existing records for this date"
-   - [ ] Replace existing data for this date
-4. User checks the box
-5. Warning appears: "This will delete 42 existing records and import 100 new records"
-6. User confirms
-7. System deletes 42 existing records, imports all 100 records
+1. **Foreign Keys**: Your SQL had `REFERENCES public.investors(investor_code)` - but the existing `investors` table uses `investor_code` as a text column (not primary key). Should I skip these foreign key constraints to avoid conflicts?
 
-**Trade Import with Replace:**
+2. **Existing Data**: Do you want to keep the existing tables (`trade_history`, `deposits_withdrawals`, `eod_ledger_snapshots`) for historical data, or should I migrate data from them to the new tables?
 
-1. User uploads CSE file with 500 trades for Jan 15, 2026
-2. System detects 200 existing trades for that date
-3. Preview shows:
-   - "500 trades parsed"
-   - Warning: "200 existing trades found for this date"
-   - [ ] Replace existing trade data
-4. User checks the box
-5. Warning: "This will delete 200 existing trades and import 500 new trades"
-6. User confirms
-7. System deletes 200 existing, inserts 500 new trades
+3. **EOD Processing Functions**: You mentioned `process_staged_trades`, `calculate_settlement_date`, `process_settlements` functions - should I create these as part of this plan, or do you have SQL for them?
+
