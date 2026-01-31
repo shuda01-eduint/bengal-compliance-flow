@@ -1,0 +1,123 @@
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TrendingUp, TrendingDown, Users, FileText, AlertTriangle } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface EodSummaryCardsProps {
+  totalTrades?: number;
+  clientsCaptured?: number;
+  grossBuy?: number;
+  grossSell?: number;
+  totalCommission?: number;
+  totalDeposits?: number;
+  totalWithdrawals?: number;
+  errorsCount?: number;
+  warningsCount?: number;
+  visible?: boolean;
+}
+
+export function EodSummaryCards({
+  totalTrades = 0,
+  clientsCaptured = 0,
+  grossBuy = 0,
+  grossSell = 0,
+  totalCommission = 0,
+  totalDeposits = 0,
+  totalWithdrawals = 0,
+  errorsCount = 0,
+  warningsCount = 0,
+  visible = true,
+}: EodSummaryCardsProps) {
+  if (!visible) return null;
+
+  const formatCurrency = (value: number): string => {
+    if (value >= 1e9) {
+      return `${(value / 1e9).toFixed(2)}B`;
+    }
+    if (value >= 1e6) {
+      return `${(value / 1e6).toFixed(2)}M`;
+    }
+    if (value >= 1e3) {
+      return `${(value / 1e3).toFixed(1)}K`;
+    }
+    return value.toLocaleString();
+  };
+
+  const cards = [
+    {
+      title: "Total Trades",
+      value: totalTrades.toLocaleString(),
+      icon: FileText,
+      color: "text-foreground",
+    },
+    {
+      title: "Clients Captured",
+      value: clientsCaptured.toLocaleString(),
+      icon: Users,
+      color: "text-foreground",
+    },
+    {
+      title: "Gross Buy",
+      value: `৳${formatCurrency(grossBuy)}`,
+      icon: TrendingDown,
+      color: "text-red-600",
+    },
+    {
+      title: "Gross Sell",
+      value: `৳${formatCurrency(grossSell)}`,
+      icon: TrendingUp,
+      color: "text-green-600",
+    },
+    {
+      title: "Commission",
+      value: `৳${formatCurrency(totalCommission)}`,
+      icon: TrendingUp,
+      color: "text-primary",
+    },
+    {
+      title: "Net Deposits",
+      value: `৳${formatCurrency(totalDeposits - totalWithdrawals)}`,
+      icon: totalDeposits >= totalWithdrawals ? TrendingUp : TrendingDown,
+      color: totalDeposits >= totalWithdrawals ? "text-green-600" : "text-red-600",
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold">EOD Summary</h3>
+      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+        {cards.map((card) => (
+          <Card key={card.title}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">
+                {card.title}
+              </CardTitle>
+              <card.icon className={cn("h-4 w-4", card.color)} />
+            </CardHeader>
+            <CardContent>
+              <div className={cn("text-lg font-bold", card.color)}>
+                {card.value}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {(errorsCount > 0 || warningsCount > 0) && (
+        <div className="flex gap-4">
+          {errorsCount > 0 && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <AlertTriangle className="h-4 w-4" />
+              {errorsCount} error{errorsCount !== 1 ? "s" : ""}
+            </div>
+          )}
+          {warningsCount > 0 && (
+            <div className="flex items-center gap-2 text-sm text-amber-600">
+              <AlertTriangle className="h-4 w-4" />
+              {warningsCount} warning{warningsCount !== 1 ? "s" : ""}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
