@@ -22,6 +22,7 @@ interface EodActionButtonsProps {
   isRunning: boolean;
   isStopping?: boolean;
   isClearing?: boolean;
+  isProcessingStaged?: boolean;
   disabled?: boolean;
   hasDateSelected?: boolean;
 }
@@ -38,6 +39,7 @@ export function EodActionButtons({
   isRunning,
   isStopping,
   isClearing,
+  isProcessingStaged,
   disabled,
   hasDateSelected,
 }: EodActionButtonsProps) {
@@ -64,10 +66,14 @@ export function EodActionButtons({
       <Button
         variant="outline"
         onClick={onProcessStaged}
-        disabled={disabled || isRunning || !hasDateSelected}
+        disabled={disabled || isRunning || isProcessingStaged || !hasDateSelected}
       >
-        <Calculator className="mr-2 h-4 w-4" />
-        Process Staged Trades
+        {isProcessingStaged ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Calculator className="mr-2 h-4 w-4" />
+        )}
+        {isProcessingStaged ? "Processing..." : "Process Staged Trades"}
       </Button>
 
       <Button

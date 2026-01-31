@@ -48,6 +48,35 @@ interface DayResult {
   error?: string;
 }
 
+// Process staged trades result interface
+interface ProcessStagedResult {
+  success: boolean;
+  trade_date?: string;
+  trade_count?: number;
+  investor_count?: number;
+  gross_buy?: number;
+  gross_sell?: number;
+  total_commission?: number;
+  deposit_count?: number;
+  withdrawal_count?: number;
+  total_deposits?: number;
+  total_withdrawals?: number;
+  instruments_priced?: number;
+  positions_captured?: number;
+  total_market_value?: number;
+  snapshots_created?: number;
+  margin_accounts?: number;
+  margin_exposure?: number;
+  daily_interest_total?: number;
+  cumulative_interest_total?: number;
+  total_equity?: number;
+  negative_equity_count?: number;
+  with_rm_assigned?: number;
+  with_department?: number;
+  error?: string;
+  error_detail?: string;
+}
+
 export default function EodPage() {
   const queryClient = useQueryClient();
 
@@ -65,6 +94,7 @@ export default function EodPage() {
   const [stopping, setStopping] = useState(false);
   const [stopRequested, setStopRequested] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [processingStaged, setProcessingStaged] = useState(false);
 
   // Progress tracking
   const [progress, setProgress] = useState(0);
@@ -75,6 +105,7 @@ export default function EodPage() {
   // Results
   const [dayResults, setDayResults] = useState<DayResult[]>([]);
   const [showSummary, setShowSummary] = useState(false);
+  const [stagedResult, setStagedResult] = useState<ProcessStagedResult | null>(null);
 
   // Computed status counts
   const completedCount = dayResults.filter((r) => r.success && !r.skipped).length;
@@ -269,12 +300,42 @@ export default function EodPage() {
     setDepositsDialogOpen(true);
   };
 
-  const handleProcessStaged = () => {
-    toast.info("Process Staged Trades - Coming soon");
-  };
+  const handleProcessStaged = async () => {
+    if (!selectedDate) {
+      toast.error("Please select a date first");
+      return;
+    }
 
-  const handleCalculateSettlements = () => {
-    toast.info("Calculate Settlements - Coming soon");
+    setProcessingStaged(true);
+    setStagedResult(null);
+    
+    try {
+      const dateStr = format(selectedDate, "yyyy-MM-dd");
+      const { data, error } = await supabase.rpc("process_staged_trades", {
+        p_trade_date: dateStr,
+      });
+
+      if (error) throw error;
+
+      const result = data as unknown as ProcessStagedResult;
+      setStagedResult(result);
+
+      if (result.success) {
+        toast.success(`Processed trades for ${dateStr}`, {
+          description: `${result.snapshots_created?.toLocaleString()} snapshots, ${result.positions_captured?.toLocaleString()} positions`,
+        });
+        setShowSummary(true);
+        queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
+      } else {
+        toast.error("Processing failed", {
+          description: result.error,
+        });
+      }
+    } catch (error: any) {
+      toast.error("Failed to process staged trades", { description: error.message });
+    } finally {
+      setProcessingStaged(false);
+    }
   };
 
   const handleGenerateReport = () => {
@@ -309,14 +370,15 @@ export default function EodPage() {
           onImportTrades={handleImportTrades}
           onImportDeposits={handleImportDeposits}
           onProcessStaged={handleProcessStaged}
-          onCalculateSettlements={handleCalculateSettlements}
+          onCalculateSettlements={() => toast.info("Calculate Settlements - Coming soon")}
           onRunFullEod={handleRunFullEod}
-          onGenerateReport={handleGenerateReport}
+          onGenerateReport={() => toast.info("Generate Report - Coming soon")}
           onClearSelected={handleClearSelected}
           onStop={handleStop}
           isRunning={running}
           isStopping={stopping}
           isClearing={clearing}
+          isProcessingStaged={processingStaged}
           hasDateSelected={hasDateSelected}
         />
 
@@ -346,16 +408,23 @@ export default function EodPage() {
           visible={running}
         />
 
-        {/* Summary Cards */}
+        {/* Summary Cards - show from staged result or batch result */}
         <EodSummaryCards
-          totalTrades={summary.totalTrades}
-          clientsCaptured={summary.clientsCaptured}
-          grossBuy={summary.grossBuy}
-          grossSell={summary.grossSell}
-          totalCommission={summary.totalCommission}
-          totalDeposits={summary.totalDeposits}
-          totalWithdrawals={summary.totalWithdrawals}
+          totalTrades={stagedResult?.trade_count ?? summary.totalTrades}
+          clientsCaptured={stagedResult?.snapshots_created ?? summary.clientsCaptured}
+          grossBuy={stagedResult?.gross_buy ?? summary.grossBuy}
+          grossSell={stagedResult?.gross_sell ?? summary.grossSell}
+          totalCommission={stagedResult?.total_commission ?? summary.totalCommission}
+          totalDeposits={stagedResult?.total_deposits ?? summary.totalDeposits}
+          totalWithdrawals={stagedResult?.total_withdrawals ?? summary.totalWithdrawals}
           errorsCount={summary.errorsCount}
+          positionsCaptured={stagedResult?.positions_captured ?? 0}
+          totalMarketValue={stagedResult?.total_market_value ?? 0}
+          marginAccounts={stagedResult?.margin_accounts ?? 0}
+          marginExposure={stagedResult?.margin_exposure ?? 0}
+          dailyInterestTotal={stagedResult?.daily_interest_total ?? 0}
+          totalEquity={stagedResult?.total_equity ?? 0}
+          negativeEquityCount={stagedResult?.negative_equity_count ?? 0}
           visible={showSummary}
         />
 
