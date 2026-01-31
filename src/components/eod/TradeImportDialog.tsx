@@ -395,7 +395,7 @@ function parseXmlRowToTrade(
   const price = getNumber("Price");
   const value = getNumber("Value") || quantity * price;
 
-  // Parse date - DSE uses various formats
+  // Parse date - DSE uses various formats (YYYYMMDD, DDMMYYYY, DD/MM/YYYY, YYYY-MM-DD)
   const dateRaw = getString("Date");
   let tradeDate = dateRaw;
 
@@ -407,12 +407,19 @@ function parseXmlRowToTrade(
       tradeDate = `${year}${month.padStart(2, "0")}${day.padStart(2, "0")}`;
     }
   }
-  // Handle DDMMYYYY format
+  // Handle 8-digit formats (YYYYMMDD or DDMMYYYY)
   else if (dateRaw.length === 8 && !dateRaw.includes("-")) {
-    const day = dateRaw.substring(0, 2);
-    const month = dateRaw.substring(2, 4);
-    const year = dateRaw.substring(4, 8);
-    tradeDate = `${year}${month}${day}`;
+    // Detect YYYYMMDD format (starts with 19xx or 20xx century)
+    if (dateRaw.startsWith("19") || dateRaw.startsWith("20")) {
+      // Already in YYYYMMDD format - use as-is
+      tradeDate = dateRaw;
+    } else {
+      // Assume DDMMYYYY format
+      const day = dateRaw.substring(0, 2);
+      const month = dateRaw.substring(2, 4);
+      const year = dateRaw.substring(4, 8);
+      tradeDate = `${year}${month}${day}`;
+    }
   }
   // Handle YYYY-MM-DD format
   else if (dateRaw.includes("-")) {
