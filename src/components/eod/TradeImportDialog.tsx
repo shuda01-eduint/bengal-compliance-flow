@@ -22,20 +22,25 @@ import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { format } from "date-fns";
 import { sanitizeString } from "@/lib/validation-schemas";
 
 interface ParsedTrade {
-  trade_date: string;
-  client_code: string;
+  exchange: string;
+  dp_code: string;
+  investor_code: string;
+  full_investor_code: string;
   security_code: string;
   side: "BUY" | "SELL";
   quantity: number;
   price: number;
   value: number;
-  commission: number;
+  market_type: string;
+  trade_id: string;
+  trade_date: string;
+  trade_time: string;
   settlement_date: string;
-  category: string;
+  settlement_time: string;
+  category_flag: string;
   exec_id: string;
   file_name: string;
 }
@@ -43,6 +48,7 @@ interface ParsedTrade {
 interface ValidationError {
   line: number;
   message: string;
+  raw?: string;
 }
 
 interface TradeImportDialogProps {
@@ -52,6 +58,162 @@ interface TradeImportDialogProps {
 }
 
 type ImportStep = "upload" | "preview" | "importing" | "complete";
+
+// Convert DDMMYYYY to YYYYMMDD format
+function convertDateFormat(ddmmyyyy: string): string {
+  if (ddmmyyyy.length !== 8) return ddmmyyyy;
+  const day = ddmmyyyy.substring(0, 2);
+  const month = ddmmyyyy.substring(2, 4);
+  const year = ddmmyyyy.substring(4, 8);
+  return `${year}${month}${day}`;
+}
+
+// Convert DDMMYYYY to YYYY-MM-DD display format
+function formatDateForDisplay(ddmmyyyy: string): string {
+  if (ddmmyyyy.length !== 8) return ddmmyyyy;
+  const day = ddmmyyyy.substring(0, 2);
+  const month = ddmmyyyy.substring(2, 4);
+  const year = ddmmyyyy.substring(4, 8);
+  return `${year}-${month}-${day}`;
+}
+
+// Convert HHMMSS to HH:MM:SS display format
+function formatTimeForDisplay(hhmmss: string): string {
+  if (hhmmss.length !== 6) return hhmmss;
+  const hour = hhmmss.substring(0, 2);
+  const min = hhmmss.substring(2, 4);
+  const sec = hhmmss.substring(4, 6);
+  return `${hour}:${min}:${sec}`;
+}
+
+// Parse a single line of DSE fixed-width trade data
+function parseFixedWidthLine(line: string, lineNumber: number, fileName: string): ParsedTrade | ValidationError {
+  const trimmed = line.trim();
+  
+  // Minimum length check: 3+2+5 (fixed start) + some middle + 29 (fixed end) = ~45+ chars
+  if (trimmed.length < 45) {
+    return { line: lineNumber, message: `Line too short (${trimmed.length} chars, need 45+)`, raw: trimmed.substring(0, 50) };
+  }
+
+  try {
+    // === FIXED START POSITIONS ===
+    const exchange = trimmed.substring(0, 3); // DHK or CSE
+    const dpCode = trimmed.substring(3, 5); // 01, 05, 11, 16, etc.
+    const investorCode = trimmed.substring(5, 10); // 5 digits
+    const fullInvestorCode = dpCode + investorCode;
+
+    // === FIXED END POSITIONS (from the end) ===
+    const len = trimmed.length;
+    const categoryFlag = trimmed.substring(len - 1); // Last char: B or N
+    const settlementTime = trimmed.substring(len - 7, len - 1); // 6 chars before category
+    const settlementDate = trimmed.substring(len - 15, len - 7); // 8 chars DDMMYYYY
+    const tradeTime = trimmed.substring(len - 21, len - 15); // 6 chars HHMMSS
+    const tradeDate = trimmed.substring(len - 29, len - 21); // 8 chars DDMMYYYY
+
+    // Validate dates look like numbers
+    if (!/^\d{8}$/.test(tradeDate)) {
+      return { line: lineNumber, message: `Invalid trade date format: ${tradeDate}`, raw: trimmed.substring(0, 50) };
+    }
+    if (!/^\d{8}$/.test(settlementDate)) {
+      return { line: lineNumber, message: `Invalid settlement date format: ${settlementDate}`, raw: trimmed.substring(0, 50) };
+    }
+
+    // === VARIABLE MIDDLE SECTION ===
+    // Everything between position 10 and (len - 29)
+    const middleSection = trimmed.substring(10, len - 29);
+    
+    if (middleSection.length < 10) {
+      return { line: lineNumber, message: `Middle section too short: ${middleSection}`, raw: trimmed.substring(0, 50) };
+    }
+
+    // Find the side (B or S) - it separates instrument code from quantity
+    // Instrument is uppercase letters, side is B or S, followed by digits
+    const sideMatch = middleSection.match(/^([A-Z0-9]+)(B|S)(.+)$/);
+    if (!sideMatch) {
+      return { line: lineNumber, message: `Cannot find B/S side indicator`, raw: trimmed.substring(0, 50) };
+    }
+
+    const securityCode = sideMatch[1];
+    const side: "BUY" | "SELL" = sideMatch[2] === "S" ? "SELL" : "BUY";
+    const afterSide = sideMatch[3]; // e.g., "3500065.00GZ44221"
+
+    // Parse: Quantity + Price + MarketType + TradeID
+    // Price has a decimal point (XX.XX format)
+    // MarketType is 2 uppercase letters (GZ, NJ, BK, ST, etc.)
+    // TradeID is digits at the end
+
+    // Find the decimal point for price
+    const decimalIndex = afterSide.indexOf(".");
+    if (decimalIndex === -1) {
+      return { line: lineNumber, message: `Cannot find decimal point for price`, raw: trimmed.substring(0, 50) };
+    }
+
+    // Find market type (2 uppercase letters after the price)
+    // Price format: digits.XX where XX is 2 decimal places
+    const afterDecimal = afterSide.substring(decimalIndex + 1);
+    const marketMatch = afterDecimal.match(/^(\d{2})([A-Z]{2})(\d+)$/);
+    
+    if (!marketMatch) {
+      return { line: lineNumber, message: `Cannot parse market type and trade ID from: ${afterDecimal}`, raw: trimmed.substring(0, 50) };
+    }
+
+    const priceDecimals = marketMatch[1]; // "00" from "65.00"
+    const marketType = marketMatch[2]; // "GZ"
+    const tradeId = marketMatch[3]; // "44221"
+
+    // Extract price: everything from some point before decimal to the decimals
+    // Price is the number ending at decimal + 2 digits
+    const priceEndIndex = decimalIndex + 3; // includes ".XX"
+    
+    // Find where price starts - it's the digits immediately before the decimal
+    // that form a reasonable price (work backwards from decimal)
+    let priceStartIndex = decimalIndex - 1;
+    while (priceStartIndex > 0 && /\d/.test(afterSide[priceStartIndex - 1])) {
+      priceStartIndex--;
+    }
+    
+    // Quantity is everything from start of afterSide to priceStartIndex
+    const quantityStr = afterSide.substring(0, priceStartIndex);
+    const priceStr = afterSide.substring(priceStartIndex, decimalIndex) + "." + priceDecimals;
+
+    const quantity = parseInt(quantityStr, 10);
+    const price = parseFloat(priceStr);
+
+    if (isNaN(quantity) || quantity <= 0) {
+      return { line: lineNumber, message: `Invalid quantity: ${quantityStr}`, raw: trimmed.substring(0, 50) };
+    }
+    if (isNaN(price) || price <= 0) {
+      return { line: lineNumber, message: `Invalid price: ${priceStr}`, raw: trimmed.substring(0, 50) };
+    }
+
+    const value = quantity * price;
+    const tradeDateFormatted = convertDateFormat(tradeDate);
+    const execId = `${exchange}_${fullInvestorCode}_${securityCode}_${tradeDateFormatted}_${tradeId}`;
+
+    return {
+      exchange,
+      dp_code: dpCode,
+      investor_code: investorCode,
+      full_investor_code: fullInvestorCode,
+      security_code: securityCode,
+      side,
+      quantity,
+      price,
+      value,
+      market_type: marketType,
+      trade_id: tradeId,
+      trade_date: tradeDateFormatted,
+      trade_time: tradeTime,
+      settlement_date: convertDateFormat(settlementDate),
+      settlement_time: settlementTime,
+      category_flag: categoryFlag,
+      exec_id: execId,
+      file_name: fileName,
+    };
+  } catch (error: any) {
+    return { line: lineNumber, message: `Parse error: ${error.message}`, raw: trimmed.substring(0, 50) };
+  }
+}
 
 export function TradeImportDialog({
   open,
@@ -95,7 +257,7 @@ export function TradeImportDialog({
 
     if (!selectedFile.name.toLowerCase().endsWith(".txt")) {
       toast.error("Invalid file type", {
-        description: "Please upload a .txt file with pipe-delimited data",
+        description: "Please upload a .txt file with DSE trade data",
       });
       return;
     }
@@ -120,100 +282,22 @@ export function TradeImportDialog({
 
       // Process each line
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        const parts = line.split("|");
-
-        // Expected format: Trade Date|Investor Code|Instrument Code|Buy/Sell|Quantity|Price|Trade Value|Commission|Settlement Date|Category
-        if (parts.length < 10) {
-          if (errors.length < 20) {
-            errors.push({
-              line: i + 1,
-              message: `Invalid format: expected 10 columns, got ${parts.length}`,
-            });
+        const result = parseFixedWidthLine(lines[i], i + 1, fileName);
+        
+        if ('message' in result) {
+          // It's an error
+          if (errors.length < 50) {
+            errors.push(result);
           }
-          continue;
+        } else {
+          // It's a valid trade
+          trades.push(result);
         }
 
-        const [
-          tradeDateRaw,
-          clientCode,
-          securityCode,
-          sideRaw,
-          quantityRaw,
-          priceRaw,
-          valueRaw,
-          commissionRaw,
-          settlementDateRaw,
-          categoryRaw,
-        ] = parts;
-
-        // Validate required fields
-        if (!tradeDateRaw?.trim() || !clientCode?.trim() || !securityCode?.trim()) {
-          if (errors.length < 20) {
-            errors.push({
-              line: i + 1,
-              message: "Missing required fields: Trade Date, Investor Code, or Instrument Code",
-            });
-          }
-          continue;
+        // Yield to UI periodically for large files
+        if (i % 5000 === 0 && i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
-
-        // Parse numeric values
-        const quantity = parseInt(quantityRaw?.replace(/,/g, "") || "0", 10);
-        const price = parseFloat(priceRaw?.replace(/,/g, "") || "0");
-        const value = parseFloat(valueRaw?.replace(/,/g, "") || "0") || quantity * price;
-        const commission = parseFloat(commissionRaw?.replace(/,/g, "") || "0");
-
-        if (isNaN(quantity) || quantity <= 0) {
-          if (errors.length < 20) {
-            errors.push({ line: i + 1, message: "Invalid quantity" });
-          }
-          continue;
-        }
-
-        if (isNaN(price) || price <= 0) {
-          if (errors.length < 20) {
-            errors.push({ line: i + 1, message: "Invalid price" });
-          }
-          continue;
-        }
-
-        // Parse side (B/S or BUY/SELL)
-        const sideUpper = sideRaw?.trim().toUpperCase() || "";
-        const side: "BUY" | "SELL" =
-          sideUpper === "S" || sideUpper === "SELL" ? "SELL" : "BUY";
-
-        // Format dates (handle yyyy-mm-dd format)
-        let tradeDate = tradeDateRaw.trim();
-        let settlementDate = settlementDateRaw?.trim() || "";
-
-        // Convert date format to YYYYMMDD if needed
-        if (tradeDate.includes("-")) {
-          tradeDate = tradeDate.replace(/-/g, "");
-        }
-        if (settlementDate.includes("-")) {
-          settlementDate = settlementDate.replace(/-/g, "");
-        }
-
-        // Generate exec_id for deduplication
-        const execId = `${tradeDate}_${clientCode.trim()}_${securityCode.trim()}_${side}_${quantity}_${price}_${i}`;
-
-        trades.push({
-          trade_date: tradeDate,
-          client_code: sanitizeString(clientCode.trim()),
-          security_code: sanitizeString(securityCode.trim()),
-          side,
-          quantity,
-          price,
-          value,
-          commission,
-          settlement_date: settlementDate,
-          category: sanitizeString(categoryRaw?.trim() || ""),
-          exec_id: execId,
-          file_name: fileName,
-        });
       }
 
       setParsedTrades(trades);
@@ -223,6 +307,10 @@ export function TradeImportDialog({
       if (trades.length === 0 && errors.length > 0) {
         toast.error("No valid trades found", {
           description: `${errors.length} validation errors detected`,
+        });
+      } else {
+        toast.success(`Parsed ${trades.length} trades`, {
+          description: errors.length > 0 ? `${errors.length} lines with errors` : undefined,
         });
       }
     } catch (error: any) {
@@ -242,7 +330,7 @@ export function TradeImportDialog({
 
     try {
       // Fetch investor/client data for denormalization
-      const clientCodes = [...new Set(parsedTrades.map((t) => t.client_code))];
+      const clientCodes = [...new Set(parsedTrades.map((t) => t.full_investor_code))];
 
       const [investorsResult, clientsResult, agentCodesResult] = await Promise.all([
         supabase
@@ -293,9 +381,9 @@ export function TradeImportDialog({
 
       // Prepare records for insert
       const records = parsedTrades.map((trade) => {
-        const investorData = investorMap[trade.client_code];
-        const clientData = clientMap[trade.client_code];
-        const agentData = agentMap[trade.client_code];
+        const investorData = investorMap[trade.full_investor_code];
+        const clientData = clientMap[trade.full_investor_code];
+        const agentData = agentMap[trade.full_investor_code];
         const rmName = clientData?.rm_name || null;
         const department = rmName ? departmentMap[rmName] || null : null;
 
@@ -303,13 +391,15 @@ export function TradeImportDialog({
           action: "EXEC",
           status: "FILL",
           side: trade.side,
-          security_code: trade.security_code,
+          security_code: sanitizeString(trade.security_code),
+          board: trade.market_type,
           trade_date: trade.trade_date,
+          trade_time: trade.trade_time,
           quantity: trade.quantity,
           price: trade.price,
           value: trade.value,
-          client_code: trade.client_code,
-          category: trade.category,
+          client_code: trade.full_investor_code,
+          category: trade.category_flag,
           fill_type: "FILL",
           exec_id: trade.exec_id,
           file_name: trade.file_name,
@@ -377,11 +467,11 @@ export function TradeImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh]">
+      <DialogContent className="max-w-5xl max-h-[90vh]">
         <DialogHeader>
-          <DialogTitle>Import Trade Data</DialogTitle>
+          <DialogTitle>Import DSE Trade Data</DialogTitle>
           <DialogDescription>
-            Upload a pipe-delimited .txt file with trade data
+            Upload a .txt file with DSE fixed-width trade data
           </DialogDescription>
         </DialogHeader>
 
@@ -395,7 +485,7 @@ export function TradeImportDialog({
               <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <p className="text-lg font-medium">Click to upload or drag and drop</p>
               <p className="text-sm text-muted-foreground mt-2">
-                Pipe-delimited .txt file
+                DSE fixed-width .txt file
               </p>
               <input
                 type="file"
@@ -407,16 +497,29 @@ export function TradeImportDialog({
             </div>
 
             <div className="bg-muted/50 rounded-lg p-4">
-              <h4 className="font-medium mb-2">Expected Format</h4>
+              <h4 className="font-medium mb-2">Expected Format (Fixed-Width)</h4>
               <p className="text-sm text-muted-foreground mb-2">
-                Each line should have 10 pipe-delimited columns:
+                Each line contains trade data in DSE fixed-width format:
               </p>
-              <code className="text-xs block bg-background p-2 rounded">
-                Trade Date|Investor Code|Instrument|Side|Qty|Price|Value|Commission|Settlement Date|Category
+              <code className="text-xs block bg-background p-2 rounded font-mono break-all">
+                DHK0114028LOVELLOS3500065.00GZ44221301202610113813012026101138B
               </code>
-              <code className="text-xs block bg-background p-2 rounded mt-1 text-muted-foreground">
-                2026-01-13|INV001|BRAC|B|100|45.50|4550.00|22.75|2026-01-15|A
-              </code>
+              <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
+                <div>• Pos 1-3: Exchange (DHK/CSE)</div>
+                <div>• Pos 4-5: DP Code</div>
+                <div>• Pos 6-10: Investor Code (5 digits)</div>
+                <div>• Variable: Instrument Code</div>
+                <div>• 1 char: Side (B=Buy, S=Sell)</div>
+                <div>• Variable: Quantity</div>
+                <div>• Variable: Price (with decimal)</div>
+                <div>• 2 chars: Market Type (GZ, NJ)</div>
+                <div>• Variable: Trade ID</div>
+                <div>• 8 chars: Trade Date (DDMMYYYY)</div>
+                <div>• 6 chars: Trade Time (HHMMSS)</div>
+                <div>• 8 chars: Settlement Date</div>
+                <div>• 6 chars: Settlement Time</div>
+                <div>• 1 char: Category (B/N)</div>
+              </div>
             </div>
           </div>
         )}
@@ -429,7 +532,7 @@ export function TradeImportDialog({
               <div>
                 <p className="font-medium">{file?.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  {parsedTrades.length} trades parsed
+                  {parsedTrades.length.toLocaleString()} trades parsed
                   {validationErrors.length > 0 && (
                     <span className="text-destructive ml-2">
                       ({validationErrors.length} errors)
@@ -446,14 +549,15 @@ export function TradeImportDialog({
                   <span className="font-medium text-destructive">Validation Errors</span>
                 </div>
                 <ScrollArea className="h-24">
-                  {validationErrors.slice(0, 10).map((err, idx) => (
-                    <p key={idx} className="text-sm text-muted-foreground">
+                  {validationErrors.slice(0, 15).map((err, idx) => (
+                    <p key={idx} className="text-sm text-muted-foreground font-mono">
                       Line {err.line}: {err.message}
+                      {err.raw && <span className="text-xs ml-2 opacity-60">[{err.raw}...]</span>}
                     </p>
                   ))}
-                  {validationErrors.length > 10 && (
+                  {validationErrors.length > 15 && (
                     <p className="text-sm text-muted-foreground italic">
-                      ...and {validationErrors.length - 10} more errors
+                      ...and {validationErrors.length - 15} more errors
                     </p>
                   )}
                 </ScrollArea>
@@ -461,62 +565,101 @@ export function TradeImportDialog({
             )}
 
             <div className="border rounded-lg">
-              <ScrollArea className="h-[300px]">
+              <ScrollArea className="h-[350px]">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Date</TableHead>
+                      <TableHead className="w-[70px]">Exchange</TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Security</TableHead>
                       <TableHead>Side</TableHead>
                       <TableHead className="text-right">Qty</TableHead>
                       <TableHead className="text-right">Price</TableHead>
                       <TableHead className="text-right">Value</TableHead>
-                      <TableHead>Category</TableHead>
+                      <TableHead>Market</TableHead>
+                      <TableHead>Trade Date</TableHead>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Cat</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {parsedTrades.slice(0, 100).map((trade, idx) => (
                       <TableRow key={idx}>
                         <TableCell className="font-mono text-xs">
-                          {trade.trade_date}
+                          {trade.exchange}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
-                          {trade.client_code}
+                          {trade.full_investor_code}
                         </TableCell>
-                        <TableCell>{trade.security_code}</TableCell>
+                        <TableCell className="font-medium">
+                          {trade.security_code}
+                        </TableCell>
                         <TableCell>
                           <Badge
                             variant={trade.side === "BUY" ? "default" : "secondary"}
+                            className="text-xs"
                           >
                             {trade.side}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right font-mono">
+                        <TableCell className="text-right font-mono text-xs">
                           {trade.quantity.toLocaleString()}
                         </TableCell>
-                        <TableCell className="text-right font-mono">
+                        <TableCell className="text-right font-mono text-xs">
                           {trade.price.toFixed(2)}
                         </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {trade.value.toLocaleString()}
+                        <TableCell className="text-right font-mono text-xs">
+                          {trade.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </TableCell>
-                        <TableCell>{trade.category}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {trade.market_type}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {formatDateForDisplay(trade.trade_date.replace(/(\d{4})(\d{2})(\d{2})/, "$3$2$1"))}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {formatTimeForDisplay(trade.trade_time)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="outline" className="text-xs">
+                            {trade.category_flag}
+                          </Badge>
+                        </TableCell>
                       </TableRow>
                     ))}
                     {parsedTrades.length > 100 && (
                       <TableRow>
                         <TableCell
-                          colSpan={8}
+                          colSpan={11}
                           className="text-center text-muted-foreground italic"
                         >
-                          ...and {parsedTrades.length - 100} more trades
+                          ...and {(parsedTrades.length - 100).toLocaleString()} more trades
                         </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
               </ScrollArea>
+            </div>
+
+            {/* Summary stats */}
+            <div className="grid grid-cols-4 gap-3 text-sm">
+              <div className="bg-muted/50 rounded-lg p-3">
+                <p className="text-muted-foreground">Total Qty</p>
+                <p className="font-bold">{parsedTrades.reduce((sum, t) => sum + t.quantity, 0).toLocaleString()}</p>
+              </div>
+              <div className="bg-muted/50 rounded-lg p-3">
+                <p className="text-muted-foreground">Total Value</p>
+                <p className="font-bold">৳{parsedTrades.reduce((sum, t) => sum + t.value, 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+              </div>
+              <div className="bg-green-500/10 rounded-lg p-3">
+                <p className="text-muted-foreground">Buy Trades</p>
+                <p className="font-bold text-green-600">{parsedTrades.filter(t => t.side === "BUY").length.toLocaleString()}</p>
+              </div>
+              <div className="bg-red-500/10 rounded-lg p-3">
+                <p className="text-muted-foreground">Sell Trades</p>
+                <p className="font-bold text-red-600">{parsedTrades.filter(t => t.side === "SELL").length.toLocaleString()}</p>
+              </div>
             </div>
           </div>
         )}
@@ -548,12 +691,12 @@ export function TradeImportDialog({
 
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-muted/50 rounded-lg p-4 text-center">
-                <p className="text-2xl font-bold">{importSummary.total}</p>
+                <p className="text-2xl font-bold">{importSummary.total.toLocaleString()}</p>
                 <p className="text-sm text-muted-foreground">Total Records</p>
               </div>
               <div className="bg-green-500/10 rounded-lg p-4 text-center">
                 <p className="text-2xl font-bold text-green-600">
-                  {importSummary.imported}
+                  {importSummary.imported.toLocaleString()}
                 </p>
                 <p className="text-sm text-muted-foreground">Imported</p>
               </div>
@@ -583,7 +726,7 @@ export function TradeImportDialog({
                 onClick={handleImport}
                 disabled={parsedTrades.length === 0 || importing}
               >
-                Import {parsedTrades.length} Trades
+                Import {parsedTrades.length.toLocaleString()} Trades
               </Button>
             </>
           )}
