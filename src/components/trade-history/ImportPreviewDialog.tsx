@@ -10,7 +10,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowDown, ArrowUp, Calendar, FileSpreadsheet, AlertTriangle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { ArrowDown, ArrowUp, Calendar, FileSpreadsheet, AlertTriangle, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 
 export interface ImportPreviewData {
@@ -24,6 +26,7 @@ export interface ImportPreviewData {
   totalWithdrawals: number;
   depositCount: number;
   withdrawalCount: number;
+  existingRecordsCount?: number;
 }
 
 interface ImportPreviewDialogProps {
@@ -32,6 +35,9 @@ interface ImportPreviewDialogProps {
   previewData: ImportPreviewData | null;
   onConfirm: () => void;
   onCancel: () => void;
+  showReplaceOption?: boolean;
+  replaceExisting?: boolean;
+  onReplaceChange?: (replace: boolean) => void;
 }
 
 export const ImportPreviewDialog = ({
@@ -40,6 +46,9 @@ export const ImportPreviewDialog = ({
   previewData,
   onConfirm,
   onCancel,
+  showReplaceOption = false,
+  replaceExisting = false,
+  onReplaceChange,
 }: ImportPreviewDialogProps) => {
   if (!previewData) return null;
 
@@ -51,6 +60,7 @@ export const ImportPreviewDialog = ({
   };
 
   const netAmount = previewData.totalDeposits - previewData.totalWithdrawals;
+  const recordsToImport = replaceExisting ? previewData.validRows : previewData.newRows;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -103,7 +113,7 @@ export const ImportPreviewDialog = ({
                   <span className="font-medium text-yellow-600">{previewData.errorRows.toLocaleString()}</span>
                 </div>
               )}
-              {previewData.duplicateRows > 0 && (
+              {previewData.duplicateRows > 0 && !replaceExisting && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Duplicates (will skip)</span>
                   <span className="font-medium text-orange-500">{previewData.duplicateRows.toLocaleString()}</span>
@@ -112,11 +122,46 @@ export const ImportPreviewDialog = ({
               <div className="border-t pt-2 mt-2">
                 <div className="flex items-center justify-between text-sm font-medium">
                   <span className="text-primary">Will Import</span>
-                  <Badge>{previewData.newRows.toLocaleString()} records</Badge>
+                  <Badge>{recordsToImport.toLocaleString()} records</Badge>
                 </div>
               </div>
             </CardContent>
           </Card>
+
+          {/* Replace Existing Option */}
+          {showReplaceOption && previewData.existingRecordsCount !== undefined && previewData.existingRecordsCount > 0 && (
+            <Card className={replaceExisting ? "border-destructive/50 bg-destructive/5" : ""}>
+              <CardContent className="pt-4 space-y-3">
+                <div className="flex items-start space-x-3">
+                  <Checkbox 
+                    id="replace-existing" 
+                    checked={replaceExisting}
+                    onCheckedChange={(checked) => onReplaceChange?.(checked === true)}
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <Label 
+                      htmlFor="replace-existing" 
+                      className="text-sm font-medium cursor-pointer"
+                    >
+                      Replace existing data for this date
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {previewData.existingRecordsCount.toLocaleString()} existing records found
+                    </p>
+                  </div>
+                </div>
+                
+                {replaceExisting && (
+                  <div className="flex items-center gap-2 p-2 rounded-md bg-destructive/10 border border-destructive/20">
+                    <Trash2 className="h-4 w-4 text-destructive shrink-0" />
+                    <p className="text-xs text-destructive font-medium">
+                      This will delete {previewData.existingRecordsCount.toLocaleString()} existing records and import {previewData.validRows.toLocaleString()} new records
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Totals */}
           <Card>
@@ -159,9 +204,15 @@ export const ImportPreviewDialog = ({
           <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
           <AlertDialogAction 
             onClick={onConfirm}
-            disabled={previewData.newRows === 0}
+            disabled={recordsToImport === 0}
+            className={replaceExisting ? "bg-destructive hover:bg-destructive/90" : ""}
           >
-            {previewData.newRows === 0 ? 'Nothing to Import' : `Import ${previewData.newRows} Records`}
+            {recordsToImport === 0 
+              ? 'Nothing to Import' 
+              : replaceExisting 
+                ? `Replace & Import ${recordsToImport} Records`
+                : `Import ${recordsToImport} Records`
+            }
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
