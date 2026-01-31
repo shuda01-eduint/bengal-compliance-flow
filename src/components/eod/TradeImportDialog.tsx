@@ -105,7 +105,8 @@ function formatTimeForDisplay(hhmmss: string): string {
 }
 
 // Parse a single line of CSE pipe-delimited trade data
-// Format: Terminal|Security|Side|Qty|Price|InvestorCode|||TradeDate|TradeTime|SettleDate|SettleTime|Category
+// Format: Terminal|ID|Security|Side|Qty|Price|InvestorCode|||Seq|TradeDate|TradeTime|SettleDate|SettleTime|Category
+// The file has 15 fields (indices 0-14)
 function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: string): ParsedTrade | ValidationError {
   const trimmed = line.trim();
   
@@ -116,8 +117,8 @@ function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: stri
   try {
     const fields = trimmed.split("|");
     
-    if (fields.length < 9) {
-      return { line: lineNumber, message: `Expected at least 9 pipe-delimited fields, got ${fields.length}`, raw: trimmed.substring(0, 60) };
+    if (fields.length < 11) {
+      return { line: lineNumber, message: `Expected at least 11 pipe-delimited fields, got ${fields.length}`, raw: trimmed.substring(0, 60) };
     }
 
     // Field 0: CSE Terminal (e.g., "DHK01", "DHK05", "DHK11")
@@ -128,45 +129,50 @@ function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: stri
     // Extract DP code from terminal (e.g., "01" from "DHK01")
     const dpCode = cseTerminal.replace(/^\D+/, ''); // Remove leading non-digits
 
-    // Field 1: Security Code (e.g., "LOVELLO", "SPCERAMICS")
-    const securityCode = fields[1].trim().toUpperCase();
+    // Field 1: Unknown ID (ignored, e.g., "14028")
+    
+    // Field 2: Security Code (e.g., "LOVELLO", "SPCERAMICS")
+    const securityCode = fields[2].trim().toUpperCase();
     if (!securityCode) {
       return { line: lineNumber, message: `Missing security code`, raw: trimmed.substring(0, 60) };
     }
 
-    // Field 2: Side (B=Buy, S=Sell)
-    const sideChar = fields[2].trim().toUpperCase();
+    // Field 3: Side (B=Buy, S=Sell)
+    const sideChar = fields[3].trim().toUpperCase();
     if (sideChar !== "B" && sideChar !== "S") {
       return { line: lineNumber, message: `Invalid side: ${sideChar}, expected B or S`, raw: trimmed.substring(0, 60) };
     }
     const side: "BUY" | "SELL" = sideChar === "S" ? "SELL" : "BUY";
 
-    // Field 3: Quantity
-    const quantityStr = fields[3].trim();
+    // Field 4: Quantity
+    const quantityStr = fields[4].trim();
     const quantity = parseInt(quantityStr, 10);
     if (isNaN(quantity) || quantity <= 0) {
       return { line: lineNumber, message: `Invalid quantity: ${quantityStr}`, raw: trimmed.substring(0, 60) };
     }
 
-    // Field 4: Price
-    const priceStr = fields[4].trim();
+    // Field 5: Price
+    const priceStr = fields[5].trim();
     const price = parseFloat(priceStr);
     if (isNaN(price) || price <= 0) {
       return { line: lineNumber, message: `Invalid price: ${priceStr}`, raw: trimmed.substring(0, 60) };
     }
 
-    // Field 5: Investor Code (e.g., "GZ44", "NJ21", "13657")
-    const investorCode = fields[5].trim();
+    // Field 6: Investor Code (e.g., "GZ44", "NJ21", "13657")
+    const investorCode = fields[6].trim();
     if (!investorCode) {
       return { line: lineNumber, message: `Missing investor code`, raw: trimmed.substring(0, 60) };
     }
     // Full investor code = DP code + investor code (e.g., "01" + "GZ44" = "01GZ44")
     const fullInvestorCode = dpCode + investorCode;
 
-    // Fields 6-7: Empty (unused)
+    // Fields 7-8: Empty (unused)
     
-    // Field 8: Trade Date (DD/MM/YYYY format like "13/01/2026")
-    const tradeDateRaw = fields[8]?.trim() || "";
+    // Field 9: Trade Sequence (e.g., "22")
+    const tradeSequence = fields[9]?.trim() || "";
+    
+    // Field 10: Trade Date (DD/MM/YYYY format like "13/01/2026")
+    const tradeDateRaw = fields[10]?.trim() || "";
     if (!tradeDateRaw) {
       return { line: lineNumber, message: `Missing trade date`, raw: trimmed.substring(0, 60) };
     }
@@ -177,17 +183,17 @@ function parsePipeDelimitedLine(line: string, lineNumber: number, fileName: stri
     // Convert date to YYYYMMDD format
     const tradeDateFormatted = convertDateFormat(tradeDateRaw);
     
-    // Generate unique exec_id using terminal, investor, security, date, and a sequence
-    const execId = `CSE_${cseTerminal}_${fullInvestorCode}_${securityCode}_${tradeDateFormatted}_${side}_${quantity}_${price}`;
+    // Generate unique exec_id using terminal, investor, security, date, and trade sequence
+    const execId = `CSE_${cseTerminal}_${fullInvestorCode}_${securityCode}_${tradeDateFormatted}_${side}_${quantity}_${price}_${tradeSequence}`;
 
-    // Field 9: Trade time (HH:MM:SS)
-    const tradeTime = fields[9]?.trim() || "";
-    // Field 10: Settlement date
-    const settlementDateRaw = fields[10]?.trim() || "";
-    // Field 11: Settlement time
-    const settlementTime = fields[11]?.trim() || "";
-    // Field 12: Category flag (N=Normal, B=Block)
-    const categoryFlag = fields[12]?.trim() || "N";
+    // Field 11: Trade time (HH:MM:SS)
+    const tradeTime = fields[11]?.trim() || "";
+    // Field 12: Settlement date
+    const settlementDateRaw = fields[12]?.trim() || "";
+    // Field 13: Settlement time
+    const settlementTime = fields[13]?.trim() || "";
+    // Field 14: Category flag (N=Normal, B=Block)
+    const categoryFlag = fields[14]?.trim() || "N";
 
     return {
       cse_terminal: cseTerminal,
@@ -499,20 +505,22 @@ export function TradeImportDialog({
                 Each line contains trade data with pipe (|) separators:
               </p>
               <code className="text-xs block bg-background p-2 rounded font-mono break-all">
-                DHK01|LOVELLO|S|35000|65.00|GZ44|||13/01/2026|10:11:38|13/01/2026|10:11:38|B
+                DHK01|14028|LOVELLO|S|35000|65.00|GZ44|||22|13/01/2026|10:11:38|13/01/2026|10:11:38|B
               </code>
               <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
                 <div>• Field 1: CSE Terminal (DHK01, DHK07)</div>
-                <div>• Field 2: Security Code (LOVELLO)</div>
-                <div>• Field 3: Side (B=Buy, S=Sell)</div>
-                <div>• Field 4: Quantity (35000)</div>
-                <div>• Field 5: Price (65.00)</div>
-                <div>• Field 6: Investor Code (GZ44, NJ21)</div>
-                <div>• Field 7-8: Empty</div>
-                <div>• Field 9: Trade Date (DD/MM/YYYY)</div>
-                <div>• Field 10: Trade Time (HH:MM:SS)</div>
-                <div>• Field 11-12: Settlement Date/Time</div>
-                <div>• Field 13: Category (B/N)</div>
+                <div>• Field 2: ID (ignored)</div>
+                <div>• Field 3: Security Code (LOVELLO)</div>
+                <div>• Field 4: Side (B=Buy, S=Sell)</div>
+                <div>• Field 5: Quantity (35000)</div>
+                <div>• Field 6: Price (65.00)</div>
+                <div>• Field 7: Investor Code (GZ44, NJ21)</div>
+                <div>• Field 8-9: Empty</div>
+                <div>• Field 10: Trade Sequence (22)</div>
+                <div>• Field 11: Trade Date (DD/MM/YYYY)</div>
+                <div>• Field 12: Trade Time (HH:MM:SS)</div>
+                <div>• Field 13-14: Settlement Date/Time</div>
+                <div>• Field 15: Category (B/N)</div>
               </div>
             </div>
           </div>
