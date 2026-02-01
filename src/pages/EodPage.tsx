@@ -17,6 +17,7 @@ import { EodLogTable } from "@/components/eod/EodLogTable";
 import { EodProgressBar } from "@/components/eod/EodProgressBar";
 import { TradeImportDialog } from "@/components/eod/TradeImportDialog";
 import { DepositsImportDialog } from "@/components/eod/DepositsImportDialog";
+import { SettlementCalculationDialog } from "@/components/eod/SettlementCalculationDialog";
 
 interface BatchEodResult {
   success: boolean;
@@ -85,7 +86,7 @@ export default function EodPage() {
   // Import dialog state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [depositsDialogOpen, setDepositsDialogOpen] = useState(false);
-
+  const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   // Date selection
   const [mode, setMode] = useState<EodMode>("single");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
@@ -381,7 +382,7 @@ export default function EodPage() {
           onImportTrades={handleImportTrades}
           onImportDeposits={handleImportDeposits}
           onProcessStaged={handleProcessStaged}
-          onCalculateSettlements={() => toast.info("Calculate Settlements - Coming soon")}
+          onCalculateSettlements={() => setSettlementDialogOpen(true)}
           onRunFullEod={handleRunFullEod}
           onGenerateReport={() => toast.info("Generate Report - Coming soon")}
           onClearSelected={handleClearSelected}
@@ -408,6 +409,13 @@ export default function EodPage() {
             queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
             toast.success("Deposits/Withdrawals ready for EOD");
           }}
+        />
+
+        {/* Settlement Calculation Dialog */}
+        <SettlementCalculationDialog
+          open={settlementDialogOpen}
+          onOpenChange={setSettlementDialogOpen}
+          settlementDate={selectedDate}
         />
 
         {/* Progress Bar */}
