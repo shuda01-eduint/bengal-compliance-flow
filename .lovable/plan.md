@@ -1,85 +1,103 @@
 
-## What’s happening (confirmed from your database)
-Right now **January 31, 2026 is not selectable** on `/admin/balances` because that date-picker only allows dates returned by the backend function `get_balance_dates()`, which reads **only from** `balances_raw`.
 
-I checked the database:
+# Fix Commission Calculation in run_batch_eod
 
-- `eod_investor_balance` **does** have Jan 31 data: **23,961 rows** for `2026-01-31`
-- `balances_raw` **does NOT** have Jan 31 data: **0 rows** for `2026-01-31`
-- Latest date in `balances_raw` is **2026-01-12** (only 5 distinct dates exist there)
+## Problem Identified
 
-So the baseline import created the baseline in the EOD baseline table, but **the “Admin Balances view table” (`balances_raw`) did not get populated for Jan 31**, which is why the date stays disabled.
+The Accounting page shows "No commission data available" for Feb 01, 2026 because:
 
----
+| Issue | Current State | Expected |
+|-------|--------------|----------|
+| `trade_file.commission` column | Always 0 (source files don't contain commission) | N/A |
+| `eod_ledger_snapshots.total_commission` | 0 for all 32,846 investors | Should be ~6.7M BDT |
+| `run_batch_eod` logic | Reads commission from file: `SUM(commission)` | Should calculate from investor rates |
 
-## Most likely reasons (and how we’ll prevent them)
-1) **The baseline import you ran was done before the “sync to balances_raw” fix was live**, so Jan 31 never got inserted into `balances_raw`.
-2) Or the sync step ran but **failed silently / wasn’t obvious**, so you thought it succeeded.
+The `process_staged_trades` function correctly calculates commission, but `run_batch_eod` (which is used for batch EOD processing) does not - it simply reads the zeroed `commission` column from `trade_file`.
 
-Either way, we need to ensure `balances_raw` is populated for Jan 31, and the UI refreshes.
+## Root Cause
 
----
+In `run_batch_eod`, the `today_trades` CTE uses:
+```sql
+SUM(COALESCE(commission, 0)) as total_commission
+FROM trade_file
+```
 
-## Immediate recovery (fastest path for you)
-### Option A (recommended): Re-import the baseline for Jan 31
-1. Go to `/admin/balances`
-2. Open **Import Admin Balance Baseline**
-3. Select **Jan 31, 2026**
-4. Upload the same Admin Balance Excel again
-5. Run import and wait until it shows **“Syncing to Admin Balances view…”** and completes
+This reads commission from the file, which is always 0.
 
-After that, Jan 31 will appear in the selectable dates because `balances_raw` will finally have rows for that date.
+## Solution
 
-### Option B (fallback): Add a “Sync only” tool so you don’t need to re-upload
-If you no longer have the file handy (or want a safer repair tool), we’ll add a button that backfills `balances_raw` for a chosen date using backend logic.
+Update the `run_batch_eod` function to calculate commission using the investor's `brokerage_commission` rate with the same normalization logic used in `process_staged_trades`:
 
----
+```sql
+-- Rate normalization:
+-- >= 0.1: divide by 100 (e.g., 0.4 -> 0.004)
+-- < 0.1 and > 0: use directly (e.g., 0.004 -> 0.004)
+-- NULL: default to 0.004 (0.4%)
+```
 
-## Implementation changes to make this reliable (what I will change)
-### 1) Make “sync to balances_raw” unavoidable + earlier in the workflow
-Currently the sync happens at the end (Step 6). If anything fails earlier, it may never happen.
+## Implementation
 
-Change order so that **after parsing and deduplicating**, we run:
+### Database Migration
 
-- Insert baseline to `eod_investor_balance`
-- Immediately sync to `balances_raw` (so the date becomes selectable ASAP)
-- Then do optional investor updates / holdings replace
+Update the `today_trades` CTE in `run_batch_eod`:
 
-### 2) Make the balances_raw delete safer (avoid timeouts)
-Right now it uses:
-- `delete().eq("as_of_date", dateStr)`
+**Before (lines 77-87):**
+```sql
+today_trades AS MATERIALIZED (
+  SELECT
+    investor_code,
+    SUM(CASE WHEN UPPER(side) = 'SELL' THEN COALESCE(qty * price, 0) ELSE 0 END) as gross_sell,
+    SUM(CASE WHEN UPPER(side) = 'BUY' THEN COALESCE(qty * price, 0) ELSE 0 END) as gross_buy,
+    SUM(COALESCE(commission, 0)) as total_commission
+  FROM trade_file
+  WHERE trade_date = p_eod_date
+    AND investor_code IS NOT NULL
+  GROUP BY investor_code
+)
+```
 
-For large dates (80k+ rows), this can time out. We will switch to a safer approach:
-- batched delete (like `ImportBalancesRawDialog` already does), OR
-- a backend “delete by date in batches” function
+**After:**
+```sql
+today_trades AS MATERIALIZED (
+  SELECT
+    tf.investor_code,
+    SUM(CASE WHEN UPPER(tf.side) = 'SELL' THEN COALESCE(tf.qty * tf.price, 0) ELSE 0 END) as gross_sell,
+    SUM(CASE WHEN UPPER(tf.side) = 'BUY' THEN COALESCE(tf.qty * tf.price, 0) ELSE 0 END) as gross_buy,
+    -- Calculate commission from investor's brokerage_commission rate
+    SUM(
+      COALESCE(tf.qty * tf.price, 0) *
+      CASE
+        WHEN i.brokerage_commission >= 0.1 THEN i.brokerage_commission / 100
+        WHEN i.brokerage_commission < 0.1 AND i.brokerage_commission > 0 THEN i.brokerage_commission
+        ELSE 0.004
+      END
+    ) as total_commission
+  FROM trade_file tf
+  LEFT JOIN investors i ON tf.investor_code = i.investor_code
+  WHERE tf.trade_date = p_eod_date
+    AND tf.investor_code IS NOT NULL
+  GROUP BY tf.investor_code
+)
+```
 
-### 3) Improve error visibility: if balances_raw sync fails, it must be obvious
-We’ll:
-- show a dedicated “Balances view sync” section in the results
-- if balances_raw insert fails, show a clear error like:
-  - “Baseline imported, but Admin Balances date will NOT be selectable until sync succeeds.”
+## Expected Results After Fix
 
-### 4) Force the dates list to refresh even if there are minor import errors
-Right now `onSuccess()` is only called when there are **zero** errors.
-That means if something minor fails (like some commission updates), the UI may not refresh the dates list even if the sync succeeded.
+| Metric | Current | Expected |
+|--------|---------|----------|
+| Total Commission (Feb 01) | 0 | ~6.75M BDT (0.4% of ~1.69B turnover) |
+| Commission per investor | 0 | Varies by rate (0.2% - 0.5%) |
+| Accounting page commission chart | "No data" | Pie chart with department breakdown |
 
-We’ll change the logic to:
-- call the “refresh” callback when the **balances_raw sync succeeds**, even if other steps had warnings/errors.
+## Verification Steps
 
----
+1. After migration, re-run EOD for Feb 01, 2026
+2. Check `eod_ledger_snapshots` for non-zero `total_commission` values
+3. Verify Accounting page shows commission data in the pie chart
+4. Confirm `eod_run_history.total_commission` is populated
 
-## How we’ll verify the fix
-1) After importing Jan 31, confirm in the backend:
-   - `balances_raw` contains rows where `as_of_date = '2026-01-31'`
-2) In UI:
-   - Jan 31 becomes selectable in the `/admin/balances` date picker immediately (or after auto refresh)
-3) Reload the page as a final sanity check:
-   - Jan 31 should still be selectable after refresh
+## Files Changed
 
----
-
-## Technical notes (for completeness)
-- `/admin/balances` date picker uses:
-  - `availableDates` from RPC `get_balance_dates()` and disables any date not in that list.
-- `get_balance_dates()` reads distinct dates from `balances_raw`, so **no `balances_raw` rows = date not selectable**.
+| File | Change |
+|------|--------|
+| New migration | Update `run_batch_eod` function with commission calculation |
 
