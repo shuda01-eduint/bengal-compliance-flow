@@ -26,6 +26,8 @@ interface EodRunHistory {
   gross_buy: number | null;
   gross_sell: number | null;
   total_commission: number | null;
+  total_deposits: number | null;
+  total_withdrawals: number | null;
 }
 
 interface EodLogTableProps {
@@ -51,7 +53,17 @@ export function EodLogTable({ limit = 20 }: EodLogTableProps) {
     if (value === null || value === undefined) return "-";
     if (value >= 1e9) return `৳${(value / 1e9).toFixed(2)}B`;
     if (value >= 1e6) return `৳${(value / 1e6).toFixed(2)}M`;
+    if (value >= 1e3) return `৳${(value / 1e3).toFixed(1)}K`;
     return `৳${value.toLocaleString()}`;
+  };
+
+  const formatNetFlow = (deposits: number | null, withdrawals: number | null): { value: string; isPositive: boolean } => {
+    const dep = deposits ?? 0;
+    const with_ = withdrawals ?? 0;
+    const net = dep - with_;
+    const isPositive = net >= 0;
+    const prefix = isPositive ? "+" : "";
+    return { value: `${prefix}${formatCurrency(net)}`, isPositive };
   };
 
   const getStatusBadge = (status: string) => {
@@ -88,43 +100,71 @@ export function EodLogTable({ limit = 20 }: EodLogTableProps) {
   }
 
   return (
-    <div className="rounded-md border">
+    <div className="rounded-md border overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>EOD Date</TableHead>
-            <TableHead>Run At</TableHead>
-            <TableHead>Run By</TableHead>
-            <TableHead className="text-right">Clients</TableHead>
-            <TableHead className="text-right">Ledger Balance</TableHead>
-            <TableHead className="text-right">Trade Files</TableHead>
-            <TableHead>Status</TableHead>
+            <TableHead className="whitespace-nowrap">EOD Date</TableHead>
+            <TableHead className="whitespace-nowrap">Run At</TableHead>
+            <TableHead className="whitespace-nowrap">Run By</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Clients</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Deposits</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Withdrawals</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Net Flow</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Gross Buy</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Gross Sell</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Total Trades</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Commission</TableHead>
+            <TableHead className="whitespace-nowrap">Status</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {history.map((row) => (
-            <TableRow key={row.id}>
-              <TableCell className="font-medium">
-                {format(new Date(row.run_date), "dd MMM yyyy")}
-              </TableCell>
-              <TableCell>
-                {format(new Date(row.run_at), "dd MMM HH:mm")}
-              </TableCell>
-              <TableCell className="max-w-[150px] truncate">
-                {row.run_by_email || "-"}
-              </TableCell>
-              <TableCell className="text-right">
-                {row.clients_captured.toLocaleString()}
-              </TableCell>
-              <TableCell className="text-right">
-                {formatCurrency(row.total_ledger_balance)}
-              </TableCell>
-              <TableCell className="text-right">
-                {row.trade_files_count ?? "-"}
-              </TableCell>
-              <TableCell>{getStatusBadge(row.status)}</TableCell>
-            </TableRow>
-          ))}
+          {history.map((row) => {
+            const netFlow = formatNetFlow(row.total_deposits, row.total_withdrawals);
+            const totalTrades = (row.gross_buy ?? 0) + (row.gross_sell ?? 0);
+            
+            return (
+              <TableRow key={row.id}>
+                <TableCell className="font-medium whitespace-nowrap">
+                  {format(new Date(row.run_date), "dd MMM yyyy")}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {format(new Date(row.run_at), "dd MMM HH:mm")}
+                </TableCell>
+                <TableCell className="max-w-[120px] truncate">
+                  {row.run_by_email || "-"}
+                </TableCell>
+                <TableCell className="text-right whitespace-nowrap">
+                  {row.clients_captured.toLocaleString()}
+                </TableCell>
+                <TableCell className="text-right whitespace-nowrap">
+                  {formatCurrency(row.total_deposits)}
+                </TableCell>
+                <TableCell className="text-right whitespace-nowrap">
+                  {formatCurrency(row.total_withdrawals)}
+                </TableCell>
+                <TableCell className={cn(
+                  "text-right whitespace-nowrap font-medium",
+                  netFlow.isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                )}>
+                  {netFlow.value}
+                </TableCell>
+                <TableCell className="text-right whitespace-nowrap">
+                  {formatCurrency(row.gross_buy)}
+                </TableCell>
+                <TableCell className="text-right whitespace-nowrap">
+                  {formatCurrency(row.gross_sell)}
+                </TableCell>
+                <TableCell className="text-right whitespace-nowrap font-medium">
+                  {formatCurrency(totalTrades)}
+                </TableCell>
+                <TableCell className="text-right whitespace-nowrap">
+                  {formatCurrency(row.total_commission)}
+                </TableCell>
+                <TableCell>{getStatusBadge(row.status)}</TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
