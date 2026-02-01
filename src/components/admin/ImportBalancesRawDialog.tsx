@@ -17,7 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, formatDateToISO, normalizeToLocalDate } from "@/lib/utils";
 import { CalendarIcon } from "lucide-react";
 
 interface ImportBalancesRawDialogProps {
@@ -149,7 +149,7 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
         throw new Error('Required column "Investor Code" not found');
       }
 
-      const dateStr = format(asOfDate, 'yyyy-MM-dd');
+      const dateStr = formatDateToISO(asOfDate);
       
       // Parse rows - use rm_id from file if available, otherwise lookup by rm_name
       const records = jsonData.map((row: any) => {
@@ -335,13 +335,13 @@ export function ImportBalancesRawDialog({ onImportComplete }: ImportBalancesRawD
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={asOfDate}
-                  onSelect={(date) => date && setAsOfDate(date)}
-                  initialFocus
-                  className="pointer-events-auto"
-                />
+              <Calendar
+                mode="single"
+                selected={asOfDate}
+                onSelect={(date) => date && setAsOfDate(normalizeToLocalDate(date))}
+                initialFocus
+                className="pointer-events-auto"
+              />
               </PopoverContent>
             </Popover>
           </div>

@@ -10,7 +10,7 @@ import { CalendarIcon, Percent, Upload, FileSpreadsheet, AlertCircle, CheckCircl
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
+import { cn, formatDateToISO, normalizeToLocalDate } from "@/lib/utils";
 import * as XLSX from "xlsx";
 
 interface ImportCommissionsDialogProps {
@@ -117,7 +117,7 @@ export function ImportCommissionsDialog({ onSuccess }: ImportCommissionsDialogPr
     const batchSize = 100;
     let updated = 0;
     const notFound: string[] = [];
-    const cutoffDateStr = format(cutoffDate, "yyyy-MM-dd");
+    const cutoffDateStr = formatDateToISO(cutoffDate);
 
     try {
       for (let i = 0; i < parsedData.length; i += batchSize) {
@@ -198,13 +198,13 @@ export function ImportCommissionsDialog({ onSuccess }: ImportCommissionsDialogPr
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={cutoffDate}
-                  onSelect={(date) => date && setCutoffDate(date)}
-                  initialFocus
-                  className="pointer-events-auto"
-                />
+              <Calendar
+                mode="single"
+                selected={cutoffDate}
+                onSelect={(date) => date && setCutoffDate(normalizeToLocalDate(date))}
+                initialFocus
+                className="pointer-events-auto"
+              />
               </PopoverContent>
             </Popover>
           </div>

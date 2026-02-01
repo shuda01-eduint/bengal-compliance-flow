@@ -15,7 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format, parseISO, addDays, isWeekend } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, formatDateToISO, normalizeToLocalDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
   Collapsible,
@@ -64,13 +64,13 @@ const BANK_HOLIDAYS: { date: string; name: string }[] = [
 
 // Check if a date is a bank holiday
 function isBankHoliday(date: Date): boolean {
-  const dateStr = format(date, 'yyyy-MM-dd');
+  const dateStr = formatDateToISO(date);
   return BANK_HOLIDAYS.some(h => h.date === dateStr);
 }
 
 // Get holiday name if date is a holiday
 function getHolidayName(date: Date): string | undefined {
-  const dateStr = format(date, 'yyyy-MM-dd');
+  const dateStr = formatDateToISO(date);
   return BANK_HOLIDAYS.find(h => h.date === dateStr)?.name;
 }
 
@@ -136,8 +136,8 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
     setProgress(0);
     setProgressText("Initializing...");
 
-    const sourceDateStr = format(sourceDate, 'yyyy-MM-dd');
-    const targetDateStr = format(targetDate, 'yyyy-MM-dd');
+    const sourceDateStr = formatDateToISO(sourceDate);
+    const targetDateStr = formatDateToISO(targetDate);
 
     try {
       // Step 1: Initialize - validate and get total count
@@ -241,22 +241,22 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={sourceDate}
-                  onSelect={setSourceDate}
-                  disabled={(date) => {
-                    const dateStr = format(date, 'yyyy-MM-dd');
-                    return !availableDates?.includes(dateStr);
-                  }}
-                  initialFocus
-                  modifiers={{
-                    hasData: availableDates?.map(d => parseISO(d)) || []
-                  }}
-                  modifiersStyles={{
-                    hasData: { fontWeight: 'bold', color: 'hsl(var(--primary))' }
-                  }}
-                />
+              <Calendar
+                mode="single"
+                selected={sourceDate}
+                onSelect={(date) => date && setSourceDate(normalizeToLocalDate(date))}
+                disabled={(date) => {
+                  const dateStr = formatDateToISO(date);
+                  return !availableDates?.includes(dateStr);
+                }}
+                initialFocus
+                modifiers={{
+                  hasData: availableDates?.map(d => parseISO(d)) || []
+                }}
+                modifiersStyles={{
+                  hasData: { fontWeight: 'bold', color: 'hsl(var(--primary))' }
+                }}
+              />
               </PopoverContent>
             </Popover>
             {latestDate && (
@@ -270,7 +270,7 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
             <Label className="flex items-center gap-2">
               Target Date (copy to)
               {targetDate && sourceDate && 
-                format(targetDate, 'yyyy-MM-dd') === format(getNextBusinessDay(sourceDate), 'yyyy-MM-dd') && (
+                formatDateToISO(targetDate) === formatDateToISO(getNextBusinessDay(sourceDate)) && (
                 <Badge variant="secondary" className="text-xs">
                   Next Business Day
                 </Badge>
@@ -290,21 +290,21 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={targetDate}
-                  onSelect={setTargetDate}
-                  initialFocus
-                  className="pointer-events-auto"
-                  modifiers={{
-                    weekend: (date) => isWeekendDay(date),
-                    holiday: (date) => isBankHoliday(date)
-                  }}
-                  modifiersStyles={{
-                    weekend: { color: 'hsl(var(--muted-foreground))', opacity: 0.5 },
-                    holiday: { color: 'hsl(var(--destructive))', fontWeight: 'bold' }
-                  }}
-                />
+              <Calendar
+                mode="single"
+                selected={targetDate}
+                onSelect={(date) => date && setTargetDate(normalizeToLocalDate(date))}
+                initialFocus
+                className="pointer-events-auto"
+                modifiers={{
+                  weekend: (date) => isWeekendDay(date),
+                  holiday: (date) => isBankHoliday(date)
+                }}
+                modifiersStyles={{
+                  weekend: { color: 'hsl(var(--muted-foreground))', opacity: 0.5 },
+                  holiday: { color: 'hsl(var(--destructive))', fontWeight: 'bold' }
+                }}
+              />
               </PopoverContent>
             </Popover>
             {targetDate && isWeekendDay(targetDate) && (
@@ -317,7 +317,7 @@ export function CopyBalancesDialog({ availableDates, onCopyComplete }: CopyBalan
                 Note: Selected date is a bank holiday ({getHolidayName(targetDate)})
               </p>
             )}
-            {targetDate && availableDates?.includes(format(targetDate, 'yyyy-MM-dd')) && (
+            {targetDate && availableDates?.includes(formatDateToISO(targetDate)) && (
               <p className="text-xs text-amber-500">
                 Warning: This date already has data that will be replaced
               </p>

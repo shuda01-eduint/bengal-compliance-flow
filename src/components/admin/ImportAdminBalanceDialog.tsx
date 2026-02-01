@@ -25,7 +25,7 @@ import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Upload, CalendarIcon, AlertTriangle, Loader2, FileSpreadsheet, Database, Users, Trash2, Package } from "lucide-react";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
+import { cn, formatDateToISO, normalizeToLocalDate } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -123,7 +123,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       }
 
       setIsCheckingCount(true);
-      const dateStr = format(balanceDate, "yyyy-MM-dd");
+      const dateStr = formatDateToISO(balanceDate);
       
       // Check eod_investor_balance table (new table)
       const { count, error } = await supabase
@@ -343,7 +343,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
     setProgress(0);
     setResults(null);
 
-    const dateStr = format(balanceDate, "yyyy-MM-dd");
+    const dateStr = formatDateToISO(balanceDate);
     const batchSize = 500;
     const importResults: ImportResults = {
       snapshots_imported: 0,
@@ -480,7 +480,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         const updateGroups = new Map<string, { updateData: Record<string, unknown>; investorCodes: string[] }>();
         
         // Format the selected date as string for notes
-        const effectiveDateStr = balanceDate ? format(balanceDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
+        const effectiveDateStr = balanceDate ? formatDateToISO(balanceDate) : formatDateToISO(new Date());
         
         for (const item of investorsWithRates) {
           const updateData: Record<string, unknown> = {};
@@ -688,12 +688,12 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={balanceDate}
-                    onSelect={setBalanceDate}
-                    initialFocus
-                  />
+                <Calendar
+                  mode="single"
+                  selected={balanceDate}
+                  onSelect={(date) => date && setBalanceDate(normalizeToLocalDate(date))}
+                  initialFocus
+                />
                 </PopoverContent>
               </Popover>
               <p className="text-xs text-muted-foreground">
