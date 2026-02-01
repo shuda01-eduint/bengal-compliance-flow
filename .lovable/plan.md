@@ -1,162 +1,143 @@
 
 
-## EOD Run History Table Enhancements & Calculate Settlements Feature
+## Fix Accounting Page Not Showing Feb 1 Data
 
-### Overview
-This plan covers two enhancements to the EOD Processing page:
-1. **Extended EOD Run History Table** - Add columns for Deposits, Withdrawals, Net Cash Flow, Gross Buy, Gross Sell, and Total Trade Amount
-2. **Calculate Settlements Feature** - Implement the settlement calculation functionality based on DSE T+2/T+3 rules
+### Problem Summary
+When viewing Feb 1, 2026 on the Accounting page, the data grid shows zero rows even though:
+- EOD processing for Feb 1 completed successfully (32,099 snapshots created)
+- 34,665 trades exist in `trade_file` for Feb 1
+- 368 deposit/withdrawal transactions exist in `cash_ledger_txn` for Feb 1
+
+### Root Cause Analysis
+The `get_accounting_data_v3` RPC function queries from the **wrong source tables**:
+
+| What Function Uses | What Has Feb 1 Data |
+|--------------------|---------------------|
+| `trade_history` (0 rows for Feb 1) | `trade_file` (34,665 rows) |
+| `deposits_withdrawals` (0 rows for Feb 1) | `cash_ledger_txn` (368 rows) |
+
+The function also applies a filter `_has_activity_filter = 'with_trades'` which returns 0 rows when no trades are found.
+
+Additionally, the function uses `balances_raw` for opening balances with `as_of_date = _opening_date`, but `balances_raw` only has a snapshot for Jan 31 - it should instead use `eod_ledger_snapshots` which has data for all processed dates.
 
 ---
 
-## Part 1: EOD Run History Table Enhancements
-
-### Current State
-The `EodLogTable` component currently displays 7 columns:
-- EOD Date, Run At, Run By, Clients, Ledger Balance, Trade Files, Status
-
-The database table `eod_run_history` already has the required columns:
-- `total_deposits`, `total_withdrawals`, `gross_buy`, `gross_sell`, `total_commission`
+## Solution: Update `get_accounting_data_v3` to use correct source tables
 
 ### Changes Required
 
-**File: `src/components/eod/EodLogTable.tsx`**
+**Database Migration - Update `get_accounting_data_v3` function:**
 
-1. Update the interface to include missing fields that are already in the database
-2. Add new columns to the table:
-   - Deposits (formatted currency)
-   - Withdrawals (formatted currency)  
-   - Net Flow (calculated: deposits - withdrawals, with color coding)
-   - Gross Buy (formatted currency)
-   - Gross Sell (formatted currency)
-   - Total Trades (calculated: gross_buy + gross_sell)
-   - Commission (formatted currency)
+1. **Replace `trade_history` with `trade_file`** in the `period_trades` CTE:
+   - Column mappings: `client_code` becomes `investor_code`, `value` becomes `qty * price`
+   - Use `trade_date` (DATE type) directly instead of YYYYMMDD string comparisons
 
-3. Make the table horizontally scrollable for smaller screens
+2. **Replace `deposits_withdrawals` with `cash_ledger_txn`** in the `period_tx` CTE:
+   - Column mappings: `transaction_type` becomes `type`, `transaction_date` becomes `txn_date`
 
-### New Table Layout
-```text
-+----------+----------+---------+--------+---------+------------+------------+----------+------------+------------+--------------+--------+
-| EOD Date | Run At   | Run By  |Clients |Deposits |Withdrawals | Net Flow   | Gross Buy| Gross Sell |Total Trades|Commission    | Status |
-+----------+----------+---------+--------+---------+------------+------------+----------+------------+------------+--------------+--------+
-|01 Feb 26 |01 Feb 15:| user@.. | 32,846 | ৳338.24M| ৳168.80M   | +৳169.44M  | ৳865.59M | ৳823.33M   | ৳1.69B     |৳6,759        |complete|
-+----------+----------+---------+--------+---------+------------+------------+----------+------------+------------+--------------+--------+
+3. **Use `eod_ledger_snapshots` for opening balance** (if available for the date):
+   - Fall back to `balances_raw` only for historical dates before EOD processing started
+
+4. **Add fallback logic** to also check `trade_history` for backward compatibility with older date ranges
+
+### Updated SQL Logic (Simplified)
+
+```sql
+-- Opening balance from eod_ledger_snapshots (preferred) or balances_raw (fallback)
+opening_balances AS (
+  SELECT investor_code, closing_balance AS opening_balance
+  FROM eod_ledger_snapshots
+  WHERE eod_date = _opening_date
+  UNION ALL
+  SELECT investor_code, ledger_balance
+  FROM balances_raw
+  WHERE as_of_date = _opening_date
+    AND investor_code NOT IN (SELECT investor_code FROM eod_ledger_snapshots WHERE eod_date = _opening_date)
+),
+
+-- Deposits/Withdrawals from cash_ledger_txn (preferred) or deposits_withdrawals (fallback)
+period_tx AS (
+  SELECT investor_code,
+    SUM(CASE WHEN UPPER(type) = 'DEPOSIT' THEN amount ELSE 0 END) AS deposits,
+    SUM(CASE WHEN UPPER(type) IN ('WITHDRAW','WITHDRAWAL') THEN amount ELSE 0 END) AS withdrawals
+  FROM cash_ledger_txn
+  WHERE txn_date > _opening_date AND txn_date <= _tx_date
+  UNION ALL
+  -- fallback to deposits_withdrawals for older data
+  ...
+),
+
+-- Trades from trade_file (preferred) or trade_history (fallback)
+period_trades AS (
+  SELECT investor_code,
+    SUM(CASE WHEN UPPER(side) IN ('B','BUY') THEN qty * price ELSE 0 END) AS gross_buy,
+    SUM(CASE WHEN UPPER(side) IN ('S','SELL') THEN qty * price ELSE 0 END) AS gross_sell
+  FROM trade_file
+  WHERE trade_date > _opening_date AND trade_date <= _tx_date
+  UNION ALL
+  -- fallback to trade_history for older data
+  ...
+)
 ```
 
 ---
 
-## Part 2: Calculate Settlements Feature
+## Alternative Solution: Use `eod_ledger_snapshots` Directly
 
-### Business Context
-DSE (Dhaka Stock Exchange) uses T+2/T+3 settlement rules:
-- **Z Category securities**: Settle in T+3 (3 trading days after trade)
-- **All other categories**: Settle in T+2 (2 trading days after trade)
-- Bangladesh weekends are Friday/Saturday (not Saturday/Sunday)
-- Bank holidays must be skipped when calculating settlement dates
+Since EOD processing already calculates all the values and stores them in `eod_ledger_snapshots`, the accounting page could query that table directly for the selected date:
 
-### Feature Requirements
-When user clicks "Calculate Settlements" for a selected date:
-1. Calculate which trades are settling ON that date (settlement_date = selected date)
-2. Show breakdown by investor of:
-   - Settlement obligations (buys that need payment)
-   - Settlement receipts (sells that generate funds)
-   - Net settlement amount per investor
-
-### Implementation Approach
-
-**Option A: Client-side calculation with dialog display (Recommended)**
-
-Create a new component `SettlementCalculationDialog` that:
-1. Queries `trade_file` for trades where `settlement_date = selected_date`
-2. Aggregates by investor showing buy/sell/net values
-3. Displays results in a modal with export capability
-
-**Database Query Logic:**
 ```sql
 SELECT 
-  investor_code,
-  SUM(CASE WHEN UPPER(side) IN ('B','BUY') THEN qty * price ELSE 0 END) as buy_settlement,
-  SUM(CASE WHEN UPPER(side) IN ('S','SELL') THEN qty * price ELSE 0 END) as sell_settlement,
-  -- Net = Sell - Buy (positive = receives money, negative = pays money)
-  SUM(CASE WHEN UPPER(side) IN ('S','SELL') THEN qty * price 
-           WHEN UPPER(side) IN ('B','BUY') THEN -qty * price 
-           ELSE 0 END) as net_settlement
-FROM trade_file
-WHERE settlement_date = :selected_date
-GROUP BY investor_code
-ORDER BY ABS(net_settlement) DESC;
+  investor_code, investor_name, account_type, rm_name, department,
+  opening_balance, total_deposits, total_withdrawals,
+  gross_buy, gross_sell, total_commission AS brokerage,
+  closing_balance
+FROM eod_ledger_snapshots
+WHERE eod_date = _tx_date
 ```
 
-### New Components
+This would be:
+- Much faster (no joins/aggregations needed)
+- Always consistent with EOD results
+- Simpler to maintain
 
-**File: `src/components/eod/SettlementCalculationDialog.tsx`**
-
-A dialog component that:
-- Takes a settlement date as prop
-- Fetches settlement data for that date
-- Shows summary cards: Total Buy Obligations, Total Sell Receipts, Net Market Position
-- Shows investor-level breakdown in a paginated table
-- Supports export to Excel
-- Shows "no settlements" state if the date has no settling trades
-
-### UI Design
-
-```text
-+--------------------------------------------------+
-| Settlement Calculations for 03 Feb 2026          |
-+--------------------------------------------------+
-| Summary:                                         |
-| +-------------+ +-------------+ +-------------+  |
-| |Buy Settl.   | |Sell Settl.  | |Net Position |  |
-| |৳853.56M     | |৳811.47M     | |-৳42.09M    |  |
-| +-------------+ +-------------+ +-------------+  |
-+--------------------------------------------------+
-| Investor Breakdown:                    [Export]  |
-| +--------+------------+------------+------------+|
-| |Code    |Buy Settl.  |Sell Settl. |Net         ||
-| +--------+------------+------------+------------+|
-| |ABC001  |৳5,234,500  |৳2,100,000  |-৳3,134,500 ||
-| |XYZ002  |৳0          |৳8,500,000  |+৳8,500,000 ||
-| +--------+------------+------------+------------+|
-+--------------------------------------------------+
-```
+**Trade-off:** Would only show data for dates that have EOD snapshots (no ad-hoc date ranges).
 
 ---
 
 ## Implementation Steps
 
-### Step 1: Update EodLogTable (Part 1)
-- Update `EodRunHistory` interface to include all available columns
-- Add 6 new table columns with proper formatting
-- Add horizontal scroll wrapper for mobile responsiveness
-- Use color coding for Net Flow (green positive, red negative)
+1. **Create database migration** to update `get_accounting_data_v3`:
+   - Add `trade_file` as primary source for trades
+   - Add `cash_ledger_txn` as primary source for deposits/withdrawals
+   - Use `eod_ledger_snapshots` for opening balances
+   - Keep fallback to legacy tables for backward compatibility
 
-### Step 2: Create SettlementCalculationDialog (Part 2)
-- Create new component with React Query for data fetching
-- Implement summary cards at the top
-- Add virtualized table for investor breakdown (can be thousands of rows)
-- Add Excel export functionality using the existing xlsx library
+2. **Test with Feb 1 date** to verify data appears correctly
 
-### Step 3: Wire up EodPage
-- Import and integrate the new dialog
-- Connect the "Calculate Settlements" button to open the dialog
-- Pass the selected date to the dialog
+3. **Validate commission values** appear in the Brokerage column
 
 ---
 
-## Technical Notes
+## Technical Details
 
-### Existing Assets Available
-- `xlsx` library is already installed for Excel export
-- `@tanstack/react-virtual` is available for virtualized lists if needed
-- Settlement date calculation utilities exist in `src/lib/settlement-utils.ts`
-- Currency formatting helpers already used in `EodLogTable` and `EodSummaryCards`
+### Current Function Issues
+- Uses `trade_history.client_code` - should use `trade_file.investor_code`
+- Uses `trade_history.value` - should use `trade_file.qty * trade_file.price`
+- Uses `deposits_withdrawals.transaction_date` - should use `cash_ledger_txn.txn_date`
+- Uses `deposits_withdrawals.transaction_type` (Deposit/Withdrawal) - should use `cash_ledger_txn.type` (DEPOSIT/WITHDRAW)
+- String date comparison `YYYYMMDD` format - `trade_file` uses native DATE type
 
-### Database Considerations
-- No schema changes needed - all required data exists in `eod_run_history` and `trade_file`
-- Settlement queries should be indexed (settlement_date column in trade_file)
+### Column Mapping Reference
 
-### Performance
-- Settlement calculation query may return many rows - use pagination or virtualization
-- Consider caching results for frequently accessed dates
+| Legacy Table | New Table | Legacy Column | New Column |
+|-------------|-----------|---------------|------------|
+| trade_history | trade_file | client_code | investor_code |
+| trade_history | trade_file | value | qty * price |
+| trade_history | trade_file | trade_date (text YYYYMMDD) | trade_date (DATE) |
+| trade_history | trade_file | brokerage_commission | commission |
+| deposits_withdrawals | cash_ledger_txn | transaction_date | txn_date |
+| deposits_withdrawals | cash_ledger_txn | transaction_type | type |
+| balances_raw | eod_ledger_snapshots | as_of_date | eod_date |
+| balances_raw | eod_ledger_snapshots | ledger_balance | closing_balance (for opening of next day) |
 
