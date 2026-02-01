@@ -1,93 +1,162 @@
 
-Problem recap (what’s actually happening right now)
-- The “Failed: 1” is real: the backend call to run EOD is failing, so EOD is not recomputing totals for that date.
-- In the browser network log, the RPC response from `run_batch_eod` is:
-  - `{"success": false, "error": "column \"created_by\" is of type uuid but expression is of type text", "error_detail": "42804"}`
-- Separately, the “Withdrawals: ৳0” can still show even when your cash ledger has withdrawals, because:
-  1) the EOD run is failing (so nothing new is calculated), and/or
-  2) the “Process Staged Trades” backend function currently looks for `type = 'WITHDRAWAL'`, but your importer is inserting `type = 'WITHDRAW'` (so staged withdrawals sum to 0 even though the data exists).
 
-Evidence from backend data
-- For 2026-02-01 in `cash_ledger_txn`, the data is correct:
-  - DEPOSIT: 201 rows, total ≈ 338,239,927.57
-  - WITHDRAW: 167 rows, total ≈ 168,795,365.17
-- So the problem is not the Excel parsing anymore; it’s backend calculation + an EOD failure.
+## EOD Run History Table Enhancements & Calculate Settlements Feature
 
-Goals
-1) Make EOD run succeed (fix the `created_by` uuid/text mismatch).
-2) Make withdrawals sum correctly (use `type`-based logic, and accept both WITHDRAW and WITHDRAWAL defensively).
-3) Ensure the UI summary reflects the correct source (staged vs batch), and does not show stale staged numbers when you run full EOD.
+### Overview
+This plan covers two enhancements to the EOD Processing page:
+1. **Extended EOD Run History Table** - Add columns for Deposits, Withdrawals, Net Cash Flow, Gross Buy, Gross Sell, and Total Trade Amount
+2. **Calculate Settlements Feature** - Implement the settlement calculation functionality based on DSE T+2/T+3 rules
 
-Plan (implementation)
+---
 
-A) Backend fixes (database migrations)
-A1) Fix `run_batch_eod` so it can’t fail on created_by
-- Update `run_batch_eod` INSERT into `eod_ledger_snapshots`:
-  - Set `created_by = auth.uid()` (uuid), not email text.
-  - Keep storing the user email in `eod_run_history.run_by_email` only.
-- Add `SET statement_timeout = '300s'` and `SET search_path = public` for safety and consistency.
+## Part 1: EOD Run History Table Enhancements
 
-A2) Ensure `run_batch_eod` calculates withdrawals correctly from `cash_ledger_txn`
-- In both:
-  - the summary totals (v_total_deposits / v_total_withdrawals), and
-  - the per-investor `today_cash` aggregation,
-  use:
-  - Deposits: `UPPER(TRIM(type)) = 'DEPOSIT'`
-  - Withdrawals: `UPPER(TRIM(type)) IN ('WITHDRAW', 'WITHDRAWAL')`
-- This makes the function compatible with both historical naming and the current importer output.
+### Current State
+The `EodLogTable` component currently displays 7 columns:
+- EOD Date, Run At, Run By, Clients, Ledger Balance, Trade Files, Status
 
-A3) Restore/keep the “commission from investor rate” logic inside `run_batch_eod`
-- Your latest `run_batch_eod` definition currently uses `SUM(commission)` from `trade_file` (which is often 0), so commission can regress again.
-- Update `today_trades` to compute commission using the normalized brokerage rate (same normalization logic you already approved earlier):
-  - >= 0.1 → /100
-  - between 0 and 0.1 → use as-is
-  - null/other → default 0.004
-- Also ensure the top-level returned `total_commission` is computed consistently (either recompute from inserted snapshots or aggregate from the computed trades CTE).
+The database table `eod_run_history` already has the required columns:
+- `total_deposits`, `total_withdrawals`, `gross_buy`, `gross_sell`, `total_commission`
 
-A4) Fix `process_staged_trades` withdrawals logic (staged summary)
-- Update `process_staged_trades` in TWO places:
-  1) `cash_agg` CTE: change `type = 'WITHDRAWAL'` to `UPPER(TRIM(type)) IN ('WITHDRAW','WITHDRAWAL')`
-  2) the later “deposit/withdrawal stats” section: same change for counts and totals
-- This ensures the “Process Staged Trades” path also shows ~৳168.8M withdrawals.
+### Changes Required
 
-(Option, recommended) A5) One-time data normalization (safe, non-destructive)
-- Add an idempotent UPDATE that standardizes:
-  - `type='WITHDRAWAL'` → `type='WITHDRAW'`
-  - `type='DEPOSIT '` → `type='DEPOSIT'` (trim issues)
-- This reduces future mismatches, but we’ll still keep the defensive `IN ('WITHDRAW','WITHDRAWAL')` logic.
+**File: `src/components/eod/EodLogTable.tsx`**
 
-B) Frontend fixes (so the screen reflects the right numbers)
-B1) Prevent “staged result overrides batch result”
-- In `EodPage.tsx`, when “Run Full EOD” starts:
-  - set `stagedResult` to `null` (or track a `summarySource` state).
-- Today, if a staged result exists, `EodSummaryCards` uses it via `stagedResult?.total_withdrawals ?? summary.totalWithdrawals`, which can mask correct batch totals (or keep showing 0 from the staged bug).
+1. Update the interface to include missing fields that are already in the database
+2. Add new columns to the table:
+   - Deposits (formatted currency)
+   - Withdrawals (formatted currency)  
+   - Net Flow (calculated: deposits - withdrawals, with color coding)
+   - Gross Buy (formatted currency)
+   - Gross Sell (formatted currency)
+   - Total Trades (calculated: gross_buy + gross_sell)
+   - Commission (formatted currency)
 
-B2) Show clearer error details when EOD fails
-- When the RPC returns `success=false`, show the full message prominently (not only via toast):
-  - Example: an inline Alert component above the summary saying:
-    “EOD failed: created_by must be a user id (uuid).”
-- This makes it obvious that the totals are not from a successful EOD calculation.
+3. Make the table horizontally scrollable for smaller screens
 
-(Option) B3) Add a “Cash Ledger Preview” for the selected date
-- A lightweight panel that queries `cash_ledger_txn` for the selected date and shows:
-  - Deposit count/sum
-  - Withdrawal count/sum
-- This gives you a pre-flight check before running EOD and helps isolate “import vs EOD” issues instantly.
+### New Table Layout
+```text
++----------+----------+---------+--------+---------+------------+------------+----------+------------+------------+--------------+--------+
+| EOD Date | Run At   | Run By  |Clients |Deposits |Withdrawals | Net Flow   | Gross Buy| Gross Sell |Total Trades|Commission    | Status |
++----------+----------+---------+--------+---------+------------+------------+----------+------------+------------+--------------+--------+
+|01 Feb 26 |01 Feb 15:| user@.. | 32,846 | ৳338.24M| ৳168.80M   | +৳169.44M  | ৳865.59M | ৳823.33M   | ৳1.69B     |৳6,759        |complete|
++----------+----------+---------+--------+---------+------------+------------+----------+------------+------------+--------------+--------+
+```
 
-C) Verification steps (end-to-end)
-1) On /eod, pick Feb 01, 2026.
-2) Click “Process Staged Trades”
-   - Expect: Deposits ≈ ৳338.24M, Withdrawals ≈ ৳168.80M
-3) Click “Run Full EOD”
-   - Expect: Failed: 0, Completed: 1
-   - Expect: Cash Flow Summary shows deposits ≈ ৳338.24M and withdrawals ≈ ৳168.80M; Net Flow ≈ +৳169.44M
-4) Confirm EOD history row for 2026-02-01 has `total_withdrawals` populated (not 0).
+---
 
-Risks / edge cases to handle
-- Type naming inconsistencies (WITHDRAW vs WITHDRAWAL) are already present across older backend logic; we’ll code defensively and optionally normalize.
-- If the EOD chain depends on “previous day”, keep using “latest prior EOD date” logic to handle weekends/holidays.
-- Ensure the revised `run_batch_eod` doesn’t reintroduce the old “withdrawals from negative amounts” bug and doesn’t regress commission again.
+## Part 2: Calculate Settlements Feature
 
-Scope note (“other requested features”)
-- I’ll implement the core fixes above immediately.
-- If you list the “other requested features” you want on the EOD page (2–4 bullet points), I’ll fold them into the same implementation pass where possible.
+### Business Context
+DSE (Dhaka Stock Exchange) uses T+2/T+3 settlement rules:
+- **Z Category securities**: Settle in T+3 (3 trading days after trade)
+- **All other categories**: Settle in T+2 (2 trading days after trade)
+- Bangladesh weekends are Friday/Saturday (not Saturday/Sunday)
+- Bank holidays must be skipped when calculating settlement dates
+
+### Feature Requirements
+When user clicks "Calculate Settlements" for a selected date:
+1. Calculate which trades are settling ON that date (settlement_date = selected date)
+2. Show breakdown by investor of:
+   - Settlement obligations (buys that need payment)
+   - Settlement receipts (sells that generate funds)
+   - Net settlement amount per investor
+
+### Implementation Approach
+
+**Option A: Client-side calculation with dialog display (Recommended)**
+
+Create a new component `SettlementCalculationDialog` that:
+1. Queries `trade_file` for trades where `settlement_date = selected_date`
+2. Aggregates by investor showing buy/sell/net values
+3. Displays results in a modal with export capability
+
+**Database Query Logic:**
+```sql
+SELECT 
+  investor_code,
+  SUM(CASE WHEN UPPER(side) IN ('B','BUY') THEN qty * price ELSE 0 END) as buy_settlement,
+  SUM(CASE WHEN UPPER(side) IN ('S','SELL') THEN qty * price ELSE 0 END) as sell_settlement,
+  -- Net = Sell - Buy (positive = receives money, negative = pays money)
+  SUM(CASE WHEN UPPER(side) IN ('S','SELL') THEN qty * price 
+           WHEN UPPER(side) IN ('B','BUY') THEN -qty * price 
+           ELSE 0 END) as net_settlement
+FROM trade_file
+WHERE settlement_date = :selected_date
+GROUP BY investor_code
+ORDER BY ABS(net_settlement) DESC;
+```
+
+### New Components
+
+**File: `src/components/eod/SettlementCalculationDialog.tsx`**
+
+A dialog component that:
+- Takes a settlement date as prop
+- Fetches settlement data for that date
+- Shows summary cards: Total Buy Obligations, Total Sell Receipts, Net Market Position
+- Shows investor-level breakdown in a paginated table
+- Supports export to Excel
+- Shows "no settlements" state if the date has no settling trades
+
+### UI Design
+
+```text
++--------------------------------------------------+
+| Settlement Calculations for 03 Feb 2026          |
++--------------------------------------------------+
+| Summary:                                         |
+| +-------------+ +-------------+ +-------------+  |
+| |Buy Settl.   | |Sell Settl.  | |Net Position |  |
+| |৳853.56M     | |৳811.47M     | |-৳42.09M    |  |
+| +-------------+ +-------------+ +-------------+  |
++--------------------------------------------------+
+| Investor Breakdown:                    [Export]  |
+| +--------+------------+------------+------------+|
+| |Code    |Buy Settl.  |Sell Settl. |Net         ||
+| +--------+------------+------------+------------+|
+| |ABC001  |৳5,234,500  |৳2,100,000  |-৳3,134,500 ||
+| |XYZ002  |৳0          |৳8,500,000  |+৳8,500,000 ||
+| +--------+------------+------------+------------+|
++--------------------------------------------------+
+```
+
+---
+
+## Implementation Steps
+
+### Step 1: Update EodLogTable (Part 1)
+- Update `EodRunHistory` interface to include all available columns
+- Add 6 new table columns with proper formatting
+- Add horizontal scroll wrapper for mobile responsiveness
+- Use color coding for Net Flow (green positive, red negative)
+
+### Step 2: Create SettlementCalculationDialog (Part 2)
+- Create new component with React Query for data fetching
+- Implement summary cards at the top
+- Add virtualized table for investor breakdown (can be thousands of rows)
+- Add Excel export functionality using the existing xlsx library
+
+### Step 3: Wire up EodPage
+- Import and integrate the new dialog
+- Connect the "Calculate Settlements" button to open the dialog
+- Pass the selected date to the dialog
+
+---
+
+## Technical Notes
+
+### Existing Assets Available
+- `xlsx` library is already installed for Excel export
+- `@tanstack/react-virtual` is available for virtualized lists if needed
+- Settlement date calculation utilities exist in `src/lib/settlement-utils.ts`
+- Currency formatting helpers already used in `EodLogTable` and `EodSummaryCards`
+
+### Database Considerations
+- No schema changes needed - all required data exists in `eod_run_history` and `trade_file`
+- Settlement queries should be indexed (settlement_date column in trade_file)
+
+### Performance
+- Settlement calculation query may return many rows - use pagination or virtualization
+- Consider caching results for frequently accessed dates
+
