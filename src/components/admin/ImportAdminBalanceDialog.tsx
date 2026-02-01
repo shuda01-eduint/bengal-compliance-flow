@@ -53,8 +53,10 @@ interface ImportResults {
   snapshots_imported: number;
   investors_updated: number;
   holdings_imported: number;
+  balances_raw_synced: number;
   eod_cleared_after: number;
   errors: string[];
+  balances_raw_success: boolean;
 }
 
 // Column mapping patterns
@@ -349,8 +351,10 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
       snapshots_imported: 0,
       investors_updated: 0,
       holdings_imported: 0,
+      balances_raw_synced: 0,
       eod_cleared_after: 0,
       errors: [],
+      balances_raw_success: false,
     };
 
     // Deduplicate investors for ledger snapshots (multiple rows per investor due to holdings)
@@ -403,7 +407,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
           importResults.errors.push(`Failed to clear future run history: ${historyClearError.message}`);
         }
       }
-      setProgress(15);
+      setProgress(10);
 
       // STEP 3: Import to eod_investor_balance (new table with more fields)
       setProgressStage(`Importing ${snapshotData.length} unique investor balances...`);
@@ -436,9 +440,134 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
           importResults.snapshots_imported += batch.length;
         }
 
-        const snapshotProgress = 15 + ((i + batch.length) / snapshotData.length) * 25;
+        const snapshotProgress = 10 + ((i + batch.length) / snapshotData.length) * 15;
         setProgress(Math.round(snapshotProgress));
       }
+
+      // STEP 4 (CRITICAL): Sync to balances_raw IMMEDIATELY after importing baseline
+      // This ensures the date becomes selectable in Admin Balances even if later steps fail
+      setProgressStage("Syncing to Admin Balances view (making date selectable)...");
+      
+      // Use batched delete to prevent timeout on large datasets
+      const BATCH_DELETE_SIZE = 2000;
+      let deletedTotal = 0;
+      let deleteHasMore = true;
+      
+      while (deleteHasMore) {
+        const { data: deletedRows, error: batchDeleteError } = await supabase
+          .from("balances_raw")
+          .delete()
+          .eq("as_of_date", dateStr)
+          .select("id")
+          .limit(BATCH_DELETE_SIZE);
+        
+        if (batchDeleteError) {
+          importResults.errors.push(`Failed to clear balances_raw: ${batchDeleteError.message}`);
+          break;
+        }
+        
+        deletedTotal += deletedRows?.length || 0;
+        deleteHasMore = (deletedRows?.length || 0) === BATCH_DELETE_SIZE;
+        
+        if (deleteHasMore) {
+          console.log(`Deleted ${deletedTotal} balances_raw rows so far, continuing...`);
+        }
+      }
+      
+      console.log(`Cleared ${deletedTotal} existing balances_raw rows for ${dateStr}`);
+
+      // Prepare balance rows - one row per investor/instrument combination
+      const balanceRows: {
+        as_of_date: string;
+        investor_code: string;
+        instrument: string | null;
+        total_stock: number | null;
+        saleable: number | null;
+        avg_cost: number | null;
+        total_cost: number | null;
+        total_mv: number | null;
+        ledger_balance: number;
+        rm_email: string | null;
+        rm_name: string | null;
+        rm_id: string | null;
+      }[] = [];
+      
+      // For investors with holdings, create rows per instrument
+      const holdingsRows = parsedData.filter(item => 
+        item.instrument && item.instrument.trim() !== '' && item.total_stock !== undefined
+      );
+      
+      for (const item of holdingsRows) {
+        const investorInfo = uniqueInvestors.get(item.investor_code);
+        balanceRows.push({
+          as_of_date: dateStr,
+          investor_code: item.investor_code,
+          instrument: item.instrument || null,
+          total_stock: item.total_stock || null,
+          saleable: item.saleable || null,
+          avg_cost: item.avg_cost || null,
+          total_cost: item.total_cost || null,
+          total_mv: item.market_value || null,
+          ledger_balance: investorInfo?.ledger_balance || 0,
+          rm_email: investorInfo?.rm_email || null,
+          rm_name: investorInfo?.rm_name || null,
+          rm_id: investorInfo?.rm_email || null,
+        });
+      }
+      
+      // For investors without holdings, create a single row with null instrument
+      const investorsWithHoldings = new Set(holdingsRows.map(h => h.investor_code));
+      for (const [code, item] of uniqueInvestors.entries()) {
+        if (!investorsWithHoldings.has(code)) {
+          balanceRows.push({
+            as_of_date: dateStr,
+            investor_code: code,
+            instrument: null,
+            total_stock: null,
+            saleable: null,
+            avg_cost: null,
+            total_cost: null,
+            total_mv: null,
+            ledger_balance: item.ledger_balance,
+            rm_email: item.rm_email || null,
+            rm_name: item.rm_name || null,
+            rm_id: item.rm_email || null,
+          });
+        }
+      }
+
+      // Batch insert to balances_raw
+      const balancesRawBatchSize = 500;
+      let balancesRawInserted = 0;
+      
+      for (let i = 0; i < balanceRows.length; i += balancesRawBatchSize) {
+        const batch = balanceRows.slice(i, i + balancesRawBatchSize);
+        const { error: insertError } = await supabase.from("balances_raw").insert(batch);
+        
+        if (insertError) {
+          console.error("balances_raw insert error:", insertError);
+          importResults.errors.push(`balances_raw batch ${Math.floor(i / balancesRawBatchSize) + 1}: ${insertError.message}`);
+        } else {
+          balancesRawInserted += batch.length;
+        }
+        
+        const syncProgress = 25 + ((i + batch.length) / balanceRows.length) * 10;
+        setProgress(Math.round(syncProgress));
+      }
+      
+      importResults.balances_raw_synced = balancesRawInserted;
+      importResults.balances_raw_success = balancesRawInserted > 0;
+      
+      console.log(`Synced ${balancesRawInserted} rows to balances_raw for ${dateStr}`);
+      
+      // CRITICAL: Refresh dates list immediately after successful balances_raw sync
+      // This ensures the date becomes selectable even if later steps have issues
+      if (importResults.balances_raw_success) {
+        console.log("balances_raw sync successful - refreshing available dates");
+        onSuccess?.();
+      }
+
+      setProgress(35);
 
       // STEP 4: Update investors with ledger_balance using BULK RPC (fast!)
       // Always update ledger_balance to establish baseline in master table
@@ -593,98 +722,12 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         }
       }
 
-      // STEP 6: Sync to balances_raw for Admin Balances page visibility
-      setProgressStage("Syncing to Admin Balances view...");
-      
-      // Clear existing balances_raw for this date
-      const { error: balancesRawClearError } = await supabase
-        .from("balances_raw")
-        .delete()
-        .eq("as_of_date", dateStr);
-      
-      if (balancesRawClearError) {
-        importResults.errors.push(`Failed to clear balances_raw: ${balancesRawClearError.message}`);
-      }
-
-      // Prepare balance rows - one row per investor/instrument combination
-      const balanceRows: {
-        as_of_date: string;
-        investor_code: string;
-        instrument: string | null;
-        total_stock: number | null;
-        saleable: number | null;
-        avg_cost: number | null;
-        total_cost: number | null;
-        total_mv: number | null;
-        ledger_balance: number;
-        rm_email: string | null;
-        rm_name: string | null;
-        rm_id: string | null;
-      }[] = [];
-      
-      // For investors with holdings, create rows per instrument
-      const holdingsRows = parsedData.filter(item => 
-        item.instrument && item.instrument.trim() !== '' && item.total_stock !== undefined
-      );
-      
-      for (const item of holdingsRows) {
-        const investorInfo = uniqueInvestors.get(item.investor_code);
-        balanceRows.push({
-          as_of_date: dateStr,
-          investor_code: item.investor_code,
-          instrument: item.instrument || null,
-          total_stock: item.total_stock || null,
-          saleable: item.saleable || null,
-          avg_cost: item.avg_cost || null,
-          total_cost: item.total_cost || null,
-          total_mv: item.market_value || null,
-          ledger_balance: investorInfo?.ledger_balance || 0,
-          rm_email: investorInfo?.rm_email || null,
-          rm_name: investorInfo?.rm_name || null,
-          rm_id: investorInfo?.rm_email || null, // Use rm_email as rm_id for now
-        });
-      }
-      
-      // For investors without holdings, create a single row with null instrument
-      const investorsWithHoldings = new Set(holdingsRows.map(h => h.investor_code));
-      for (const [code, item] of uniqueInvestors.entries()) {
-        if (!investorsWithHoldings.has(code)) {
-          balanceRows.push({
-            as_of_date: dateStr,
-            investor_code: code,
-            instrument: null,
-            total_stock: null,
-            saleable: null,
-            avg_cost: null,
-            total_cost: null,
-            total_mv: null,
-            ledger_balance: item.ledger_balance,
-            rm_email: item.rm_email || null,
-            rm_name: item.rm_name || null,
-            rm_id: item.rm_email || null,
-          });
-        }
-      }
-
-      // Batch insert to balances_raw
-      const balancesRawBatchSize = 500;
-      for (let i = 0; i < balanceRows.length; i += balancesRawBatchSize) {
-        const batch = balanceRows.slice(i, i + balancesRawBatchSize);
-        const { error: insertError } = await supabase.from("balances_raw").insert(batch);
-        
-        if (insertError) {
-          console.error("balances_raw insert error:", insertError);
-          importResults.errors.push(`balances_raw batch ${Math.floor(i / balancesRawBatchSize) + 1}: ${insertError.message}`);
-        }
-      }
-      
-      console.log(`Synced ${balanceRows.length} rows to balances_raw for ${dateStr}`);
-
       setProgress(100);
       setProgressStage("Complete!");
       setResults(importResults);
 
-      if (importResults.errors.length === 0) {
+      // Show appropriate toast based on balances_raw sync status
+      if (importResults.balances_raw_success) {
         const parts = [
           `${importResults.snapshots_imported} snapshots`,
           `${importResults.investors_updated} investors`,
@@ -692,10 +735,15 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         if (importResults.holdings_imported > 0) {
           parts.push(`${importResults.holdings_imported} holdings`);
         }
-        toast.success(`Baseline import complete: ${parts.join(', ')}`);
-        onSuccess?.();
+        parts.push(`${importResults.balances_raw_synced} balance rows synced`);
+        
+        if (importResults.errors.length === 0) {
+          toast.success(`Baseline import complete: ${parts.join(', ')}`);
+        } else {
+          toast.warning(`Import completed with ${importResults.errors.length} warnings: ${parts.join(', ')}`);
+        }
       } else {
-        toast.warning(`Import completed with ${importResults.errors.length} errors`);
+        toast.error("Import failed: Admin Balances date will NOT be selectable. Please retry.");
       }
     } catch (error) {
       console.error("Import error:", error);
@@ -935,8 +983,12 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
             {/* Results */}
             {results && (
               <div className={cn(
-                "p-4 rounded-md",
-                results.errors.length === 0 ? "bg-green-500/10 text-green-700 dark:text-green-400" : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                "p-4 rounded-md space-y-3",
+                results.balances_raw_success && results.errors.length === 0 
+                  ? "bg-green-500/10 text-green-700 dark:text-green-400" 
+                  : results.balances_raw_success 
+                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                    : "bg-destructive/10 text-destructive"
               )}>
                 <h4 className="font-medium mb-2">Import Results</h4>
                 <div className="grid grid-cols-2 gap-1 text-sm">
@@ -957,9 +1009,30 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
                     </>
                   )}
                 </div>
+                
+                {/* Admin Balances Sync Status - Critical for date picker visibility */}
+                <div className={cn(
+                  "border-t pt-3 mt-2",
+                  results.balances_raw_success ? "border-green-500/30" : "border-destructive/30"
+                )}>
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Database className="h-4 w-4" />
+                    Admin Balances View Sync
+                  </div>
+                  {results.balances_raw_success ? (
+                    <div className="text-sm mt-1">
+                      ✓ {results.balances_raw_synced.toLocaleString()} rows synced — date is now selectable
+                    </div>
+                  ) : (
+                    <div className="text-sm mt-1 text-destructive">
+                      ✗ Sync failed — date will NOT appear in Admin Balances. Please retry the import.
+                    </div>
+                  )}
+                </div>
+                
                 {results.errors.length > 0 && (
-                  <div className="mt-2 text-xs">
-                    <div className="font-medium">Errors:</div>
+                  <div className="mt-2 text-xs border-t pt-2">
+                    <div className="font-medium">Warnings/Errors ({results.errors.length}):</div>
                     {results.errors.slice(0, 3).map((err, i) => (
                       <div key={i}>{err}</div>
                     ))}
