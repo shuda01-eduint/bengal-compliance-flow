@@ -1,78 +1,82 @@
 
-## Fix: Lock Timeout on Process Staged Trades
 
-### Problem Analysis
+# Fix: Doubled EOD Metrics from Duplicate Trade Imports
 
-The `process_staged_trades` function is failing with:
-```
-"canceling statement due to lock timeout" (error code 55P03)
-```
+## Problem Diagnosis
+February 1st `trade_file` staging data contains **69,329 records but only 21,626 unique trades** — a ~3.2x duplication. The processing function is mathematically correct, but the source data is bloated. The "Clear Selected" button only clears EOD results, not the staging data that feeds them.
 
-**Root Cause**: The function performs large DELETE operations at the start (32,099 snapshots + 75,212 positions) which require table locks. Supabase's default lock_timeout is causing the function to abort when it can't acquire locks quickly enough.
+## Solution Overview
+1. **Extend the clear function** to also delete staging data (`trade_file`, `cash_ledger_txn`) for the selected date range
+2. **Provide a deduplication query** to fix the current Feb 1 data without requiring a full re-import
 
-| Current Setting | Value | Issue |
-|-----------------|-------|-------|
-| statement_timeout | 300s | Sufficient |
-| lock_timeout | Default (unset) | Too restrictive for large deletes |
+---
 
-### Technical Solution
+## Technical Changes
 
-Add `lock_timeout` configuration to the function and optimize the delete strategy to reduce lock contention:
+### Change 1: Update `clear_eod_by_date_range` Function
 
-1. **Set lock_timeout to 60s** - Give enough time to acquire locks on the EOD tables
-2. **Use TRUNCATE-like approach** - Delete in batches or use more efficient cleanup
-3. **Add advisory locks** - Prevent concurrent EOD runs from conflicting
+The current function only clears output tables. It will be updated to also clear staging tables when EOD data is deleted:
 
-### Implementation Changes
+| Current Behavior | New Behavior |
+|-----------------|--------------|
+| Deletes `eod_ledger_snapshots` | Deletes `eod_ledger_snapshots` |
+| Deletes `eod_run_history` | Deletes `eod_run_history` |
+| — | Deletes `eod_instrument_position` |
+| — | Deletes `trade_file` for the date range |
+| — | Deletes `cash_ledger_txn` for the date range |
 
-```sql
-CREATE OR REPLACE FUNCTION public.process_staged_trades(p_trade_date date)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public'
-SET statement_timeout TO '300s'
-SET lock_timeout TO '60s'  -- NEW: Allow time to acquire locks
-AS $$
-DECLARE
-  -- ... existing declarations ...
-  v_lock_acquired boolean;
-BEGIN
-  -- NEW: Acquire advisory lock to prevent concurrent runs
-  SELECT pg_try_advisory_xact_lock(hashtext('eod_' || p_trade_date::text)) INTO v_lock_acquired;
-  
-  IF NOT v_lock_acquired THEN
-    RETURN jsonb_build_object(
-      'success', false,
-      'error', 'Another EOD process is running for this date',
-      'error_detail', 'CONCURRENT_RUN'
-    );
-  END IF;
+This ensures that after "Clear Selected", re-importing trades will start fresh.
 
-  -- Existing logic continues...
-  DELETE FROM eod_ledger_snapshots WHERE eod_date = p_trade_date;
-  DELETE FROM eod_instrument_position WHERE trade_date = p_trade_date;
-  DELETE FROM eod_run_history WHERE run_date = p_trade_date;
-  
-  -- ... rest of function ...
+### Change 2: One-Time Deduplication Query
+
+To fix the current bloated Feb 1 data without re-importing, a deduplication query will be provided that:
+1. Identifies truly unique trades using a composite key (investor, instrument, side, qty, price, settlement_date, exchange_code)
+2. Keeps only one copy of each unique trade
+3. Deletes the duplicates (~47,000 excess records)
+
+```text
+Deduplication Strategy:
+┌─────────────────────────────────────────────────────────────┐
+│  69,329 total  →  Delete 47,703 duplicates  →  21,626 kept │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Database Changes
+---
 
-| Change | Description |
-|--------|-------------|
-| Add `SET lock_timeout TO '60s'` | Extends time to acquire locks |
-| Add advisory lock | Prevents concurrent EOD runs |
-| Return structured error | When another process is running |
+## Implementation Steps
 
-### Files to Modify
+### Step 1: Update Database Function
+Create a migration to update `clear_eod_by_date_range`:
+- Add deletion of `eod_instrument_position` for the date range
+- Add deletion of `trade_file` for the date range  
+- Add deletion of `cash_ledger_txn` for the date range
+- Return counts of all deleted records in the response
+
+### Step 2: Run Deduplication for Feb 1
+Execute a SQL script to remove duplicate trades from `trade_file` for 2026-02-01 while preserving one copy of each unique trade.
+
+### Step 3: Re-process EOD
+After deduplication, re-run "Process Staged Trades" for Feb 1. Expected corrected metrics:
+- Trade count: ~21,626 (down from 69,329)
+- Gross Buy: ~৳1.4B (down from ~৳4.5B)
+- Gross Sell: ~৳1.3B (down from ~৳4.1B)
+- Commission: ~৳4-6M (calculated from corrected trades)
+
+---
+
+## Files Modified
 
 | File | Change |
 |------|--------|
-| Database Migration | Update `process_staged_trades` function |
+| Database Migration | Update `clear_eod_by_date_range` to include staging tables |
+| Database (data) | Deduplication query run once against `trade_file` |
 
-### Post-Implementation Steps
+---
 
-1. Wait for any previous EOD attempts to fully release locks (a few seconds)
-2. Re-run "Process Staged Trades" for February 1
-3. If data already exists correctly, you can skip re-processing
+## Workflow After Implementation
+
+1. Click "Clear Selected" for a date → Clears ALL data (results + staging)
+2. Re-import trades → Fresh DSE/CSE files
+3. Import deposits/withdrawals → Fresh data
+4. Process Staged Trades → Accurate metrics
+
