@@ -1,162 +1,78 @@
 
+## Fix: Lock Timeout on Process Staged Trades
 
-## Comprehensive Fix: Process Staged Trades Duplicate Key Error
+### Problem Analysis
 
-### Root Cause Analysis
-
-The `process_staged_trades` function fails with:
+The `process_staged_trades` function is failing with:
 ```
-duplicate key value violates unique constraint "eod_ledger_snapshots_eod_date_investor_code_key"
-```
-
-**The Problem**: The `tmp_investor_meta` temporary table creates duplicate investor_code rows due to the employee JOIN logic:
-
-```sql
-LEFT JOIN employees e ON LOWER(i.rm_id) = LOWER(e.employee_id)
-   OR LOWER(i.rm_name) = LOWER(e.name)
+"canceling statement due to lock timeout" (error code 55P03)
 ```
 
-When multiple employees share the same name (e.g., two "Kamal Hossain" with IDs 30345 and 30347), investors assigned to that RM get duplicated.
+**Root Cause**: The function performs large DELETE operations at the start (32,099 snapshots + 75,212 positions) which require table locks. Supabase's default lock_timeout is causing the function to abort when it can't acquire locks quickly enough.
 
-| Table | Expected Rows | Actual Rows | Duplicates |
-|-------|---------------|-------------|------------|
-| investors | 32,099 | 32,099 | 0 |
-| tmp_investor_meta | 32,099 | 32,230 | 131 extra |
-
-These duplicates cascade into the final INSERT, violating the unique constraint on `(eod_date, investor_code)`.
-
----
+| Current Setting | Value | Issue |
+|-----------------|-------|-------|
+| statement_timeout | 300s | Sufficient |
+| lock_timeout | Default (unset) | Too restrictive for large deletes |
 
 ### Technical Solution
 
-#### 1. Fix tmp_investor_meta to eliminate duplicates
-Use `DISTINCT ON (investor_code)` to ensure one row per investor, prioritizing the employee_id match over the name match:
+Add `lock_timeout` configuration to the function and optimize the delete strategy to reduce lock contention:
 
-```sql
-CREATE TEMP TABLE tmp_investor_meta ON COMMIT DROP AS
-SELECT DISTINCT ON (i.investor_code)
-  i.investor_code,
-  i.investor_name,
-  i.brokerage_commission,
-  i.interest_rate AS investor_interest_rate,
-  i.account_type,
-  e.employee_id AS rm_id,
-  e.name AS rm_name,
-  e.email AS rm_email,
-  e.department
-FROM investors i
-LEFT JOIN employees e 
-  ON LOWER(i.rm_id) = LOWER(e.employee_id)
-  OR LOWER(i.rm_name) = LOWER(e.name)
-ORDER BY i.investor_code, 
-  -- Prioritize employee_id match over name match
-  CASE WHEN LOWER(i.rm_id) = LOWER(e.employee_id) THEN 0 ELSE 1 END;
-```
+1. **Set lock_timeout to 60s** - Give enough time to acquire locks on the EOD tables
+2. **Use TRUNCATE-like approach** - Delete in batches or use more efficient cleanup
+3. **Add advisory locks** - Prevent concurrent EOD runs from conflicting
 
-#### 2. Add EXCEPTION handler for graceful error reporting
-Match `run_batch_eod` pattern to return structured error instead of crashing:
-
-```sql
-EXCEPTION WHEN OTHERS THEN
-  RETURN jsonb_build_object(
-    'success', false,
-    'error', SQLERRM,
-    'error_detail', SQLSTATE
-  );
-END;
-```
-
-#### 3. Add defensive DISTINCT ON to final INSERT
-Extra safeguard in case other joins also produce duplicates:
-
-```sql
-INSERT INTO eod_ledger_snapshots (...)
-SELECT DISTINCT ON (bi.investor_code)
-  p_trade_date,
-  bi.investor_code,
-  ...
-FROM tmp_base_investors bi
-...
-ORDER BY bi.investor_code;
-```
-
----
-
-### Files to Modify
-
-| File | Change |
-|------|--------|
-| Database Migration | Update `process_staged_trades` function with all 3 fixes |
-
----
-
-### Migration SQL Summary
+### Implementation Changes
 
 ```sql
 CREATE OR REPLACE FUNCTION public.process_staged_trades(p_trade_date date)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
-SET statement_timeout = '300s'
+SET search_path TO 'public'
+SET statement_timeout TO '300s'
+SET lock_timeout TO '60s'  -- NEW: Allow time to acquire locks
 AS $$
 DECLARE
   -- ... existing declarations ...
+  v_lock_acquired boolean;
 BEGIN
-  -- ... existing DELETE and temp table logic ...
+  -- NEW: Acquire advisory lock to prevent concurrent runs
+  SELECT pg_try_advisory_xact_lock(hashtext('eod_' || p_trade_date::text)) INTO v_lock_acquired;
+  
+  IF NOT v_lock_acquired THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Another EOD process is running for this date',
+      'error_detail', 'CONCURRENT_RUN'
+    );
+  END IF;
 
-  -- FIXED: Use DISTINCT ON to prevent duplicate investor rows
-  CREATE TEMP TABLE tmp_investor_meta ON COMMIT DROP AS
-  SELECT DISTINCT ON (i.investor_code)
-    i.investor_code,
-    i.investor_name,
-    i.brokerage_commission,
-    i.interest_rate AS investor_interest_rate,
-    i.account_type,
-    e.employee_id AS rm_id,
-    e.name AS rm_name,
-    e.email AS rm_email,
-    e.department
-  FROM investors i
-  LEFT JOIN employees e 
-    ON LOWER(i.rm_id) = LOWER(e.employee_id)
-    OR LOWER(i.rm_name) = LOWER(e.name)
-  ORDER BY i.investor_code, 
-    CASE WHEN LOWER(i.rm_id) = LOWER(e.employee_id) THEN 0 ELSE 1 END;
-
-  -- ... rest of temp tables ...
-
-  -- FIXED: Add DISTINCT ON to final INSERT as safeguard
-  INSERT INTO eod_ledger_snapshots (...)
-  SELECT DISTINCT ON (bi.investor_code)
-    p_trade_date,
-    bi.investor_code,
-    ...
-  FROM tmp_base_investors bi
-  ...
-  ORDER BY bi.investor_code;
-
-  -- ... rest of aggregation and history insert ...
-
-  RETURN v_result;
-
--- FIXED: Add exception handler
-EXCEPTION WHEN OTHERS THEN
-  RETURN jsonb_build_object(
-    'success', false,
-    'error', SQLERRM,
-    'error_detail', SQLSTATE
-  );
-END;
-$$;
+  -- Existing logic continues...
+  DELETE FROM eod_ledger_snapshots WHERE eod_date = p_trade_date;
+  DELETE FROM eod_instrument_position WHERE trade_date = p_trade_date;
+  DELETE FROM eod_run_history WHERE run_date = p_trade_date;
+  
+  -- ... rest of function ...
 ```
 
----
+### Database Changes
 
-### Post-Implementation Verification
+| Change | Description |
+|--------|-------------|
+| Add `SET lock_timeout TO '60s'` | Extends time to acquire locks |
+| Add advisory lock | Prevents concurrent EOD runs |
+| Return structured error | When another process is running |
 
-1. Clear any partial Feb 1 EOD data using "Clear Selected" button
-2. Re-run "Process Staged Trades" for Feb 1
-3. Verify success message shows snapshot count
-4. Check EOD Run History table updates correctly
+### Files to Modify
 
+| File | Change |
+|------|--------|
+| Database Migration | Update `process_staged_trades` function |
+
+### Post-Implementation Steps
+
+1. Wait for any previous EOD attempts to fully release locks (a few seconds)
+2. Re-run "Process Staged Trades" for February 1
+3. If data already exists correctly, you can skip re-processing
