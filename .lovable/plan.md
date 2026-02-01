@@ -1,90 +1,82 @@
 
-# Fix Date Parsing Error in Admin Balance Import
+
+# Fix Admin Balance Import & Add to EOD Page
 
 ## Problem Summary
-When importing admin balances, a date parsing error occurs with the value `"01132620"` (expected format: `YYYY-MM-DD` like `2026-01-12`). This corrupted date format appears to be caused by timezone issues when formatting dates from the Calendar component.
 
-## Root Cause Analysis
-The issue stems from how JavaScript's Date object handles timezones:
-1. The Calendar component (react-day-picker) returns a Date object
-2. When using `format(date, "yyyy-MM-dd")` from date-fns, it may interpret the date differently based on timezone
-3. In UTC+6 timezone (Bangladesh), dates selected near midnight can shift by a day when converted to/from UTC
-
-The malformed date `01132620` suggests:
-- Month: 01 (January)
-- Day: 13
-- Year: 2620 (corrupted - should be 2026)
-
-This indicates the date components are being concatenated incorrectly, possibly due to a bug in how the Date object's components are being extracted.
-
-## Technical Solution
-
-### 1. Create Date Normalization Utility
-Add a utility function in `src/lib/utils.ts` to safely format dates for database operations:
-
-```typescript
-/**
- * Safely format a Date to YYYY-MM-DD string using local date components.
- * This avoids timezone issues that occur with toISOString() or date-fns format().
- */
-export function formatDateToISO(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * Normalize a date to local midnight to avoid timezone issues.
- * Use this when receiving dates from Calendar/DatePicker components.
- */
-export function normalizeToLocalDate(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
+The Admin Balance import is failing with:
+```
+date/time field value out of range: "01132620"
 ```
 
-### 2. Update ImportAdminBalanceDialog.tsx
-Replace all usages of `format(balanceDate, "yyyy-MM-dd")` with the new `formatDateToISO()` function.
+This is caused by **corrupted data in the database**, not frontend date formatting. The `trade_history` table contains 23,737 rows with `trade_date='01132620'` (invalid format: MMDDYYYY without separators) instead of the correct `'20260113'` (YYYYMMDD). These rows are duplicates of existing correct records (verified by matching `exec_id`).
 
-**Files to modify:**
-- Line 126: `const dateStr = format(balanceDate, "yyyy-MM-dd");`
-- Line 346: `const dateStr = format(balanceDate, "yyyy-MM-dd");`
-- Line 483: `const effectiveDateStr = balanceDate ? format(balanceDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');`
+When the SQL functions `get_admin_balances_enriched` and `get_admin_balances_summary` execute `trade_date::date`, PostgreSQL cannot parse the malformed string.
 
-### 3. Update Calendar Selection Handler
-Normalize the date when it's selected from the Calendar to prevent timezone drift:
+---
 
-```typescript
-onSelect={(date) => date && setBalanceDate(normalizeToLocalDate(date))}
+## Solution Overview
+
+### Part 1: Delete Corrupted Data (Database Fix)
+
+Execute a DELETE statement to remove the 23,737 bad rows:
+
+```sql
+DELETE FROM trade_history WHERE trade_date = '01132620';
 ```
 
-### 4. Apply Same Fix to Other Import Dialogs
-Apply the same pattern to:
-- `ImportBalancesRawDialog.tsx` (line 152)
-- `CopyBalancesDialog.tsx` (lines 67-68, 73-74, 139-140, 249, 273, 320)
-- `ImportCommissionsDialog.tsx` (line 120)
+This is safe because:
+- All rows with `trade_date='01132620'` have matching `exec_id` values in rows with `trade_date='20260113'`
+- They are duplicates created by a previous import with incorrect date formatting
+
+### Part 2: Add Admin Balance Import to EOD Page
+
+Add the `ImportAdminBalanceDialog`, `ImportBalancesRawDialog`, and `CopyBalancesDialog` components to the EOD page, creating a new "Baseline Balances" section.
+
+---
+
+## Implementation Details
+
+### Step 1: Delete Corrupted Data
+Run migration to delete the malformed trade_date records:
+- Target: `trade_history` table
+- Condition: `trade_date = '01132620'`
+- Records affected: 23,737 duplicate rows
+
+### Step 2: Update EOD Page
+Add a new "Import Baseline Balances" section with:
+- `ImportAdminBalanceDialog` - Full admin balance import with investor/holdings updates
+- `ImportBalancesRawDialog` - Raw balance data import
+- `CopyBalancesDialog` - Copy balances between dates
+- `ImportOpeningBalancesDialog` - Simple opening balance import for EOD chain
+
+### Step 3: Update Imports in EOD Page
+File: `src/pages/EodPage.tsx`
+- Add imports for the balance import dialogs
+- Add state for the dialog open states
+- Add a new Card/section with "Import Baseline Balances" header
+- Place buttons to trigger each dialog
+
+### Step 4: Keep Existing Admin Balances Page Unchanged
+The `/admin/balances` page will retain its import buttons as-is, maintaining backward compatibility.
+
+---
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/lib/utils.ts` | Add `formatDateToISO()` and `normalizeToLocalDate()` functions |
-| `src/components/admin/ImportAdminBalanceDialog.tsx` | Replace `format()` calls with `formatDateToISO()`, normalize calendar dates |
-| `src/components/admin/ImportBalancesRawDialog.tsx` | Replace `format()` calls with `formatDateToISO()`, normalize calendar dates |
-| `src/components/admin/CopyBalancesDialog.tsx` | Replace `format()` calls with `formatDateToISO()`, normalize calendar dates |
-| `src/components/admin/ImportCommissionsDialog.tsx` | Replace `format()` calls with `formatDateToISO()` |
+| (Database) | DELETE statement to remove 23,737 rows where `trade_date='01132620'` |
+| `src/pages/EodPage.tsx` | Add import dialogs for baseline balances, add UI section |
 
-## Implementation Order
-1. Add utility functions to `src/lib/utils.ts`
-2. Update `ImportAdminBalanceDialog.tsx` (primary fix)
-3. Update other import dialogs for consistency
-4. Test with the Admin Balance import flow
+---
 
-## Testing Steps
+## Testing Checklist
 After implementation:
-1. Go to `/admin/balances` page
-2. Click "Import Admin Balance Baseline"
-3. Select a date (e.g., January 12, 2026) from the calendar
-4. Upload an Excel file with balance data
-5. Verify the import succeeds without date parsing errors
-6. Check the database to confirm the `trade_date` is stored as `2026-01-12`
+1. Navigate to `/admin/balances` 
+2. Select January 12, 2026
+3. Verify the page loads without the date parsing error
+4. Navigate to `/eod`
+5. Verify the new "Import Baseline Balances" section appears
+6. Test each import dialog opens and functions correctly
+
