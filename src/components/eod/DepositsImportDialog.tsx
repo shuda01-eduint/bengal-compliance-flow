@@ -71,9 +71,11 @@ export function DepositsImportDialog({
   };
 
   // Normalize to cash_ledger_txn type enum: DEPOSIT, WITHDRAW, TRADE_CASH, COMMISSION, INTEREST, OTHER
-  const normalizeTransactionType = (rawType: string): string => {
+  // Also determines if amount should come from Debit or Credit column
+  const normalizeTransactionType = (rawType: string): { type: string; isDebit: boolean } => {
     const lower = rawType.toLowerCase().trim();
     
+    // "Receipt" = Deposit (use Credit column)
     if (
       lower === "receipt" ||
       lower === "receive" ||
@@ -82,12 +84,13 @@ export function DepositsImportDialog({
       lower.includes("receipt") ||
       lower.includes("deposit")
     ) {
-      return "DEPOSIT";
+      return { type: "DEPOSIT", isDebit: false };
     }
     
+    // "Paid" = Withdrawal (use Debit column) - this is the key fix!
     if (
-      lower === "payment" ||
       lower === "paid" ||
+      lower === "payment" ||
       lower === "withdraw" ||
       lower === "withdrawal" ||
       lower === "debit" ||
@@ -95,18 +98,19 @@ export function DepositsImportDialog({
       lower.includes("withdraw") ||
       lower.includes("paid")
     ) {
-      return "WITHDRAW";
+      return { type: "WITHDRAW", isDebit: true };
     }
 
     if (lower.includes("commission") || lower.includes("brokerage")) {
-      return "COMMISSION";
+      return { type: "COMMISSION", isDebit: true };
     }
 
     if (lower.includes("interest")) {
-      return "INTEREST";
+      return { type: "INTEREST", isDebit: true };
     }
     
-    return "OTHER";
+    // Default to OTHER - check if debit has value
+    return { type: "OTHER", isDebit: false };
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -214,7 +218,7 @@ export function DepositsImportDialog({
           ""
         ).trim();
         
-        const transactionType = normalizeTransactionType(rawType);
+        const { type: transactionType, isDebit } = normalizeTransactionType(rawType);
 
         const debit = parseNumber(row["Debit"] || row["debit"] || 0);
         const credit = parseNumber(row["Credit"] || row["credit"] || 0);
@@ -224,7 +228,8 @@ export function DepositsImportDialog({
         if (rawAmount !== undefined && rawAmount !== null) {
           amount = parseNumber(rawAmount);
         } else {
-          amount = credit > 0 ? credit : debit;
+          // Use Debit column for withdrawals/payments, Credit column for deposits/receipts
+          amount = isDebit ? debit : credit;
         }
 
         const investorName = 
