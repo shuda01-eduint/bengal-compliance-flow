@@ -1,81 +1,162 @@
 
 
-## Plan: Fix Column Name Mismatch in `run_batch_eod` RETURNING Clause
+## Comprehensive Fix: Process Staged Trades Duplicate Key Error
 
-### Problem Analysis
+### Root Cause Analysis
 
-After thorough investigation, I found the root cause of the February 1st EOD failure:
-
-**The `RETURNING` clause in `run_batch_eod` uses `deposits` and `withdrawals`, but the `eod_ledger_snapshots` table columns are named `total_deposits` and `total_withdrawals`.**
-
-Looking at the latest migration (lines 190-202):
-
-```sql
-INSERT INTO eod_ledger_snapshots (
-  ...
-  total_deposits,      -- ← Table column name
-  total_withdrawals,   -- ← Table column name
-  ...
-)
-SELECT
-  ...
-  wi.deposits,         -- ← CTE alias
-  wi.withdrawals,      -- ← CTE alias
-  ...
-FROM with_interest wi
-RETURNING investor_code, closing_balance, gross_buy, gross_sell, total_commission, deposits, withdrawals
-                                                                                   ^^^^^^^^  ^^^^^^^^^^^
-                                                                                   ERROR: These don't exist!
+The `process_staged_trades` function fails with:
+```
+duplicate key value violates unique constraint "eod_ledger_snapshots_eod_date_investor_code_key"
 ```
 
-The INSERT correctly maps `wi.deposits` to `total_deposits`, but the RETURNING clause tries to reference `deposits` which is not a column in the table.
+**The Problem**: The `tmp_investor_meta` temporary table creates duplicate investor_code rows due to the employee JOIN logic:
 
-### Settlement Calculation Check
+```sql
+LEFT JOIN employees e ON LOWER(i.rm_id) = LOWER(e.employee_id)
+   OR LOWER(i.rm_name) = LOWER(e.name)
+```
 
-The "Calculate Settlements" feature was **NOT** the cause of this issue:
-- It only queries `trade_file` for read-only settlement calculations
-- It aggregates buy/sell values by investor code  
-- It does not write to any EOD-related tables
-- Safe to use without impact on EOD processing
+When multiple employees share the same name (e.g., two "Kamal Hossain" with IDs 30345 and 30347), investors assigned to that RM get duplicated.
+
+| Table | Expected Rows | Actual Rows | Duplicates |
+|-------|---------------|-------------|------------|
+| investors | 32,099 | 32,099 | 0 |
+| tmp_investor_meta | 32,099 | 32,230 | 131 extra |
+
+These duplicates cascade into the final INSERT, violating the unique constraint on `(eod_date, investor_code)`.
 
 ---
 
 ### Technical Solution
 
-Update the `RETURNING` clause to use the correct column names that exist in `eod_ledger_snapshots`:
+#### 1. Fix tmp_investor_meta to eliminate duplicates
+Use `DISTINCT ON (investor_code)` to ensure one row per investor, prioritizing the employee_id match over the name match:
 
-| Current (Broken) | Correct (Fixed) |
-|------------------|-----------------|
-| `deposits` | `total_deposits` |
-| `withdrawals` | `total_withdrawals` |
+```sql
+CREATE TEMP TABLE tmp_investor_meta ON COMMIT DROP AS
+SELECT DISTINCT ON (i.investor_code)
+  i.investor_code,
+  i.investor_name,
+  i.brokerage_commission,
+  i.interest_rate AS investor_interest_rate,
+  i.account_type,
+  e.employee_id AS rm_id,
+  e.name AS rm_name,
+  e.email AS rm_email,
+  e.department
+FROM investors i
+LEFT JOIN employees e 
+  ON LOWER(i.rm_id) = LOWER(e.employee_id)
+  OR LOWER(i.rm_name) = LOWER(e.name)
+ORDER BY i.investor_code, 
+  -- Prioritize employee_id match over name match
+  CASE WHEN LOWER(i.rm_id) = LOWER(e.employee_id) THEN 0 ELSE 1 END;
+```
+
+#### 2. Add EXCEPTION handler for graceful error reporting
+Match `run_batch_eod` pattern to return structured error instead of crashing:
+
+```sql
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object(
+    'success', false,
+    'error', SQLERRM,
+    'error_detail', SQLSTATE
+  );
+END;
+```
+
+#### 3. Add defensive DISTINCT ON to final INSERT
+Extra safeguard in case other joins also produce duplicates:
+
+```sql
+INSERT INTO eod_ledger_snapshots (...)
+SELECT DISTINCT ON (bi.investor_code)
+  p_trade_date,
+  bi.investor_code,
+  ...
+FROM tmp_base_investors bi
+...
+ORDER BY bi.investor_code;
+```
+
+---
 
 ### Files to Modify
 
 | File | Change |
 |------|--------|
-| SQL Migration | Fix `run_batch_eod` RETURNING clause column names |
+| Database Migration | Update `process_staged_trades` function with all 3 fixes |
 
-### SQL Migration
+---
+
+### Migration SQL Summary
 
 ```sql
--- Fix run_batch_eod RETURNING clause to use correct column names
-CREATE OR REPLACE FUNCTION public.run_batch_eod(...)
+CREATE OR REPLACE FUNCTION public.process_staged_trades(p_trade_date date)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+SET statement_timeout = '300s'
+AS $$
+DECLARE
+  -- ... existing declarations ...
+BEGIN
+  -- ... existing DELETE and temp table logic ...
 
--- Change line 202 from:
-RETURNING investor_code, closing_balance, gross_buy, gross_sell, total_commission, deposits, withdrawals
+  -- FIXED: Use DISTINCT ON to prevent duplicate investor rows
+  CREATE TEMP TABLE tmp_investor_meta ON COMMIT DROP AS
+  SELECT DISTINCT ON (i.investor_code)
+    i.investor_code,
+    i.investor_name,
+    i.brokerage_commission,
+    i.interest_rate AS investor_interest_rate,
+    i.account_type,
+    e.employee_id AS rm_id,
+    e.name AS rm_name,
+    e.email AS rm_email,
+    e.department
+  FROM investors i
+  LEFT JOIN employees e 
+    ON LOWER(i.rm_id) = LOWER(e.employee_id)
+    OR LOWER(i.rm_name) = LOWER(e.name)
+  ORDER BY i.investor_code, 
+    CASE WHEN LOWER(i.rm_id) = LOWER(e.employee_id) THEN 0 ELSE 1 END;
 
--- To:
-RETURNING investor_code, closing_balance, gross_buy, gross_sell, total_commission, total_deposits, total_withdrawals
+  -- ... rest of temp tables ...
 
--- Also update lines 210-211 aggregation to match:
-COALESCE(SUM(total_deposits), 0),
-COALESCE(SUM(total_withdrawals), 0)
+  -- FIXED: Add DISTINCT ON to final INSERT as safeguard
+  INSERT INTO eod_ledger_snapshots (...)
+  SELECT DISTINCT ON (bi.investor_code)
+    p_trade_date,
+    bi.investor_code,
+    ...
+  FROM tmp_base_investors bi
+  ...
+  ORDER BY bi.investor_code;
+
+  -- ... rest of aggregation and history insert ...
+
+  RETURN v_result;
+
+-- FIXED: Add exception handler
+EXCEPTION WHEN OTHERS THEN
+  RETURN jsonb_build_object(
+    'success', false,
+    'error', SQLERRM,
+    'error_detail', SQLSTATE
+  );
+END;
+$$;
 ```
 
 ---
 
-### Post-Implementation
+### Post-Implementation Verification
 
-1. Clear the Feb 1 EOD data (if any partial run exists)
-2. Re-run EOD for Feb 1 to verify the fix
+1. Clear any partial Feb 1 EOD data using "Clear Selected" button
+2. Re-run "Process Staged Trades" for Feb 1
+3. Verify success message shows snapshot count
+4. Check EOD Run History table updates correctly
 
