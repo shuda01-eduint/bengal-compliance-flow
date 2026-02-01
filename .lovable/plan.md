@@ -1,90 +1,115 @@
 
-# Optimize Admin Balance Import Performance
 
-## Problem
-The current Admin Balance import is extremely slow because it performs individual database updates for each investor's ledger_balance (23,961 individual HTTP requests). This takes 15-30 minutes for a file with 81,000+ rows.
+# Fix Admin Balance Import - Data Not Visible After Import
 
-## Solution Overview
-Implement a bulk update RPC function for investor baseline balances and use batch processing for all operations, reducing import time from ~30 minutes to under 3 minutes.
+## Problem Identified
 
-## Implementation Details
+Your import **WAS successful** - 23,961 records were imported for January 31, 2026. However, you cannot select January 31st in the date picker because:
 
-### Step 1: Create Bulk Update RPC Function
-Create a new PostgreSQL function `update_investor_balances_bulk` that accepts a JSONB array and updates all investors in a single database operation.
+**The Admin Balances page queries a different table than where the import saves data.**
 
-```sql
-CREATE OR REPLACE FUNCTION update_investor_balances_bulk(updates jsonb)
-RETURNS integer
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  updated_count integer := 0;
-BEGIN
-  UPDATE investors i
-  SET ledger_balance = (u->>'ledger_balance')::numeric
-  FROM jsonb_array_elements(updates) AS u
-  WHERE i.investor_code = u->>'investor_code';
-  
-  GET DIAGNOSTICS updated_count = ROW_COUNT;
-  RETURN updated_count;
-END;
-$$;
-```
+| Component | Table Used | January 31st Data |
+|-----------|-----------|-------------------|
+| Import Admin Balance | `eod_investor_balance` | 23,961 records (imported) |
+| Admin Balances Page | `balances_raw` | No data (empty for Jan 31) |
 
-### Step 2: Update ImportAdminBalanceDialog.tsx
-Modify the import logic to use bulk operations:
+The date picker only shows dates that exist in `balances_raw`, which currently has data only up to January 12, 2026.
 
-**Current approach (slow):**
+## Solution
+
+Update the `ImportAdminBalanceDialog` to also populate the `balances_raw` table, which the Admin Balances page uses for display. This ensures imported data is immediately visible.
+
+## Changes Required
+
+### File: `src/components/admin/ImportAdminBalanceDialog.tsx`
+
+Add a new step in the import process to insert holdings data into `balances_raw` table (in addition to `eod_investor_balance`):
+
+**Current Flow:**
+1. Clear existing `eod_investor_balance` for the date
+2. Clear future EOD data if requested
+3. Import to `eod_investor_balance`
+4. Update investors table with ledger balances
+5. Update commission rates
+6. Import holdings to `holdings` table
+
+**Updated Flow (add step 3b):**
+1. Clear existing `eod_investor_balance` for the date
+2. Clear future EOD data if requested
+3. Import to `eod_investor_balance`
+3b. **NEW: Import to `balances_raw` table** (for Admin Balances page visibility)
+4. Update investors table with ledger balances
+5. Update commission rates
+6. Import holdings to `holdings` table
+
+### New Step Implementation
+
+After importing to `eod_investor_balance`, add import to `balances_raw`:
+
 ```typescript
-// Lines 452-468: Individual updates per investor
-for (const item of chunk) {
-  await supabase
-    .from("investors")
-    .update({ ledger_balance: item.ledger_balance })
-    .eq("investor_code", item.investor_code);
+// STEP 3b: Import to balances_raw for Admin Balances page visibility
+setProgressStage("Syncing to balances view...");
+
+// First clear existing balances_raw for this date
+await supabase.from("balances_raw").delete().eq("as_of_date", dateStr);
+
+// Group holdings by investor to create balance rows
+const holdingsByInvestor = parsedData.reduce((acc, item) => {
+  if (!acc[item.investor_code]) acc[item.investor_code] = [];
+  if (item.instrument) acc[item.investor_code].push(item);
+  return acc;
+}, {});
+
+// Insert balance rows with holdings
+const balanceRows = [];
+for (const [code, holdings] of Object.entries(holdingsByInvestor)) {
+  const investorInfo = uniqueInvestors.get(code);
+  for (const holding of holdings) {
+    balanceRows.push({
+      as_of_date: dateStr,
+      investor_code: code,
+      instrument: holding.instrument,
+      total_stock: holding.total_stock,
+      saleable: holding.saleable,
+      avg_cost: holding.avg_cost,
+      total_cost: holding.total_cost,
+      total_mv: holding.market_value,
+      ledger_balance: investorInfo?.ledger_balance || 0,
+      rm_email: investorInfo?.rm_email || null,
+      rm_name: investorInfo?.rm_name || null,
+    });
+  }
+}
+
+// Batch insert to balances_raw
+for (let i = 0; i < balanceRows.length; i += batchSize) {
+  const batch = balanceRows.slice(i, i + batchSize);
+  await supabase.from("balances_raw").insert(batch);
 }
 ```
 
-**New approach (fast):**
+### Additional: Query Cache Invalidation
+
+After import completes successfully, invalidate React Query cache to trigger immediate UI refresh:
+
 ```typescript
-// Batch updates using RPC - 1000 records per call
-const BULK_BATCH_SIZE = 1000;
-for (let i = 0; i < investorsToUpdate.length; i += BULK_BATCH_SIZE) {
-  const batch = investorsToUpdate.slice(i, i + BULK_BATCH_SIZE);
-  const updates = batch.map(item => ({
-    investor_code: item.investor_code,
-    ledger_balance: item.ledger_balance
-  }));
-  
-  await supabase.rpc('update_investor_balances_bulk', { updates });
-}
+// In onSuccess callback
+queryClient.invalidateQueries({ queryKey: ['balances-raw-dates'] });
+queryClient.invalidateQueries({ queryKey: ['balances-enriched'] });
+queryClient.invalidateQueries({ queryKey: ['balances-summary'] });
 ```
 
-### Step 3: Optimize Commission Rate Updates
-Similarly, create and use a bulk function for commission rate updates instead of individual PATCH requests.
+## Expected Result After Fix
 
-## Files to Modify
+- Import will populate both `eod_investor_balance` (for EOD processing) AND `balances_raw` (for Admin Balances display)
+- January 31st will appear in the date picker immediately after import
+- All 23,677 investors with their holdings will be visible on the Admin Balances page
 
-| File | Changes |
-|------|---------|
-| Database Migration | Create `update_investor_balances_bulk` RPC function |
-| `src/components/admin/ImportAdminBalanceDialog.tsx` | Replace individual updates with bulk RPC calls |
+## Summary
 
-## Expected Performance Improvement
+| Action | Purpose |
+|--------|---------|
+| Add `balances_raw` insert | Make imported data visible on Admin Balances page |
+| Clear existing date data | Prevent duplicates when re-importing |
+| Invalidate query cache | Refresh UI immediately without page reload |
 
-| Metric | Before | After |
-|--------|--------|-------|
-| Ledger balance updates | 23,961 requests | 24 requests (1000/batch) |
-| Commission updates | ~24,000 requests | 24 requests (batched) |
-| Holdings inserts | 150 batches (500/batch) | No change |
-| Total time | 15-30 minutes | 2-3 minutes |
-
-## Testing Checklist
-After implementation:
-1. Upload the Admin Balance file (Admin_Balance_31.01.2026.xlsx)
-2. Verify progress bar moves smoothly through all stages
-3. Confirm all 23,961 investors have updated ledger_balance values
-4. Confirm 75,342 holdings are imported correctly
-5. Verify import completes in under 5 minutes
