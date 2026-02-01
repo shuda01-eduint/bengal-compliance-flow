@@ -734,7 +734,7 @@ export function TradeImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh]">
+      <DialogContent className="w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Import Trade Data</DialogTitle>
           <DialogDescription>
@@ -746,12 +746,12 @@ export function TradeImportDialog({
         {step === "upload" && (
           <div className="space-y-6">
             <div
-              className="border-2 border-dashed rounded-lg p-12 text-center cursor-pointer hover:border-primary/50 transition-colors"
+              className="border-2 border-dashed rounded-lg p-6 sm:p-12 text-center cursor-pointer hover:border-primary/50 transition-colors"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-lg font-medium">Click to upload or drag and drop</p>
-              <p className="text-sm text-muted-foreground mt-2">
+              <Upload className="h-8 w-8 sm:h-12 sm:w-12 mx-auto text-muted-foreground mb-3 sm:mb-4" />
+              <p className="text-base sm:text-lg font-medium">Click to upload or drag and drop</p>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1 sm:mt-2">
                 CSE (.txt) or DSE (.xml) trade files
               </p>
               <input
@@ -772,7 +772,7 @@ export function TradeImportDialog({
                 <code className="text-xs block bg-background p-2 rounded font-mono break-all">
                   DHK01|14028|LOVELLO|S|35000|65.00|GZ44|||22|13/01/2026|10:11:38|13/01/2026|10:11:38|B
                 </code>
-                <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 sm:gap-2 mt-2 sm:mt-3 text-xs text-muted-foreground">
                   <div>• Field 1: CSE Terminal (DHK01)</div>
                   <div>• Field 3: Security Code</div>
                   <div>• Field 4: Side (B/S)</div>
@@ -789,7 +789,7 @@ export function TradeImportDialog({
                 <code className="text-xs block bg-background p-2 rounded font-mono break-all">
                   &lt;Detail Action="EXEC" ClientCode="12345" SecurityCode="STOCK" Side="B" Quantity="100" Price="50.00" FillType="FILL" /&gt;
                 </code>
-                <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-muted-foreground">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 sm:gap-2 mt-2 sm:mt-3 text-xs text-muted-foreground">
                   <div>• Action: Must be "EXEC"</div>
                   <div>• FillType: Must have value</div>
                   <div>• ClientCode: Investor ID</div>
@@ -840,33 +840,33 @@ export function TradeImportDialog({
               </div>
             )}
 
-            <div className="border rounded-lg">
-              <ScrollArea className="h-[350px]">
+            <div className="border rounded-lg overflow-x-auto">
+              <ScrollArea className="h-[250px] sm:h-[350px]">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[70px]">Terminal</TableHead>
+                      <TableHead className="w-[70px] hidden sm:table-cell">Terminal</TableHead>
                       <TableHead>Client</TableHead>
                       <TableHead>Security</TableHead>
                       <TableHead>Side</TableHead>
                       <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Price</TableHead>
+                      <TableHead className="text-right hidden sm:table-cell">Price</TableHead>
                       <TableHead className="text-right">Value</TableHead>
-                      <TableHead>Trade Date</TableHead>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Cat</TableHead>
+                      <TableHead className="hidden md:table-cell">Trade Date</TableHead>
+                      <TableHead className="hidden lg:table-cell">Time</TableHead>
+                      <TableHead className="hidden sm:table-cell">Cat</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {parsedTrades.slice(0, 100).map((trade, idx) => (
                       <TableRow key={idx}>
-                        <TableCell className="font-mono text-xs">
+                        <TableCell className="font-mono text-xs hidden sm:table-cell">
                           {trade.cse_terminal}
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           {trade.full_investor_code}
                         </TableCell>
-                        <TableCell className="font-medium">
+                        <TableCell className="font-medium text-xs sm:text-sm">
                           {trade.security_code}
                         </TableCell>
                         <TableCell>
@@ -880,19 +880,19 @@ export function TradeImportDialog({
                         <TableCell className="text-right font-mono text-xs">
                           {trade.quantity.toLocaleString()}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-xs">
+                        <TableCell className="text-right font-mono text-xs hidden sm:table-cell">
                           {trade.price.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs">
                           {trade.value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </TableCell>
-                        <TableCell className="font-mono text-xs">
+                        <TableCell className="font-mono text-xs hidden md:table-cell">
                           {formatDateForDisplay(trade.trade_date)}
                         </TableCell>
-                        <TableCell className="font-mono text-xs">
+                        <TableCell className="font-mono text-xs hidden lg:table-cell">
                           {formatTimeForDisplay(trade.trade_time)}
                         </TableCell>
-                        <TableCell className="text-center">
+                        <TableCell className="text-center hidden sm:table-cell">
                           <Badge variant="outline" className="text-xs">
                             {trade.category_flag}
                           </Badge>
@@ -915,29 +915,29 @@ export function TradeImportDialog({
             </div>
 
             {/* Summary stats */}
-            <div className="grid grid-cols-4 gap-3 text-sm">
-              <div className="bg-muted/50 rounded-lg p-3">
-                <p className="text-muted-foreground">Total Qty</p>
-                <p className="font-bold">{parsedTrades.reduce((sum, t) => sum + t.quantity, 0).toLocaleString()}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-sm">
+              <div className="bg-muted/50 rounded-lg p-2 sm:p-3">
+                <p className="text-muted-foreground text-xs sm:text-sm">Total Qty</p>
+                <p className="font-bold text-sm sm:text-base">{parsedTrades.reduce((sum, t) => sum + t.quantity, 0).toLocaleString()}</p>
               </div>
-              <div className="bg-muted/50 rounded-lg p-3">
-                <p className="text-muted-foreground">Total Value</p>
-                <p className="font-bold">৳{parsedTrades.reduce((sum, t) => sum + t.value, 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+              <div className="bg-muted/50 rounded-lg p-2 sm:p-3">
+                <p className="text-muted-foreground text-xs sm:text-sm">Total Value</p>
+                <p className="font-bold text-sm sm:text-base">৳{parsedTrades.reduce((sum, t) => sum + t.value, 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
               </div>
-              <div className="bg-green-500/10 rounded-lg p-3">
-                <p className="text-muted-foreground">Buy Trades</p>
-                <p className="font-bold text-green-600">{parsedTrades.filter(t => t.side === "BUY").length.toLocaleString()}</p>
+              <div className="bg-green-500/10 rounded-lg p-2 sm:p-3">
+                <p className="text-muted-foreground text-xs sm:text-sm">Buy Trades</p>
+                <p className="font-bold text-green-600 text-sm sm:text-base">{parsedTrades.filter(t => t.side === "BUY").length.toLocaleString()}</p>
               </div>
-              <div className="bg-red-500/10 rounded-lg p-3">
-                <p className="text-muted-foreground">Sell Trades</p>
-                <p className="font-bold text-red-600">{parsedTrades.filter(t => t.side === "SELL").length.toLocaleString()}</p>
+              <div className="bg-red-500/10 rounded-lg p-2 sm:p-3">
+                <p className="text-muted-foreground text-xs sm:text-sm">Sell Trades</p>
+                <p className="font-bold text-red-600 text-sm sm:text-base">{parsedTrades.filter(t => t.side === "SELL").length.toLocaleString()}</p>
               </div>
             </div>
 
             {/* Replace Existing Option - Exchange Specific */}
             {existingTradeCount > 0 && (
               <Card className={replaceExisting ? "border-destructive/50 bg-destructive/5" : ""}>
-                <CardContent className="pt-4 space-y-3">
+                <CardContent className="pt-3 sm:pt-4 space-y-2 sm:space-y-3">
                   <div className="flex items-start space-x-3">
                     <Checkbox 
                       id="replace-existing-trades" 
@@ -996,28 +996,28 @@ export function TradeImportDialog({
               <p className="text-lg font-medium">Import Complete</p>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-muted/50 rounded-lg p-4 text-center">
-                <p className="text-2xl font-bold">{importSummary.total.toLocaleString()}</p>
-                <p className="text-sm text-muted-foreground">Total Records</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+              <div className="bg-muted/50 rounded-lg p-3 sm:p-4 text-center">
+                <p className="text-xl sm:text-2xl font-bold">{importSummary.total.toLocaleString()}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">Total Records</p>
               </div>
-              <div className="bg-green-500/10 rounded-lg p-4 text-center">
-                <p className="text-2xl font-bold text-green-600">
+              <div className="bg-green-500/10 rounded-lg p-3 sm:p-4 text-center">
+                <p className="text-xl sm:text-2xl font-bold text-green-600">
                   {importSummary.imported.toLocaleString()}
                 </p>
-                <p className="text-sm text-muted-foreground">Imported</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">Imported</p>
               </div>
-              <div className="bg-destructive/10 rounded-lg p-4 text-center">
-                <p className="text-2xl font-bold text-destructive">
+              <div className="bg-destructive/10 rounded-lg p-3 sm:p-4 text-center">
+                <p className="text-xl sm:text-2xl font-bold text-destructive">
                   {importSummary.errors}
                 </p>
-                <p className="text-sm text-muted-foreground">Errors</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">Errors</p>
               </div>
             </div>
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="gap-2 flex-col-reverse sm:flex-row">
           {step === "upload" && (
             <Button variant="outline" onClick={handleClose}>
               Cancel
