@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ImportBalancesRawDialog } from "@/components/admin/ImportBalancesRawDialog";
+
 import { CopyBalancesDialog } from "@/components/admin/CopyBalancesDialog";
 import { ImportAdminBalanceDialog } from "@/components/admin/ImportAdminBalanceDialog";
 import { Calendar } from "@/components/ui/calendar";
@@ -579,7 +579,6 @@ const AdminBalancesPage = () => {
               availableDates={availableDates || []} 
               onCopyComplete={handleImportComplete} 
             />
-            <ImportBalancesRawDialog onImportComplete={handleImportComplete} />
           </div>
         </div>
 
