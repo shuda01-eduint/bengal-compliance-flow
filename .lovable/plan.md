@@ -1,82 +1,54 @@
 
 
-# Fix Admin Balance Import & Add to EOD Page
+# Simplify Import Baseline Balances Section
 
-## Problem Summary
+## Overview
 
-The Admin Balance import is failing with:
+Remove the redundant import dialogs from the EOD page's "Import Baseline Balances" section, keeping only:
+1. **Import Admin Balance Baseline** - for initial baseline where opening equals closing
+2. **Copy to Date** - to copy balances forward to new dates
+
+## Changes Required
+
+### File: `src/pages/EodPage.tsx`
+
+**1. Remove unused imports (lines 21, 23)**
+- Remove: `ImportBalancesRawDialog` import
+- Remove: `ImportOpeningBalancesDialog` import  
+- Remove: `FileSpreadsheet` and `Upload` icons (if no longer used elsewhere)
+
+**2. Remove state and useEffect for availableBalanceDates (lines 119-136)**
+- Since `ImportBalancesRawDialog` is being removed, the `availableBalanceDates` state and the `useEffect` that fetches them may be simplified or adjusted based on whether `CopyBalancesDialog` still needs them
+
+**3. Simplify the Baseline Balances Card section (lines 471-519)**
+
+Current structure with 4 buttons:
+```jsx
+<ImportAdminBalanceDialog />
+<ImportBalancesRawDialog />      // REMOVE
+<CopyBalancesDialog />
+<ImportOpeningBalancesDialog />  // REMOVE
 ```
-date/time field value out of range: "01132620"
+
+New structure with 2 buttons:
+```jsx
+<ImportAdminBalanceDialog />
+<CopyBalancesDialog />
 ```
 
-This is caused by **corrupted data in the database**, not frontend date formatting. The `trade_history` table contains 23,737 rows with `trade_date='01132620'` (invalid format: MMDDYYYY without separators) instead of the correct `'20260113'` (YYYYMMDD). These rows are duplicates of existing correct records (verified by matching `exec_id`).
+## Summary of Removals
 
-When the SQL functions `get_admin_balances_enriched` and `get_admin_balances_summary` execute `trade_date::date`, PostgreSQL cannot parse the malformed string.
+| Item | Action |
+|------|--------|
+| `ImportBalancesRawDialog` import | Remove |
+| `ImportOpeningBalancesDialog` import | Remove |
+| `<ImportBalancesRawDialog />` component usage | Remove |
+| `<ImportOpeningBalancesDialog />` component usage | Remove |
+| Unused icon imports (`FileSpreadsheet`, `Upload`) | Remove if not used elsewhere |
 
----
+## Result
 
-## Solution Overview
-
-### Part 1: Delete Corrupted Data (Database Fix)
-
-Execute a DELETE statement to remove the 23,737 bad rows:
-
-```sql
-DELETE FROM trade_history WHERE trade_date = '01132620';
-```
-
-This is safe because:
-- All rows with `trade_date='01132620'` have matching `exec_id` values in rows with `trade_date='20260113'`
-- They are duplicates created by a previous import with incorrect date formatting
-
-### Part 2: Add Admin Balance Import to EOD Page
-
-Add the `ImportAdminBalanceDialog`, `ImportBalancesRawDialog`, and `CopyBalancesDialog` components to the EOD page, creating a new "Baseline Balances" section.
-
----
-
-## Implementation Details
-
-### Step 1: Delete Corrupted Data
-Run migration to delete the malformed trade_date records:
-- Target: `trade_history` table
-- Condition: `trade_date = '01132620'`
-- Records affected: 23,737 duplicate rows
-
-### Step 2: Update EOD Page
-Add a new "Import Baseline Balances" section with:
-- `ImportAdminBalanceDialog` - Full admin balance import with investor/holdings updates
-- `ImportBalancesRawDialog` - Raw balance data import
-- `CopyBalancesDialog` - Copy balances between dates
-- `ImportOpeningBalancesDialog` - Simple opening balance import for EOD chain
-
-### Step 3: Update Imports in EOD Page
-File: `src/pages/EodPage.tsx`
-- Add imports for the balance import dialogs
-- Add state for the dialog open states
-- Add a new Card/section with "Import Baseline Balances" header
-- Place buttons to trigger each dialog
-
-### Step 4: Keep Existing Admin Balances Page Unchanged
-The `/admin/balances` page will retain its import buttons as-is, maintaining backward compatibility.
-
----
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| (Database) | DELETE statement to remove 23,737 rows where `trade_date='01132620'` |
-| `src/pages/EodPage.tsx` | Add import dialogs for baseline balances, add UI section |
-
----
-
-## Testing Checklist
-After implementation:
-1. Navigate to `/admin/balances` 
-2. Select January 12, 2026
-3. Verify the page loads without the date parsing error
-4. Navigate to `/eod`
-5. Verify the new "Import Baseline Balances" section appears
-6. Test each import dialog opens and functions correctly
+The "Import Baseline Balances" section will be cleaner with just two focused actions:
+- **Import Admin Balance Baseline** (yellow button) - For establishing the initial baseline
+- **Copy to Date** (dark button) - For copying existing balances forward
 
