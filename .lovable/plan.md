@@ -1,103 +1,127 @@
 
-
-# Fix Commission Calculation in run_batch_eod
+# Fix Withdrawals Calculation in run_batch_eod
 
 ## Problem Identified
 
-The Accounting page shows "No commission data available" for Feb 01, 2026 because:
+The `run_batch_eod` function incorrectly calculates deposits and withdrawals by assuming:
+- **Deposits** = positive amounts
+- **Withdrawals** = negative amounts
 
-| Issue | Current State | Expected |
-|-------|--------------|----------|
-| `trade_file.commission` column | Always 0 (source files don't contain commission) | N/A |
-| `eod_ledger_snapshots.total_commission` | 0 for all 32,846 investors | Should be ~6.7M BDT |
-| `run_batch_eod` logic | Reads commission from file: `SUM(commission)` | Should calculate from investor rates |
+But the `cash_ledger_txn` table stores ALL amounts as **positive values**, using the `type` column to distinguish between `DEPOSIT` and `WITHDRAW`.
 
-The `process_staged_trades` function correctly calculates commission, but `run_batch_eod` (which is used for batch EOD processing) does not - it simply reads the zeroed `commission` column from `trade_file`.
+| Current Data in cash_ledger_txn | |
+|--------------------------------|---|
+| DEPOSIT records | 201 rows, total: 338,239,927.57 BDT |
+| WITHDRAW records | 167 rows, total: 168,795,365.17 BDT |
+| All amounts | Positive values |
 
-## Root Cause
-
-In `run_batch_eod`, the `today_trades` CTE uses:
+The current SQL logic:
 ```sql
-SUM(COALESCE(commission, 0)) as total_commission
-FROM trade_file
+-- WRONG: Checking amount sign
+SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as deposits
+SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as withdrawals
 ```
 
-This reads commission from the file, which is always 0.
+Should be:
+```sql
+-- CORRECT: Checking type column
+SUM(CASE WHEN type = 'DEPOSIT' THEN amount ELSE 0 END) as deposits
+SUM(CASE WHEN type = 'WITHDRAW' THEN amount ELSE 0 END) as withdrawals
+```
+
+---
 
 ## Solution
 
-Update the `run_batch_eod` function to calculate commission using the investor's `brokerage_commission` rate with the same normalization logic used in `process_staged_trades`:
+Update the `run_batch_eod` function to use the `type` column for deposit/withdrawal classification in **two places**:
 
+### 1. Summary Totals Calculation (lines 62-67)
+
+**Before:**
 ```sql
--- Rate normalization:
--- >= 0.1: divide by 100 (e.g., 0.4 -> 0.004)
--- < 0.1 and > 0: use directly (e.g., 0.004 -> 0.004)
--- NULL: default to 0.004 (0.4%)
+SELECT 
+  COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0)
+INTO v_total_deposits, v_total_withdrawals
+FROM cash_ledger_txn
+WHERE txn_date = p_eod_date;
 ```
 
-## Implementation
-
-### Database Migration
-
-Update the `today_trades` CTE in `run_batch_eod`:
-
-**Before (lines 77-87):**
+**After:**
 ```sql
-today_trades AS MATERIALIZED (
+SELECT 
+  COALESCE(SUM(CASE WHEN UPPER(type) = 'DEPOSIT' THEN amount ELSE 0 END), 0),
+  COALESCE(SUM(CASE WHEN UPPER(type) = 'WITHDRAW' THEN amount ELSE 0 END), 0)
+INTO v_total_deposits, v_total_withdrawals
+FROM cash_ledger_txn
+WHERE txn_date = p_eod_date;
+```
+
+### 2. today_cash CTE (lines 97-105)
+
+**Before:**
+```sql
+today_cash AS MATERIALIZED (
   SELECT
     investor_code,
-    SUM(CASE WHEN UPPER(side) = 'SELL' THEN COALESCE(qty * price, 0) ELSE 0 END) as gross_sell,
-    SUM(CASE WHEN UPPER(side) = 'BUY' THEN COALESCE(qty * price, 0) ELSE 0 END) as gross_buy,
-    SUM(COALESCE(commission, 0)) as total_commission
-  FROM trade_file
-  WHERE trade_date = p_eod_date
-    AND investor_code IS NOT NULL
+    COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as deposits,
+    COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as withdrawals
+  FROM cash_ledger_txn
+  WHERE txn_date = p_eod_date
   GROUP BY investor_code
 )
 ```
 
 **After:**
 ```sql
-today_trades AS MATERIALIZED (
+today_cash AS MATERIALIZED (
   SELECT
-    tf.investor_code,
-    SUM(CASE WHEN UPPER(tf.side) = 'SELL' THEN COALESCE(tf.qty * tf.price, 0) ELSE 0 END) as gross_sell,
-    SUM(CASE WHEN UPPER(tf.side) = 'BUY' THEN COALESCE(tf.qty * tf.price, 0) ELSE 0 END) as gross_buy,
-    -- Calculate commission from investor's brokerage_commission rate
-    SUM(
-      COALESCE(tf.qty * tf.price, 0) *
-      CASE
-        WHEN i.brokerage_commission >= 0.1 THEN i.brokerage_commission / 100
-        WHEN i.brokerage_commission < 0.1 AND i.brokerage_commission > 0 THEN i.brokerage_commission
-        ELSE 0.004
-      END
-    ) as total_commission
-  FROM trade_file tf
-  LEFT JOIN investors i ON tf.investor_code = i.investor_code
-  WHERE tf.trade_date = p_eod_date
-    AND tf.investor_code IS NOT NULL
-  GROUP BY tf.investor_code
+    investor_code,
+    COALESCE(SUM(CASE WHEN UPPER(type) = 'DEPOSIT' THEN amount ELSE 0 END), 0) as deposits,
+    COALESCE(SUM(CASE WHEN UPPER(type) = 'WITHDRAW' THEN amount ELSE 0 END), 0) as withdrawals
+  FROM cash_ledger_txn
+  WHERE txn_date = p_eod_date
+  GROUP BY investor_code
 )
 ```
+
+---
 
 ## Expected Results After Fix
 
 | Metric | Current | Expected |
 |--------|---------|----------|
-| Total Commission (Feb 01) | 0 | ~6.75M BDT (0.4% of ~1.69B turnover) |
-| Commission per investor | 0 | Varies by rate (0.2% - 0.5%) |
-| Accounting page commission chart | "No data" | Pie chart with department breakdown |
+| Total Deposits | 0 | 338,239,927.57 BDT |
+| Total Withdrawals | 0 | 168,795,365.17 BDT |
+| Net Cash Flow | 0 | +169,444,562.40 BDT |
+| EOD Summary Cards | Shows 0 for both | Shows correct values |
+| eod_run_history record | zeros | populated correctly |
+
+---
+
+## Implementation
+
+Create a database migration to update the `run_batch_eod` function with the corrected deposit/withdrawal logic.
+
+---
 
 ## Verification Steps
 
-1. After migration, re-run EOD for Feb 01, 2026
-2. Check `eod_ledger_snapshots` for non-zero `total_commission` values
-3. Verify Accounting page shows commission data in the pie chart
-4. Confirm `eod_run_history.total_commission` is populated
+1. Apply the migration
+2. Re-run EOD for Feb 01, 2026 (single date mode, not skip existing)
+3. Verify the EOD Summary cards show:
+   - Deposits: ~338.2M BDT
+   - Withdrawals: ~168.8M BDT  
+   - Net Flow: +169.4M BDT
+4. Check `eod_run_history` table for correct totals
 
-## Files Changed
+---
 
-| File | Change |
+## Technical Details
+
+| Item | Change |
 |------|--------|
-| New migration | Update `run_batch_eod` function with commission calculation |
-
+| Database function | `public.run_batch_eod` |
+| Migration file | New SQL migration |
+| Logic change | Use `type` column instead of amount sign |
+| Affected tables | `cash_ledger_txn` (read), `eod_run_history` (write), `eod_ledger_snapshots` (write) |
