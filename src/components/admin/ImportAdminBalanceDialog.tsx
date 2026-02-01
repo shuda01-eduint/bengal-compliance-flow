@@ -593,6 +593,93 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         }
       }
 
+      // STEP 6: Sync to balances_raw for Admin Balances page visibility
+      setProgressStage("Syncing to Admin Balances view...");
+      
+      // Clear existing balances_raw for this date
+      const { error: balancesRawClearError } = await supabase
+        .from("balances_raw")
+        .delete()
+        .eq("as_of_date", dateStr);
+      
+      if (balancesRawClearError) {
+        importResults.errors.push(`Failed to clear balances_raw: ${balancesRawClearError.message}`);
+      }
+
+      // Prepare balance rows - one row per investor/instrument combination
+      const balanceRows: {
+        as_of_date: string;
+        investor_code: string;
+        instrument: string | null;
+        total_stock: number | null;
+        saleable: number | null;
+        avg_cost: number | null;
+        total_cost: number | null;
+        total_mv: number | null;
+        ledger_balance: number;
+        rm_email: string | null;
+        rm_name: string | null;
+        rm_id: string | null;
+      }[] = [];
+      
+      // For investors with holdings, create rows per instrument
+      const holdingsRows = parsedData.filter(item => 
+        item.instrument && item.instrument.trim() !== '' && item.total_stock !== undefined
+      );
+      
+      for (const item of holdingsRows) {
+        const investorInfo = uniqueInvestors.get(item.investor_code);
+        balanceRows.push({
+          as_of_date: dateStr,
+          investor_code: item.investor_code,
+          instrument: item.instrument || null,
+          total_stock: item.total_stock || null,
+          saleable: item.saleable || null,
+          avg_cost: item.avg_cost || null,
+          total_cost: item.total_cost || null,
+          total_mv: item.market_value || null,
+          ledger_balance: investorInfo?.ledger_balance || 0,
+          rm_email: investorInfo?.rm_email || null,
+          rm_name: investorInfo?.rm_name || null,
+          rm_id: investorInfo?.rm_email || null, // Use rm_email as rm_id for now
+        });
+      }
+      
+      // For investors without holdings, create a single row with null instrument
+      const investorsWithHoldings = new Set(holdingsRows.map(h => h.investor_code));
+      for (const [code, item] of uniqueInvestors.entries()) {
+        if (!investorsWithHoldings.has(code)) {
+          balanceRows.push({
+            as_of_date: dateStr,
+            investor_code: code,
+            instrument: null,
+            total_stock: null,
+            saleable: null,
+            avg_cost: null,
+            total_cost: null,
+            total_mv: null,
+            ledger_balance: item.ledger_balance,
+            rm_email: item.rm_email || null,
+            rm_name: item.rm_name || null,
+            rm_id: item.rm_email || null,
+          });
+        }
+      }
+
+      // Batch insert to balances_raw
+      const balancesRawBatchSize = 500;
+      for (let i = 0; i < balanceRows.length; i += balancesRawBatchSize) {
+        const batch = balanceRows.slice(i, i + balancesRawBatchSize);
+        const { error: insertError } = await supabase.from("balances_raw").insert(batch);
+        
+        if (insertError) {
+          console.error("balances_raw insert error:", insertError);
+          importResults.errors.push(`balances_raw batch ${Math.floor(i / balancesRawBatchSize) + 1}: ${insertError.message}`);
+        }
+      }
+      
+      console.log(`Synced ${balanceRows.length} rows to balances_raw for ${dateStr}`);
+
       setProgress(100);
       setProgressStage("Complete!");
       setResults(importResults);
