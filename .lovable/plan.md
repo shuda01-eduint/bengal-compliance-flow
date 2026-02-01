@@ -1,82 +1,123 @@
 
+# Add Separate Import Buttons for DSE, CSE, and Deposits
 
-# Fix: Doubled EOD Metrics from Duplicate Trade Imports
-
-## Problem Diagnosis
-February 1st `trade_file` staging data contains **69,329 records but only 21,626 unique trades** — a ~3.2x duplication. The processing function is mathematically correct, but the source data is bloated. The "Clear Selected" button only clears EOD results, not the staging data that feeds them.
-
-## Solution Overview
-1. **Extend the clear function** to also delete staging data (`trade_file`, `cash_ledger_txn`) for the selected date range
-2. **Provide a deduplication query** to fix the current Feb 1 data without requiring a full re-import
+## Overview
+Replace the single "Import Trades" button with two separate buttons ("Import DSE Trades" and "Import CSE Trades") and keep the existing "Import Deposits / Withdrawals" button. Wire these to new backend edge functions that handle the import logic server-side.
 
 ---
 
-## Technical Changes
+## Current State
+- Single `TradeImportDialog` handles both DSE XML and CSE TXT files client-side
+- `DepositsImportDialog` handles deposits/withdrawals client-side  
+- No edge functions exist for trade imports
 
-### Change 1: Update `clear_eod_by_date_range` Function
+## Changes Required
 
-The current function only clears output tables. It will be updated to also clear staging tables when EOD data is deleted:
+### 1. Create Three New Edge Functions
 
-| Current Behavior | New Behavior |
-|-----------------|--------------|
-| Deletes `eod_ledger_snapshots` | Deletes `eod_ledger_snapshots` |
-| Deletes `eod_run_history` | Deletes `eod_run_history` |
-| — | Deletes `eod_instrument_position` |
-| — | Deletes `trade_file` for the date range |
-| — | Deletes `cash_ledger_txn` for the date range |
+**`supabase/functions/import-dse-trades/index.ts`**
+- Accepts: `{ trade_date: string, xml_content: string, replace_existing?: boolean, run_cse_too?: boolean }`
+- Parses DSE XML format (Excel-style Row/Cell or Detail attributes)
+- Inserts into `trade_file` table with `exchange_code = 'DSE'`
+- If `replace_existing`, deletes existing DSE records for the date first
+- If `run_cse_too`, can optionally trigger CSE import as well
+- Returns: `{ success, trade_count, gross_buy, gross_sell }`
 
-This ensures that after "Clear Selected", re-importing trades will start fresh.
+**`supabase/functions/import-cse-trades/index.ts`**  
+- Accepts: `{ trade_date: string, txt_content: string, replace_existing?: boolean }`
+- Parses CSE pipe-delimited TXT format
+- Inserts into `trade_file` table with exchange_code from terminal (DHK01, CTG01, etc.)
+- If `replace_existing`, deletes existing CSE records for the date first
+- Returns: `{ success, trade_count, gross_buy, gross_sell }`
 
-### Change 2: One-Time Deduplication Query
+**`supabase/functions/import-deposits-withdrawals/index.ts`**
+- Accepts: `{ txn_date: string, records: Array<{investor_code, type, amount}>, replace_existing?: boolean }`
+- Inserts into `cash_ledger_txn` table
+- If `replace_existing`, deletes existing records for the date first
+- Returns: `{ success, deposit_count, withdrawal_count, total_deposits, total_withdrawals }`
 
-To fix the current bloated Feb 1 data without re-importing, a deduplication query will be provided that:
-1. Identifies truly unique trades using a composite key (investor, instrument, side, qty, price, settlement_date, exchange_code)
-2. Keeps only one copy of each unique trade
-3. Deletes the duplicates (~47,000 excess records)
+### 2. Update EodActionButtons Component
 
-```text
-Deduplication Strategy:
-┌─────────────────────────────────────────────────────────────┐
-│  69,329 total  →  Delete 47,703 duplicates  →  21,626 kept │
-└─────────────────────────────────────────────────────────────┘
+**File: `src/components/eod/EodActionButtons.tsx`**
+
+Replace single "Import Trades" button with two buttons:
+- "Import DSE Trades" - triggers DSE XML import dialog
+- "Import CSE Trades" - triggers CSE TXT import dialog
+- Keep "Import Deposits/Withdrawals" as-is
+
+Add new props:
+```typescript
+onImportDseTrades: () => void;
+onImportCseTrades: () => void;
 ```
 
+Remove old prop:
+```typescript
+// Remove: onImportTrades: () => void;
+```
+
+### 3. Create Separate Import Dialogs
+
+**`src/components/eod/DseTradeImportDialog.tsx`**
+- File picker for XML files only
+- Preview parsed trades before import
+- "Replace existing" checkbox
+- Calls edge function `import-dse-trades`
+
+**`src/components/eod/CseTradeImportDialog.tsx`**
+- File picker for TXT files only  
+- Preview parsed trades before import
+- "Replace existing" checkbox
+- Calls edge function `import-cse-trades`
+
+### 4. Update EodPage
+
+**File: `src/pages/EodPage.tsx`**
+
+- Add state for both new dialogs
+- Wire up handlers to call appropriate edge functions
+- Keep deposits dialog as-is
+
 ---
 
-## Implementation Steps
+## File Summary
 
-### Step 1: Update Database Function
-Create a migration to update `clear_eod_by_date_range`:
-- Add deletion of `eod_instrument_position` for the date range
-- Add deletion of `trade_file` for the date range  
-- Add deletion of `cash_ledger_txn` for the date range
-- Return counts of all deleted records in the response
-
-### Step 2: Run Deduplication for Feb 1
-Execute a SQL script to remove duplicate trades from `trade_file` for 2026-02-01 while preserving one copy of each unique trade.
-
-### Step 3: Re-process EOD
-After deduplication, re-run "Process Staged Trades" for Feb 1. Expected corrected metrics:
-- Trade count: ~21,626 (down from 69,329)
-- Gross Buy: ~৳1.4B (down from ~৳4.5B)
-- Gross Sell: ~৳1.3B (down from ~৳4.1B)
-- Commission: ~৳4-6M (calculated from corrected trades)
-
----
-
-## Files Modified
-
-| File | Change |
+| File | Action |
 |------|--------|
-| Database Migration | Update `clear_eod_by_date_range` to include staging tables |
-| Database (data) | Deduplication query run once against `trade_file` |
+| `supabase/functions/import-dse-trades/index.ts` | Create new |
+| `supabase/functions/import-cse-trades/index.ts` | Create new |
+| `supabase/functions/import-deposits-withdrawals/index.ts` | Create new |
+| `src/components/eod/DseTradeImportDialog.tsx` | Create new |
+| `src/components/eod/CseTradeImportDialog.tsx` | Create new |
+| `src/components/eod/EodActionButtons.tsx` | Modify |
+| `src/pages/EodPage.tsx` | Modify |
+| `src/components/eod/TradeImportDialog.tsx` | Keep (can remove later) |
 
 ---
 
-## Workflow After Implementation
+## Technical Notes
 
-1. Click "Clear Selected" for a date → Clears ALL data (results + staging)
-2. Re-import trades → Fresh DSE/CSE files
-3. Import deposits/withdrawals → Fresh data
-4. Process Staged Trades → Accurate metrics
+### Edge Function API Signatures
+```
+POST /functions/v1/import-dse-trades
+Body: { trade_date, xml_content, replace_existing?, run_cse_too? }
 
+POST /functions/v1/import-cse-trades  
+Body: { trade_date, txt_content, replace_existing? }
+
+POST /functions/v1/import-deposits-withdrawals
+Body: { txn_date, records, replace_existing? }
+```
+
+### Security
+- All edge functions require JWT authentication
+- Admin role check before allowing imports
+- Input validation using Zod schemas
+- String sanitization to prevent formula injection
+
+### Data Flow
+1. User selects file in dialog
+2. File is read as text in browser
+3. Content sent to edge function
+4. Edge function parses, validates, and inserts
+5. Result returned to UI for display
