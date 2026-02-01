@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, Users, FileText, AlertTriangle, Percent, DollarSign, BarChart3, Building2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Users, FileText, AlertTriangle, Percent, DollarSign, BarChart3, Building2, ArrowUpDown, ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface EodSummaryCardsProps {
@@ -57,6 +57,8 @@ export function EodSummaryCards({
     return value.toLocaleString();
   };
 
+  const netCashFlow = totalDeposits - totalWithdrawals;
+
   const tradingCards = [
     {
       title: "Total Trades",
@@ -88,19 +90,14 @@ export function EodSummaryCards({
       icon: TrendingUp,
       color: "text-primary",
     },
-    {
-      title: "Deposits",
-      value: `৳${formatCurrency(totalDeposits)}`,
-      icon: TrendingUp,
-      color: "text-green-600",
-    },
-    {
-      title: "Withdrawals",
-      value: `৳${formatCurrency(totalWithdrawals)}`,
-      icon: TrendingDown,
-      color: "text-red-600",
-    },
   ];
+
+  // Cash Flow Card - combines deposits and withdrawals into one modern card
+  const cashFlowCard = {
+    deposits: totalDeposits,
+    withdrawals: totalWithdrawals,
+    netFlow: netCashFlow,
+  };
 
   const marginCards = [
     {
@@ -145,8 +142,8 @@ export function EodSummaryCards({
     <div className="space-y-4">
       <h3 className="text-lg font-semibold">EOD Summary</h3>
       
-      {/* Trading Cards */}
-      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+      {/* Trading Cards - 5 cards in a row */}
+      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
         {tradingCards.map((card) => (
           <Card key={card.title}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -162,6 +159,61 @@ export function EodSummaryCards({
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      {/* Cash Flow Card - Modern combined deposits/withdrawals */}
+      <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
+        <Card className="bg-gradient-to-br from-card to-muted/30 border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <ArrowUpDown className="h-4 w-4" />
+              Cash Flow Summary
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4">
+              {/* Deposits */}
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <ArrowUpRight className="h-3 w-3 text-green-500" />
+                  Deposits
+                </div>
+                <div className="text-xl font-bold text-green-600">
+                  ৳{formatCurrency(cashFlowCard.deposits)}
+                </div>
+              </div>
+              
+              {/* Withdrawals */}
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <ArrowDownRight className="h-3 w-3 text-red-500" />
+                  Withdrawals
+                </div>
+                <div className="text-xl font-bold text-red-600">
+                  ৳{formatCurrency(cashFlowCard.withdrawals)}
+                </div>
+              </div>
+              
+              {/* Net Flow */}
+              <div className="space-y-1 border-l pl-4">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {cashFlowCard.netFlow >= 0 ? (
+                    <TrendingUp className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3 text-red-500" />
+                  )}
+                  Net Flow
+                </div>
+                <div className={cn(
+                  "text-xl font-bold",
+                  cashFlowCard.netFlow >= 0 ? "text-green-600" : "text-red-600"
+                )}>
+                  {cashFlowCard.netFlow >= 0 ? "+" : "-"}৳{formatCurrency(Math.abs(cashFlowCard.netFlow))}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Margin & Position Cards */}
