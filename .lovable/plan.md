@@ -1,115 +1,157 @@
 
 
-# Fix Admin Balance Import - Data Not Visible After Import
+# Optimize TradeImportDialog for Mobile Responsiveness
 
-## Problem Identified
+## Current Issues
 
-Your import **WAS successful** - 23,961 records were imported for January 31, 2026. However, you cannot select January 31st in the date picker because:
+The `TradeImportDialog` has several mobile responsiveness problems:
 
-**The Admin Balances page queries a different table than where the import saves data.**
+| Issue | Location | Impact |
+|-------|----------|--------|
+| Fixed max-width `max-w-5xl` | Line 737 | Dialog overflows on small screens |
+| No mobile-specific padding | Line 737 | Content cramped on mobile |
+| 10-column preview table | Lines 846-858 | Horizontal scroll required, columns too small |
+| Fixed 4-column stats grid | Line 918 | Columns collapse poorly on mobile |
+| Upload area large padding `p-12` | Line 749 | Takes too much space on mobile |
+| Format info grid `grid-cols-2` | Lines 775, 792 | Too cramped on mobile |
+| Complete summary `grid-cols-3` | Line 999 | Poor stacking on mobile |
 
-| Component | Table Used | January 31st Data |
-|-----------|-----------|-------------------|
-| Import Admin Balance | `eod_investor_balance` | 23,961 records (imported) |
-| Admin Balances Page | `balances_raw` | No data (empty for Jan 31) |
+## Solution Overview
 
-The date picker only shows dates that exist in `balances_raw`, which currently has data only up to January 12, 2026.
+Apply responsive Tailwind classes to make the dialog work seamlessly on mobile while maintaining the desktop experience.
 
-## Solution
+## Implementation Details
 
-Update the `ImportAdminBalanceDialog` to also populate the `balances_raw` table, which the Admin Balances page uses for display. This ensures imported data is immediately visible.
+### 1. DialogContent - Responsive Container
 
-## Changes Required
-
-### File: `src/components/admin/ImportAdminBalanceDialog.tsx`
-
-Add a new step in the import process to insert holdings data into `balances_raw` table (in addition to `eod_investor_balance`):
-
-**Current Flow:**
-1. Clear existing `eod_investor_balance` for the date
-2. Clear future EOD data if requested
-3. Import to `eod_investor_balance`
-4. Update investors table with ledger balances
-5. Update commission rates
-6. Import holdings to `holdings` table
-
-**Updated Flow (add step 3b):**
-1. Clear existing `eod_investor_balance` for the date
-2. Clear future EOD data if requested
-3. Import to `eod_investor_balance`
-3b. **NEW: Import to `balances_raw` table** (for Admin Balances page visibility)
-4. Update investors table with ledger balances
-5. Update commission rates
-6. Import holdings to `holdings` table
-
-### New Step Implementation
-
-After importing to `eod_investor_balance`, add import to `balances_raw`:
-
-```typescript
-// STEP 3b: Import to balances_raw for Admin Balances page visibility
-setProgressStage("Syncing to balances view...");
-
-// First clear existing balances_raw for this date
-await supabase.from("balances_raw").delete().eq("as_of_date", dateStr);
-
-// Group holdings by investor to create balance rows
-const holdingsByInvestor = parsedData.reduce((acc, item) => {
-  if (!acc[item.investor_code]) acc[item.investor_code] = [];
-  if (item.instrument) acc[item.investor_code].push(item);
-  return acc;
-}, {});
-
-// Insert balance rows with holdings
-const balanceRows = [];
-for (const [code, holdings] of Object.entries(holdingsByInvestor)) {
-  const investorInfo = uniqueInvestors.get(code);
-  for (const holding of holdings) {
-    balanceRows.push({
-      as_of_date: dateStr,
-      investor_code: code,
-      instrument: holding.instrument,
-      total_stock: holding.total_stock,
-      saleable: holding.saleable,
-      avg_cost: holding.avg_cost,
-      total_cost: holding.total_cost,
-      total_mv: holding.market_value,
-      ledger_balance: investorInfo?.ledger_balance || 0,
-      rm_email: investorInfo?.rm_email || null,
-      rm_name: investorInfo?.rm_name || null,
-    });
-  }
-}
-
-// Batch insert to balances_raw
-for (let i = 0; i < balanceRows.length; i += batchSize) {
-  const batch = balanceRows.slice(i, i + batchSize);
-  await supabase.from("balances_raw").insert(batch);
-}
+**Current:**
+```tsx
+<DialogContent className="max-w-5xl max-h-[90vh]">
 ```
 
-### Additional: Query Cache Invalidation
-
-After import completes successfully, invalidate React Query cache to trigger immediate UI refresh:
-
-```typescript
-// In onSuccess callback
-queryClient.invalidateQueries({ queryKey: ['balances-raw-dates'] });
-queryClient.invalidateQueries({ queryKey: ['balances-enriched'] });
-queryClient.invalidateQueries({ queryKey: ['balances-summary'] });
+**Updated:**
+```tsx
+<DialogContent className="w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-4 sm:p-6">
 ```
 
-## Expected Result After Fix
+Changes:
+- Add `w-[95vw]` for proper mobile width
+- Add `overflow-hidden flex flex-col` for proper scroll containment
+- Reduce padding on mobile with `p-4 sm:p-6`
 
-- Import will populate both `eod_investor_balance` (for EOD processing) AND `balances_raw` (for Admin Balances display)
-- January 31st will appear in the date picker immediately after import
-- All 23,677 investors with their holdings will be visible on the Admin Balances page
+### 2. Upload Step - Mobile-Friendly Drop Zone
 
-## Summary
+**Current (Line 749):**
+```tsx
+<div className="border-2 border-dashed rounded-lg p-12 text-center...">
+```
 
-| Action | Purpose |
-|--------|---------|
-| Add `balances_raw` insert | Make imported data visible on Admin Balances page |
-| Clear existing date data | Prevent duplicates when re-importing |
-| Invalidate query cache | Refresh UI immediately without page reload |
+**Updated:**
+```tsx
+<div className="border-2 border-dashed rounded-lg p-6 sm:p-12 text-center...">
+```
+
+Also reduce icon size and text on mobile:
+```tsx
+<Upload className="h-8 w-8 sm:h-12 sm:w-12 mx-auto..." />
+<p className="text-base sm:text-lg font-medium">...</p>
+```
+
+### 3. Format Info Section - Stack on Mobile
+
+**Current (Lines 775, 792):**
+```tsx
+<div className="grid grid-cols-2 gap-2 mt-3...">
+```
+
+**Updated:**
+```tsx
+<div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3...">
+```
+
+### 4. Preview Table - Mobile Card View or Horizontal Scroll
+
+For the 10-column table (Lines 846-913), implement:
+- Wrap in horizontal scroll container
+- Hide less critical columns on mobile (Terminal, Time, Cat)
+- Reduce cell padding
+
+**Updated Table Header:**
+```tsx
+<TableHead className="w-[70px] hidden sm:table-cell">Terminal</TableHead>
+<TableHead>Client</TableHead>
+<TableHead>Security</TableHead>
+<TableHead>Side</TableHead>
+<TableHead className="text-right">Qty</TableHead>
+<TableHead className="text-right hidden sm:table-cell">Price</TableHead>
+<TableHead className="text-right">Value</TableHead>
+<TableHead className="hidden md:table-cell">Trade Date</TableHead>
+<TableHead className="hidden lg:table-cell">Time</TableHead>
+<TableHead className="hidden sm:table-cell">Cat</TableHead>
+```
+
+### 5. Summary Stats Grid - Responsive Layout
+
+**Current (Line 918):**
+```tsx
+<div className="grid grid-cols-4 gap-3 text-sm">
+```
+
+**Updated:**
+```tsx
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-sm">
+```
+
+### 6. Replace Existing Card - Mobile Spacing
+
+Ensure the card content uses responsive spacing:
+```tsx
+<CardContent className="pt-3 sm:pt-4 space-y-2 sm:space-y-3">
+```
+
+### 7. Complete Step - Summary Grid
+
+**Current (Line 999):**
+```tsx
+<div className="grid grid-cols-3 gap-4">
+```
+
+**Updated:**
+```tsx
+<div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+```
+
+### 8. Dialog Footer - Stack Buttons on Mobile
+
+The footer already uses `flex-col-reverse sm:flex-row` from the base component, but ensure buttons have proper spacing:
+```tsx
+<DialogFooter className="gap-2">
+```
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/components/eod/TradeImportDialog.tsx` | Apply all responsive classes |
+
+## Summary of Class Changes
+
+| Element | Before | After |
+|---------|--------|-------|
+| DialogContent | `max-w-5xl max-h-[90vh]` | `w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-4 sm:p-6` |
+| Upload zone | `p-12` | `p-6 sm:p-12` |
+| Upload icon | `h-12 w-12` | `h-8 w-8 sm:h-12 sm:w-12` |
+| Format grid | `grid-cols-2` | `grid-cols-1 sm:grid-cols-2` |
+| Stats grid | `grid-cols-4` | `grid-cols-2 sm:grid-cols-4` |
+| Complete grid | `grid-cols-3` | `grid-cols-1 sm:grid-cols-3` |
+| Table columns | All visible | Hide Terminal, Price, Time, Cat on mobile |
+
+## Expected Result
+
+- Dialog fits properly on mobile screens (320px - 767px)
+- Upload area is touch-friendly with adequate tap targets
+- Preview table shows essential columns with horizontal scroll for more
+- Summary stats stack in 2x2 grid on mobile
+- Buttons stack vertically on mobile for easy tapping
+- Content scrolls smoothly within the dialog
 
