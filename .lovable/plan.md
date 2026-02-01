@@ -1,143 +1,157 @@
 
 
-## Fix Accounting Page Not Showing Feb 1 Data
+## Simplify Accounting Page to Read from EOD Snapshots
 
-### Problem Summary
-When viewing Feb 1, 2026 on the Accounting page, the data grid shows zero rows even though:
-- EOD processing for Feb 1 completed successfully (32,099 snapshots created)
-- 34,665 trades exist in `trade_file` for Feb 1
-- 368 deposit/withdrawal transactions exist in `cash_ledger_txn` for Feb 1
+### Problem
+The Accounting page uses a complex `get_accounting_data_v3` RPC that recalculates data from multiple source tables (`trade_file`, `cash_ledger_txn`, `balances_raw`). This is redundant because the EOD process already calculates and stores all this data in `eod_ledger_snapshots`.
 
-### Root Cause Analysis
-The `get_accounting_data_v3` RPC function queries from the **wrong source tables**:
-
-| What Function Uses | What Has Feb 1 Data |
-|--------------------|---------------------|
-| `trade_history` (0 rows for Feb 1) | `trade_file` (34,665 rows) |
-| `deposits_withdrawals` (0 rows for Feb 1) | `cash_ledger_txn` (368 rows) |
-
-The function also applies a filter `_has_activity_filter = 'with_trades'` which returns 0 rows when no trades are found.
-
-Additionally, the function uses `balances_raw` for opening balances with `as_of_date = _opening_date`, but `balances_raw` only has a snapshot for Jan 31 - it should instead use `eod_ledger_snapshots` which has data for all processed dates.
+### Solution
+Replace the RPC-based approach with a direct query to `eod_ledger_snapshots` when EOD data exists for the selected date.
 
 ---
 
-## Solution: Update `get_accounting_data_v3` to use correct source tables
+## Benefits
 
-### Changes Required
+| Current Approach | New Approach |
+|-----------------|--------------|
+| Complex RPC with 5+ CTEs | Simple table query |
+| Recalculates everything | Reads pre-calculated data |
+| Can timeout on large datasets | Fast indexed lookup |
+| Requires maintaining RPC logic | Automatically uses EOD results |
+| May have calculation discrepancies | Always consistent with EOD |
 
-**Database Migration - Update `get_accounting_data_v3` function:**
+---
 
-1. **Replace `trade_history` with `trade_file`** in the `period_trades` CTE:
-   - Column mappings: `client_code` becomes `investor_code`, `value` becomes `qty * price`
-   - Use `trade_date` (DATE type) directly instead of YYYYMMDD string comparisons
+## Implementation Changes
 
-2. **Replace `deposits_withdrawals` with `cash_ledger_txn`** in the `period_tx` CTE:
-   - Column mappings: `transaction_type` becomes `type`, `transaction_date` becomes `txn_date`
+### File: `src/components/trade-history/AccountingTab.tsx`
 
-3. **Use `eod_ledger_snapshots` for opening balance** (if available for the date):
-   - Fall back to `balances_raw` only for historical dates before EOD processing started
+**1. Simplify Date Handling**
+- The Accounting page should work with a single date (the EOD date) instead of date ranges
+- Remove the complex "opening date" calculation - EOD snapshots already have opening_balance
 
-4. **Add fallback logic** to also check `trade_history` for backward compatibility with older date ranges
+**2. Replace RPC Query with Direct Table Query**
+```typescript
+// Current: Complex RPC with multiple fallbacks
+const { data } = await rpcWithRetry('get_accounting_data_v3', { ... });
 
-### Updated SQL Logic (Simplified)
+// New: Simple direct query to eod_ledger_snapshots
+const { data, error } = await supabase
+  .from('eod_ledger_snapshots')
+  .select('*')
+  .eq('eod_date', selectedDateStr)
+  .ilike('investor_code', `%${searchTerm}%`);
+```
 
-```sql
--- Opening balance from eod_ledger_snapshots (preferred) or balances_raw (fallback)
-opening_balances AS (
-  SELECT investor_code, closing_balance AS opening_balance
-  FROM eod_ledger_snapshots
-  WHERE eod_date = _opening_date
-  UNION ALL
-  SELECT investor_code, ledger_balance
-  FROM balances_raw
-  WHERE as_of_date = _opening_date
-    AND investor_code NOT IN (SELECT investor_code FROM eod_ledger_snapshots WHERE eod_date = _opening_date)
-),
+**3. Update Field Mappings**
+The snapshot table columns map directly to the UI:
 
--- Deposits/Withdrawals from cash_ledger_txn (preferred) or deposits_withdrawals (fallback)
-period_tx AS (
-  SELECT investor_code,
-    SUM(CASE WHEN UPPER(type) = 'DEPOSIT' THEN amount ELSE 0 END) AS deposits,
-    SUM(CASE WHEN UPPER(type) IN ('WITHDRAW','WITHDRAWAL') THEN amount ELSE 0 END) AS withdrawals
-  FROM cash_ledger_txn
-  WHERE txn_date > _opening_date AND txn_date <= _tx_date
-  UNION ALL
-  -- fallback to deposits_withdrawals for older data
-  ...
-),
+| UI Column | Snapshot Column |
+|-----------|-----------------|
+| Opening Bal | `opening_balance` |
+| Deposits | `total_deposits` |
+| Withdrawals | `total_withdrawals` |
+| Gross Buy | `gross_buy` |
+| Gross Sell | `gross_sell` |
+| Brokerage | `total_commission` |
+| Closing Balance | `closing_balance` |
 
--- Trades from trade_file (preferred) or trade_history (fallback)
-period_trades AS (
-  SELECT investor_code,
-    SUM(CASE WHEN UPPER(side) IN ('B','BUY') THEN qty * price ELSE 0 END) AS gross_buy,
-    SUM(CASE WHEN UPPER(side) IN ('S','SELL') THEN qty * price ELSE 0 END) AS gross_sell
-  FROM trade_file
-  WHERE trade_date > _opening_date AND trade_date <= _tx_date
-  UNION ALL
-  -- fallback to trade_history for older data
-  ...
-)
+**4. Add Fallback for Non-EOD Dates**
+- Check if EOD snapshot exists for selected date
+- If no snapshot exists, show a message: "No EOD data for this date. Run EOD processing first."
+- This prevents confusion about why data is missing
+
+**5. Handle Filtering**
+- Account type filter: Use `.eq('account_type', filter)` 
+- Activity filter: Use `.or('gross_buy.gt.0,gross_sell.gt.0,total_deposits.gt.0,total_withdrawals.gt.0')`
+- Search: Use `.or(investor_code.ilike.%search%,investor_name.ilike.%search%)`
+
+---
+
+## Query Structure
+
+```typescript
+const fetchAccountingData = async () => {
+  let query = supabase
+    .from('eod_ledger_snapshots')
+    .select(`
+      investor_code,
+      investor_name,
+      account_type,
+      rm_name,
+      department,
+      opening_balance,
+      total_deposits,
+      total_withdrawals,
+      gross_buy,
+      gross_sell,
+      total_commission,
+      closing_balance
+    `)
+    .eq('eod_date', selectedDateStr);
+
+  // Apply search filter
+  if (searchTerm) {
+    query = query.or(`investor_code.ilike.%${searchTerm}%,investor_name.ilike.%${searchTerm}%`);
+  }
+
+  // Apply account type filter
+  if (accountTypeFilter !== 'all') {
+    query = query.eq('account_type', accountTypeFilter);
+  }
+
+  // Apply activity filter
+  if (activityFilter === 'with_trades') {
+    query = query.or('gross_buy.gt.0,gross_sell.gt.0');
+  } else if (activityFilter === 'with_activity') {
+    query = query.or('gross_buy.gt.0,gross_sell.gt.0,total_deposits.gt.0,total_withdrawals.gt.0');
+  }
+
+  // Order and limit
+  query = query.order('investor_code').limit(1000);
+
+  const { data, error } = await query;
+  return data;
+};
 ```
 
 ---
 
-## Alternative Solution: Use `eod_ledger_snapshots` Directly
+## Summary Cards Update
 
-Since EOD processing already calculates all the values and stores them in `eod_ledger_snapshots`, the accounting page could query that table directly for the selected date:
+Update summary computation to use snapshot aggregates:
 
-```sql
-SELECT 
-  investor_code, investor_name, account_type, rm_name, department,
-  opening_balance, total_deposits, total_withdrawals,
-  gross_buy, gross_sell, total_commission AS brokerage,
-  closing_balance
-FROM eod_ledger_snapshots
-WHERE eod_date = _tx_date
+```typescript
+const summary = useMemo(() => ({
+  totalAccounts: data?.length || 0,
+  totalBuy: data?.reduce((sum, r) => sum + (r.gross_buy || 0), 0) || 0,
+  totalSell: data?.reduce((sum, r) => sum + (r.gross_sell || 0), 0) || 0,
+  totalCommission: data?.reduce((sum, r) => sum + (r.total_commission || 0), 0) || 0,
+  // ... other metrics
+}), [data]);
 ```
 
-This would be:
-- Much faster (no joins/aggregations needed)
-- Always consistent with EOD results
-- Simpler to maintain
+---
 
-**Trade-off:** Would only show data for dates that have EOD snapshots (no ad-hoc date ranges).
+## UI Changes
+
+**1. Simplify Date Picker**
+- Change from "From/To" date range to single "EOD Date" picker
+- Show available EOD dates or latest processed date
+
+**2. Add EOD Status Indicator**
+- Show if EOD has been run for selected date
+- Quick link to EOD page if not processed
+
+**3. Remove Unnecessary Complexity**
+- Remove the "opening date" logic (snapshots already have opening_balance)
+- Remove date range warnings (single date = no timeout risk)
 
 ---
 
-## Implementation Steps
+## Migration Notes
 
-1. **Create database migration** to update `get_accounting_data_v3`:
-   - Add `trade_file` as primary source for trades
-   - Add `cash_ledger_txn` as primary source for deposits/withdrawals
-   - Use `eod_ledger_snapshots` for opening balances
-   - Keep fallback to legacy tables for backward compatibility
-
-2. **Test with Feb 1 date** to verify data appears correctly
-
-3. **Validate commission values** appear in the Brokerage column
-
----
-
-## Technical Details
-
-### Current Function Issues
-- Uses `trade_history.client_code` - should use `trade_file.investor_code`
-- Uses `trade_history.value` - should use `trade_file.qty * trade_file.price`
-- Uses `deposits_withdrawals.transaction_date` - should use `cash_ledger_txn.txn_date`
-- Uses `deposits_withdrawals.transaction_type` (Deposit/Withdrawal) - should use `cash_ledger_txn.type` (DEPOSIT/WITHDRAW)
-- String date comparison `YYYYMMDD` format - `trade_file` uses native DATE type
-
-### Column Mapping Reference
-
-| Legacy Table | New Table | Legacy Column | New Column |
-|-------------|-----------|---------------|------------|
-| trade_history | trade_file | client_code | investor_code |
-| trade_history | trade_file | value | qty * price |
-| trade_history | trade_file | trade_date (text YYYYMMDD) | trade_date (DATE) |
-| trade_history | trade_file | brokerage_commission | commission |
-| deposits_withdrawals | cash_ledger_txn | transaction_date | txn_date |
-| deposits_withdrawals | cash_ledger_txn | transaction_type | type |
-| balances_raw | eod_ledger_snapshots | as_of_date | eod_date |
-| balances_raw | eod_ledger_snapshots | ledger_balance | closing_balance (for opening of next day) |
+- The existing RPC `get_accounting_data_v3` can be deprecated but kept for backward compatibility
+- The simpler approach is faster, more reliable, and always matches EOD results
+- Date ranges are no longer supported (trade-off: can only view EOD-processed dates)
 
