@@ -76,6 +76,7 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: 'total_withdrawals', label: 'Withdrawals', visible: true, align: 'right', colorClass: 'text-amber-400' },
   { id: 'gross_buy', label: 'Gross Buy', visible: true, align: 'right', colorClass: 'text-red-400' },
   { id: 'gross_sell', label: 'Gross Sell', visible: true, align: 'right', colorClass: 'text-green-400' },
+  { id: 'brokerage_amount', label: 'Brokerage', visible: true, align: 'right', colorClass: 'text-purple-400' },
   { id: 'final_balance', label: 'Closing Balance', visible: true, align: 'right', colorClass: 'text-blue-400' },
 ];
 
@@ -438,7 +439,7 @@ const AccountingTab = () => {
         net_sell: Number(row.gross_sell) || 0,
         adjusted_ledger: 0,
         accrued_interest: 0,
-        brokerage_amount: 0,
+        brokerage_amount: Number(row.brokerage) || 0,
         final_balance: Number(row.closing_balance ?? row.final_balance) || 0,
         receivable: 0,
         payable: 0,
