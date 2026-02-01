@@ -1,128 +1,79 @@
 
 
-## Plan: Prioritize `eod_investor_balance` Baseline in EOD Functions
+## Plan: Fix `process_staged_trades` to Record in `eod_run_history`
 
-### Problem Summary
+### Problem Analysis
 
-The current EOD functions (`run_batch_eod` and `process_staged_trades`) use the **previous day's closing balance from `eod_ledger_snapshots`** as the opening balance for the next day. However, when the snapshot chain is corrupted (as we found with investors 9000, 20337, 21878, 13839, etc.), this propagates errors forward.
+After thorough investigation, I found that:
 
-The `eod_investor_balance` table contains the **official imported baseline** (closing_ledger_balance) for a given date. This should be the authoritative source when available.
+1. **Feb 1 EOD processing completed successfully** - 32,099 snapshots were created with correct commission (5.55M BDT)
+2. **The baseline priority fix is working** - Opening balances now correctly use the Jan 31 baseline from `eod_investor_balance`
+3. **However, `process_staged_trades` does not record in `eod_run_history`** - This creates confusion because the EOD Log Table shows no record for Feb 1
 
-### Current Logic (Problematic)
+The user likely saw that:
+- `process_staged_trades` showed success toast
+- But the EOD Run History table showed no Feb 1 record
+- This appeared as an "error" or missing result
 
-```text
-Opening Balance = eod_ledger_snapshots.closing_balance (previous day)
-                  OR 0 if no snapshot exists
-```
+### Root Cause
 
-### Proposed Logic (Fixed)
+The `process_staged_trades` function was designed to only return results in its JSONB response without persisting an audit record. The `run_batch_eod` function does persist to `eod_run_history`.
 
-```text
-Opening Balance = eod_investor_balance.closing_ledger_balance (same date as previous day)
-                  OR eod_ledger_snapshots.closing_balance (previous day)
-                  OR investors.ledger_balance (original baseline)
-                  OR 0 if nothing exists
-```
+### Solution
 
-This creates a priority chain:
-1. **First**: Use official baseline from `eod_investor_balance` if one exists for the previous day
-2. **Second**: Fall back to the snapshot chain if no baseline exists
-3. **Third**: Use the investors table baseline
-4. **Fourth**: Default to 0 for new accounts
+Add an INSERT statement to `process_staged_trades` to record the run in `eod_run_history`, matching the pattern used by `run_batch_eod`.
 
 ---
 
 ### Technical Implementation
 
-**Migration SQL** - Update both EOD functions:
-
-#### 1. Update `run_batch_eod` Function
-
-Modify the `prior_eod` CTE to prioritize `eod_investor_balance`:
+**Database Migration** - Add history recording to `process_staged_trades`:
 
 ```sql
-prior_eod AS MATERIALIZED (
-  SELECT 
-    bi.investor_code,
-    COALESCE(
-      -- Priority 1: Official baseline from eod_investor_balance (previous day)
-      eib.closing_ledger_balance,
-      -- Priority 2: Prior snapshot chain
-      prev_snap.closing_balance,
-      -- Priority 3: Investors table baseline  
-      i.ledger_balance,
-      -- Priority 4: Default
-      0
-    ) AS closing_balance,
-    COALESCE(prev_snap.cumulative_interest, 0) AS cumulative_interest
-  FROM base_investors bi
-  LEFT JOIN investors i ON bi.investor_code = i.investor_code
-  LEFT JOIN eod_investor_balance eib 
-    ON bi.investor_code = eib.investor_code 
-    AND eib.trade_date = p_eod_date - INTERVAL '1 day'
-  LEFT JOIN LATERAL (
-    SELECT closing_balance, cumulative_interest
-    FROM eod_ledger_snapshots
-    WHERE investor_code = bi.investor_code 
-      AND eod_date < p_eod_date
-    ORDER BY eod_date DESC
-    LIMIT 1
-  ) prev_snap ON TRUE
+-- After line 303 (before RETURN), add:
+INSERT INTO eod_run_history (
+  run_date, 
+  run_at, 
+  run_by, 
+  run_by_email, 
+  clients_captured, 
+  total_ledger_balance,
+  trade_files_count, 
+  deposit_records_count, 
+  gross_buy, 
+  gross_sell,
+  total_commission, 
+  total_deposits, 
+  total_withdrawals, 
+  status,
+  notes
 )
+VALUES (
+  p_trade_date, 
+  now(), 
+  auth.uid(), 
+  (SELECT email FROM auth.users WHERE id = auth.uid()),
+  v_snapshots_created,
+  (SELECT COALESCE(SUM(closing_balance), 0) FROM eod_ledger_snapshots WHERE eod_date = p_trade_date),
+  v_trade_count,
+  v_deposit_count + v_withdrawal_count,
+  v_gross_buy,
+  v_gross_sell,
+  v_total_commission,
+  v_total_deposits,
+  v_total_withdrawals,
+  'completed',
+  'Processed via staged trades'
+);
 ```
 
-#### 2. Update `process_staged_trades` Function
+### Key Changes
 
-Same modification to `tmp_prior_eod` temp table:
-
-```sql
-CREATE TEMP TABLE tmp_prior_eod ON COMMIT DROP AS
-SELECT 
-  bi.investor_code,
-  COALESCE(
-    eib.closing_ledger_balance,
-    prev_snap.closing_balance,
-    i.ledger_balance,
-    0
-  ) AS closing_balance,
-  COALESCE(prev_snap.cumulative_interest, 0) AS cumulative_interest
-FROM tmp_base_investors bi
-LEFT JOIN investors i ON bi.investor_code = i.investor_code
-LEFT JOIN eod_investor_balance eib 
-  ON bi.investor_code = eib.investor_code 
-  AND eib.trade_date = p_trade_date - INTERVAL '1 day'
-LEFT JOIN LATERAL (
-  SELECT closing_balance, cumulative_interest
-  FROM eod_ledger_snapshots
-  WHERE investor_code = bi.investor_code 
-    AND eod_date < p_trade_date
-  ORDER BY eod_date DESC
-  LIMIT 1
-) prev_snap ON TRUE;
-```
-
----
-
-### Key Changes Summary
-
-| Aspect | Current | After Fix |
-|--------|---------|-----------|
-| Opening balance source | Snapshot chain only | Baseline first, then snapshot chain |
-| Corruption recovery | Propagates errors | Self-corrects from baseline |
-| Fallback chain | Snapshot -> 0 | Baseline -> Snapshot -> investors.ledger_balance -> 0 |
-
----
-
-### Testing After Implementation
-
-1. **Clear Feb 1 snapshots**: 
-   ```sql
-   DELETE FROM eod_ledger_snapshots WHERE eod_date = '2026-02-01';
-   ```
-
-2. **Re-run EOD for Feb 1** using the EOD page
-
-3. **Verify** the same 10 investors from the statement - they should now match because the function will use the Jan 31 baseline from `eod_investor_balance`
+| Aspect | Before | After |
+|--------|--------|-------|
+| Audit trail | No history record | Records in `eod_run_history` |
+| EOD Log Table | Shows blank for Feb 1 | Shows complete run details |
+| Consistency | Different behavior from `run_batch_eod` | Matches `run_batch_eod` pattern |
 
 ---
 
@@ -130,9 +81,36 @@ LEFT JOIN LATERAL (
 
 | File | Change |
 |------|--------|
-| New SQL Migration | Update `run_batch_eod` and `process_staged_trades` functions |
+| New SQL Migration | Add INSERT INTO `eod_run_history` in `process_staged_trades` function |
 
-### No Frontend Changes Required
+---
 
-The EOD page and UI remain unchanged - only the database function logic is being fixed.
+### Post-Implementation Steps
+
+1. Deploy the migration
+2. Manually insert a history record for the Feb 1 run that already completed:
+```sql
+INSERT INTO eod_run_history (
+  run_date, run_at, clients_captured, total_ledger_balance,
+  trade_files_count, gross_buy, gross_sell, total_commission,
+  total_deposits, total_withdrawals, status, notes
+)
+SELECT 
+  '2026-02-01',
+  '2026-02-01 20:07:27+00',
+  COUNT(*),
+  SUM(closing_balance),
+  (SELECT COUNT(*) FROM trade_file WHERE trade_date = '2026-02-01'),
+  SUM(gross_buy),
+  SUM(gross_sell),
+  SUM(total_commission),
+  SUM(total_deposits),
+  SUM(total_withdrawals),
+  'completed',
+  'Backfilled from existing snapshots'
+FROM eod_ledger_snapshots
+WHERE eod_date = '2026-02-01';
+```
+
+3. Verify Feb 1 now appears in the EOD Log Table
 
