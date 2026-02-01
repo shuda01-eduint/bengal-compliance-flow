@@ -11,7 +11,8 @@ import {
 } from "lucide-react";
 
 interface EodActionButtonsProps {
-  onImportTrades: () => void;
+  onImportDseTrades: () => void;
+  onImportCseTrades: () => void;
   onImportDeposits: () => void;
   onProcessStaged: () => void;
   onCalculateSettlements: () => void;
@@ -28,7 +29,8 @@ interface EodActionButtonsProps {
 }
 
 export function EodActionButtons({
-  onImportTrades,
+  onImportDseTrades,
+  onImportCseTrades,
   onImportDeposits,
   onProcessStaged,
   onCalculateSettlements,
@@ -47,11 +49,20 @@ export function EodActionButtons({
     <div className="flex flex-wrap gap-3">
       <Button
         variant="outline"
-        onClick={onImportTrades}
+        onClick={onImportDseTrades}
         disabled={disabled || isRunning}
       >
         <Upload className="mr-2 h-4 w-4" />
-        Import Trades
+        Import DSE Trades
+      </Button>
+
+      <Button
+        variant="outline"
+        onClick={onImportCseTrades}
+        disabled={disabled || isRunning}
+      >
+        <Upload className="mr-2 h-4 w-4" />
+        Import CSE Trades
       </Button>
 
       <Button
@@ -60,7 +71,7 @@ export function EodActionButtons({
         disabled={disabled || isRunning}
       >
         <Wallet className="mr-2 h-4 w-4" />
-        Import Deposits/Withdrawals
+        Import Deposits / Withdrawals
       </Button>
 
       <Button

@@ -15,7 +15,8 @@ import { EodActionButtons } from "@/components/eod/EodActionButtons";
 import { EodSummaryCards } from "@/components/eod/EodSummaryCards";
 import { EodLogTable } from "@/components/eod/EodLogTable";
 import { EodProgressBar } from "@/components/eod/EodProgressBar";
-import { TradeImportDialog } from "@/components/eod/TradeImportDialog";
+import { DseTradeImportDialog } from "@/components/eod/DseTradeImportDialog";
+import { CseTradeImportDialog } from "@/components/eod/CseTradeImportDialog";
 import { DepositsImportDialog } from "@/components/eod/DepositsImportDialog";
 import { SettlementCalculationDialog } from "@/components/eod/SettlementCalculationDialog";
 
@@ -84,7 +85,8 @@ export default function EodPage() {
   const queryClient = useQueryClient();
 
   // Import dialog state
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [dseImportDialogOpen, setDseImportDialogOpen] = useState(false);
+  const [cseImportDialogOpen, setCseImportDialogOpen] = useState(false);
   const [depositsDialogOpen, setDepositsDialogOpen] = useState(false);
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
   // Date selection
@@ -304,8 +306,12 @@ export default function EodPage() {
     }
   };
 
-  const handleImportTrades = () => {
-    setImportDialogOpen(true);
+  const handleImportDseTrades = () => {
+    setDseImportDialogOpen(true);
+  };
+
+  const handleImportCseTrades = () => {
+    setCseImportDialogOpen(true);
   };
 
   const handleImportDeposits = () => {
@@ -379,7 +385,8 @@ export default function EodPage() {
 
         {/* Action Buttons */}
         <EodActionButtons
-          onImportTrades={handleImportTrades}
+          onImportDseTrades={handleImportDseTrades}
+          onImportCseTrades={handleImportCseTrades}
           onImportDeposits={handleImportDeposits}
           onProcessStaged={handleProcessStaged}
           onCalculateSettlements={() => setSettlementDialogOpen(true)}
@@ -394,10 +401,19 @@ export default function EodPage() {
           hasDateSelected={hasDateSelected}
         />
 
-        {/* Trade Import Dialog */}
-        <TradeImportDialog
-          open={importDialogOpen}
-          onOpenChange={setImportDialogOpen}
+        {/* DSE Trade Import Dialog */}
+        <DseTradeImportDialog
+          open={dseImportDialogOpen}
+          onOpenChange={setDseImportDialogOpen}
+          selectedDate={selectedDate}
+          onImportComplete={() => queryClient.invalidateQueries({ queryKey: ["eod-run-history"] })}
+        />
+
+        {/* CSE Trade Import Dialog */}
+        <CseTradeImportDialog
+          open={cseImportDialogOpen}
+          onOpenChange={setCseImportDialogOpen}
+          selectedDate={selectedDate}
           onImportComplete={() => queryClient.invalidateQueries({ queryKey: ["eod-run-history"] })}
         />
 
