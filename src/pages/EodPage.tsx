@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { format, eachDayOfInterval } from "date-fns";
 import { rpcWithRetry, formatRpcError } from "@/lib/rpc-utils";
 import type { DateRange } from "react-day-picker";
+import { AlertCircle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import { EodDateSelector, type EodMode } from "@/components/eod/EodDateSelector";
 import { EodStatusDashboard } from "@/components/eod/EodStatusDashboard";
@@ -105,6 +107,7 @@ export default function EodPage() {
   // Results
   const [dayResults, setDayResults] = useState<DayResult[]>([]);
   const [showSummary, setShowSummary] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
   const [stagedResult, setStagedResult] = useState<ProcessStagedResult | null>(null);
 
   // Computed status counts
@@ -203,6 +206,8 @@ export default function EodPage() {
     setStopping(false);
     setDayResults([]);
     setShowSummary(false);
+    setStagedResult(null);  // Clear staged result so batch results show
+    setLastError(null);
     setTotalDays(datesToProcess.length);
     setProcessedDays(0);
     setProgress(0);
@@ -239,6 +244,12 @@ export default function EodPage() {
 
     const successCount = results.filter((r) => r.success).length;
     const failCount = results.filter((r) => !r.success).length;
+
+    // Track last error for prominent display
+    const lastFailure = results.find((r) => !r.success);
+    if (lastFailure?.error) {
+      setLastError(lastFailure.error);
+    }
 
     if (failCount === 0) {
       toast.success(`EOD completed successfully for ${successCount} day(s)`);
@@ -407,6 +418,17 @@ export default function EodPage() {
           totalDays={totalDays}
           visible={running}
         />
+
+        {/* Error Alert - show prominently when EOD fails */}
+        {lastError && failedCount > 0 && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>EOD Processing Failed</AlertTitle>
+            <AlertDescription className="mt-2">
+              {lastError}
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Summary Cards - show from staged result or batch result */}
         <EodSummaryCards
