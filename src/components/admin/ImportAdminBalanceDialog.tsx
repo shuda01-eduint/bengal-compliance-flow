@@ -440,105 +440,98 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         setProgress(Math.round(snapshotProgress));
       }
 
-      // STEP 4: Update investors with ledger_balance, commission rates and account types (BULK UPDATE)
+      // STEP 4: Update investors with ledger_balance using BULK RPC (fast!)
       // Always update ledger_balance to establish baseline in master table
-      setProgressStage("Updating investor baseline balances...");
+      setProgressStage("Updating investor baseline balances (bulk)...");
       
       // Use deduplicated data for investor updates - always update ledger_balance
       const investorsToUpdate = Array.from(uniqueInvestors.values());
-      const bulkChunkSize = 100; // Safe chunk size for .in() to avoid URL length issues
+      const BULK_BATCH_SIZE = 1000; // Larger batches for RPC bulk updates
       
-      // First, update ledger_balance for ALL investors (baseline balance)
-      for (let i = 0; i < investorsToUpdate.length; i += bulkChunkSize) {
-        const chunk = investorsToUpdate.slice(i, i + bulkChunkSize);
+      // Bulk update ledger_balance for ALL investors using RPC
+      for (let i = 0; i < investorsToUpdate.length; i += BULK_BATCH_SIZE) {
+        const batch = investorsToUpdate.slice(i, i + BULK_BATCH_SIZE);
+        const updates = batch.map(item => ({
+          investor_code: item.investor_code,
+          ledger_balance: item.ledger_balance
+        }));
         
-        // Update each investor's ledger_balance individually since values differ
-        for (const item of chunk) {
-          const { error } = await supabase
-            .from("investors")
-            .update({ ledger_balance: item.ledger_balance })
-            .eq("investor_code", item.investor_code);
-          
-          if (error) {
-            console.error(`Failed to update ledger_balance for ${item.investor_code}:`, error.message);
-          }
+        const { data: updatedCount, error } = await supabase.rpc(
+          'update_investor_balances_bulk', 
+          { updates: JSON.stringify(updates) }
+        );
+        
+        if (error) {
+          console.error(`Bulk ledger_balance update failed:`, error.message);
+          importResults.errors.push(`Ledger balance batch ${Math.floor(i / BULK_BATCH_SIZE) + 1}: ${error.message}`);
+        } else {
+          console.log(`Updated ${updatedCount} investor ledger balances`);
         }
         
-        const baselineProgress = 40 + ((i + chunk.length) / investorsToUpdate.length) * 10;
+        const baselineProgress = 40 + ((i + batch.length) / investorsToUpdate.length) * 10;
         setProgress(Math.round(baselineProgress));
       }
       
-      // Then update commission rates and account types if enabled
+      // Then update commission rates using BULK RPC if enabled
       if (updateInvestors) {
-        setProgressStage("Updating investor commission rates...");
+        setProgressStage("Updating investor commission rates (bulk)...");
         
         const investorsWithRates = investorsToUpdate.filter(
-          (item) => item.commission_rate !== undefined || item.account_type !== undefined
+          (item) => item.commission_rate !== undefined
         );
 
-        // Group investors by their update payload to enable bulk updates
-        const updateGroups = new Map<string, { updateData: Record<string, unknown>; investorCodes: string[] }>();
-        
-        // Format the selected date as string for notes
-        const effectiveDateStr = balanceDate ? formatDateToISO(balanceDate) : formatDateToISO(new Date());
-        
-        for (const item of investorsWithRates) {
-          const updateData: Record<string, unknown> = {};
-          
-          if (item.commission_rate !== undefined) {
-            updateData.brokerage_commission = item.commission_rate;
-            // Set commission effective date and notes when updating commission
-            updateData.commission_effective_date = effectiveDateStr;
-            updateData.commission_notes = `Imported from Admin Balance ${effectiveDateStr}`;
-          }
-          if (item.account_type !== undefined) {
-            // Map ChargeRate values to account_type
-            const accType = item.account_type.toLowerCase();
-            if (accType.includes('margin')) {
-              updateData.account_type = 'Margin';
-            } else if (accType.includes('cash')) {
-              updateData.account_type = 'Cash';
-            } else {
-              updateData.account_type = item.account_type;
-            }
-          }
-
-          if (Object.keys(updateData).length > 0) {
-            // Create a key based on the update payload
-            const groupKey = `${updateData.brokerage_commission ?? ''}|${updateData.account_type ?? ''}`;
+        if (investorsWithRates.length > 0) {
+          // Bulk update commission rates using RPC
+          for (let i = 0; i < investorsWithRates.length; i += BULK_BATCH_SIZE) {
+            const batch = investorsWithRates.slice(i, i + BULK_BATCH_SIZE);
+            const updates = batch.map(item => ({
+              investor_code: item.investor_code,
+              brokerage_commission: item.commission_rate
+            }));
             
-            if (!updateGroups.has(groupKey)) {
-              updateGroups.set(groupKey, { updateData, investorCodes: [] });
+            const { data: updatedCount, error } = await supabase.rpc(
+              'update_investor_commissions_bulk',
+              { updates: JSON.stringify(updates) }
+            );
+            
+            if (error) {
+              console.error(`Bulk commission update failed:`, error.message);
+            } else {
+              importResults.investors_updated += updatedCount || batch.length;
+              console.log(`Updated ${updatedCount} investor commissions`);
             }
-            updateGroups.get(groupKey)!.investorCodes.push(item.investor_code);
+            
+            const commProgress = 50 + ((i + batch.length) / investorsWithRates.length) * 10;
+            setProgress(Math.round(commProgress));
           }
         }
-
-        // Perform bulk updates per group with chunking to avoid URL length limits
-        const totalToUpdate = investorsWithRates.length;
-        let processedCount = 0;
-
-        for (const [, group] of updateGroups) {
-          const { updateData, investorCodes } = group;
+        
+        // Update account types separately (still grouped by type for efficiency)
+        const investorsWithAccountType = investorsToUpdate.filter(
+          (item) => item.account_type !== undefined
+        );
+        
+        if (investorsWithAccountType.length > 0) {
+          // Group by account type for bulk .in() updates
+          const marginCodes = investorsWithAccountType
+            .filter(i => i.account_type?.toLowerCase().includes('margin'))
+            .map(i => i.investor_code);
+          const cashCodes = investorsWithAccountType
+            .filter(i => i.account_type?.toLowerCase().includes('cash'))
+            .map(i => i.investor_code);
           
-          // Chunk the investor codes for this group
-          for (let i = 0; i < investorCodes.length; i += bulkChunkSize) {
-            const chunk = investorCodes.slice(i, i + bulkChunkSize);
-            
-            const { error, count } = await supabase
-              .from("investors")
-              .update(updateData)
-              .in("investor_code", chunk);
-
-            if (!error) {
-              importResults.investors_updated += chunk.length;
-            } else {
-              console.error(`Bulk update failed for chunk:`, error);
-            }
-            
-            processedCount += chunk.length;
-            const investorProgress = 50 + (processedCount / totalToUpdate) * 10;
-            setProgress(Math.round(investorProgress));
+          const bulkChunkSize = 100;
+          
+          // Update margin accounts in chunks
+          for (let i = 0; i < marginCodes.length; i += bulkChunkSize) {
+            const chunk = marginCodes.slice(i, i + bulkChunkSize);
+            await supabase.from("investors").update({ account_type: 'Margin' }).in("investor_code", chunk);
+          }
+          
+          // Update cash accounts in chunks
+          for (let i = 0; i < cashCodes.length; i += bulkChunkSize) {
+            const chunk = cashCodes.slice(i, i + bulkChunkSize);
+            await supabase.from("investors").update({ account_type: 'Cash' }).in("investor_code", chunk);
           }
         }
       }
