@@ -1,157 +1,85 @@
 
+## What’s happening (confirmed from your database)
+Right now **January 31, 2026 is not selectable** on `/admin/balances` because that date-picker only allows dates returned by the backend function `get_balance_dates()`, which reads **only from** `balances_raw`.
 
-# Optimize TradeImportDialog for Mobile Responsiveness
+I checked the database:
 
-## Current Issues
+- `eod_investor_balance` **does** have Jan 31 data: **23,961 rows** for `2026-01-31`
+- `balances_raw` **does NOT** have Jan 31 data: **0 rows** for `2026-01-31`
+- Latest date in `balances_raw` is **2026-01-12** (only 5 distinct dates exist there)
 
-The `TradeImportDialog` has several mobile responsiveness problems:
+So the baseline import created the baseline in the EOD baseline table, but **the “Admin Balances view table” (`balances_raw`) did not get populated for Jan 31**, which is why the date stays disabled.
 
-| Issue | Location | Impact |
-|-------|----------|--------|
-| Fixed max-width `max-w-5xl` | Line 737 | Dialog overflows on small screens |
-| No mobile-specific padding | Line 737 | Content cramped on mobile |
-| 10-column preview table | Lines 846-858 | Horizontal scroll required, columns too small |
-| Fixed 4-column stats grid | Line 918 | Columns collapse poorly on mobile |
-| Upload area large padding `p-12` | Line 749 | Takes too much space on mobile |
-| Format info grid `grid-cols-2` | Lines 775, 792 | Too cramped on mobile |
-| Complete summary `grid-cols-3` | Line 999 | Poor stacking on mobile |
+---
 
-## Solution Overview
+## Most likely reasons (and how we’ll prevent them)
+1) **The baseline import you ran was done before the “sync to balances_raw” fix was live**, so Jan 31 never got inserted into `balances_raw`.
+2) Or the sync step ran but **failed silently / wasn’t obvious**, so you thought it succeeded.
 
-Apply responsive Tailwind classes to make the dialog work seamlessly on mobile while maintaining the desktop experience.
+Either way, we need to ensure `balances_raw` is populated for Jan 31, and the UI refreshes.
 
-## Implementation Details
+---
 
-### 1. DialogContent - Responsive Container
+## Immediate recovery (fastest path for you)
+### Option A (recommended): Re-import the baseline for Jan 31
+1. Go to `/admin/balances`
+2. Open **Import Admin Balance Baseline**
+3. Select **Jan 31, 2026**
+4. Upload the same Admin Balance Excel again
+5. Run import and wait until it shows **“Syncing to Admin Balances view…”** and completes
 
-**Current:**
-```tsx
-<DialogContent className="max-w-5xl max-h-[90vh]">
-```
+After that, Jan 31 will appear in the selectable dates because `balances_raw` will finally have rows for that date.
 
-**Updated:**
-```tsx
-<DialogContent className="w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-4 sm:p-6">
-```
+### Option B (fallback): Add a “Sync only” tool so you don’t need to re-upload
+If you no longer have the file handy (or want a safer repair tool), we’ll add a button that backfills `balances_raw` for a chosen date using backend logic.
 
-Changes:
-- Add `w-[95vw]` for proper mobile width
-- Add `overflow-hidden flex flex-col` for proper scroll containment
-- Reduce padding on mobile with `p-4 sm:p-6`
+---
 
-### 2. Upload Step - Mobile-Friendly Drop Zone
+## Implementation changes to make this reliable (what I will change)
+### 1) Make “sync to balances_raw” unavoidable + earlier in the workflow
+Currently the sync happens at the end (Step 6). If anything fails earlier, it may never happen.
 
-**Current (Line 749):**
-```tsx
-<div className="border-2 border-dashed rounded-lg p-12 text-center...">
-```
+Change order so that **after parsing and deduplicating**, we run:
 
-**Updated:**
-```tsx
-<div className="border-2 border-dashed rounded-lg p-6 sm:p-12 text-center...">
-```
+- Insert baseline to `eod_investor_balance`
+- Immediately sync to `balances_raw` (so the date becomes selectable ASAP)
+- Then do optional investor updates / holdings replace
 
-Also reduce icon size and text on mobile:
-```tsx
-<Upload className="h-8 w-8 sm:h-12 sm:w-12 mx-auto..." />
-<p className="text-base sm:text-lg font-medium">...</p>
-```
+### 2) Make the balances_raw delete safer (avoid timeouts)
+Right now it uses:
+- `delete().eq("as_of_date", dateStr)`
 
-### 3. Format Info Section - Stack on Mobile
+For large dates (80k+ rows), this can time out. We will switch to a safer approach:
+- batched delete (like `ImportBalancesRawDialog` already does), OR
+- a backend “delete by date in batches” function
 
-**Current (Lines 775, 792):**
-```tsx
-<div className="grid grid-cols-2 gap-2 mt-3...">
-```
+### 3) Improve error visibility: if balances_raw sync fails, it must be obvious
+We’ll:
+- show a dedicated “Balances view sync” section in the results
+- if balances_raw insert fails, show a clear error like:
+  - “Baseline imported, but Admin Balances date will NOT be selectable until sync succeeds.”
 
-**Updated:**
-```tsx
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3...">
-```
+### 4) Force the dates list to refresh even if there are minor import errors
+Right now `onSuccess()` is only called when there are **zero** errors.
+That means if something minor fails (like some commission updates), the UI may not refresh the dates list even if the sync succeeded.
 
-### 4. Preview Table - Mobile Card View or Horizontal Scroll
+We’ll change the logic to:
+- call the “refresh” callback when the **balances_raw sync succeeds**, even if other steps had warnings/errors.
 
-For the 10-column table (Lines 846-913), implement:
-- Wrap in horizontal scroll container
-- Hide less critical columns on mobile (Terminal, Time, Cat)
-- Reduce cell padding
+---
 
-**Updated Table Header:**
-```tsx
-<TableHead className="w-[70px] hidden sm:table-cell">Terminal</TableHead>
-<TableHead>Client</TableHead>
-<TableHead>Security</TableHead>
-<TableHead>Side</TableHead>
-<TableHead className="text-right">Qty</TableHead>
-<TableHead className="text-right hidden sm:table-cell">Price</TableHead>
-<TableHead className="text-right">Value</TableHead>
-<TableHead className="hidden md:table-cell">Trade Date</TableHead>
-<TableHead className="hidden lg:table-cell">Time</TableHead>
-<TableHead className="hidden sm:table-cell">Cat</TableHead>
-```
+## How we’ll verify the fix
+1) After importing Jan 31, confirm in the backend:
+   - `balances_raw` contains rows where `as_of_date = '2026-01-31'`
+2) In UI:
+   - Jan 31 becomes selectable in the `/admin/balances` date picker immediately (or after auto refresh)
+3) Reload the page as a final sanity check:
+   - Jan 31 should still be selectable after refresh
 
-### 5. Summary Stats Grid - Responsive Layout
+---
 
-**Current (Line 918):**
-```tsx
-<div className="grid grid-cols-4 gap-3 text-sm">
-```
-
-**Updated:**
-```tsx
-<div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-sm">
-```
-
-### 6. Replace Existing Card - Mobile Spacing
-
-Ensure the card content uses responsive spacing:
-```tsx
-<CardContent className="pt-3 sm:pt-4 space-y-2 sm:space-y-3">
-```
-
-### 7. Complete Step - Summary Grid
-
-**Current (Line 999):**
-```tsx
-<div className="grid grid-cols-3 gap-4">
-```
-
-**Updated:**
-```tsx
-<div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-```
-
-### 8. Dialog Footer - Stack Buttons on Mobile
-
-The footer already uses `flex-col-reverse sm:flex-row` from the base component, but ensure buttons have proper spacing:
-```tsx
-<DialogFooter className="gap-2">
-```
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| `src/components/eod/TradeImportDialog.tsx` | Apply all responsive classes |
-
-## Summary of Class Changes
-
-| Element | Before | After |
-|---------|--------|-------|
-| DialogContent | `max-w-5xl max-h-[90vh]` | `w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-4 sm:p-6` |
-| Upload zone | `p-12` | `p-6 sm:p-12` |
-| Upload icon | `h-12 w-12` | `h-8 w-8 sm:h-12 sm:w-12` |
-| Format grid | `grid-cols-2` | `grid-cols-1 sm:grid-cols-2` |
-| Stats grid | `grid-cols-4` | `grid-cols-2 sm:grid-cols-4` |
-| Complete grid | `grid-cols-3` | `grid-cols-1 sm:grid-cols-3` |
-| Table columns | All visible | Hide Terminal, Price, Time, Cat on mobile |
-
-## Expected Result
-
-- Dialog fits properly on mobile screens (320px - 767px)
-- Upload area is touch-friendly with adequate tap targets
-- Preview table shows essential columns with horizontal scroll for more
-- Summary stats stack in 2x2 grid on mobile
-- Buttons stack vertically on mobile for easy tapping
-- Content scrolls smoothly within the dialog
+## Technical notes (for completeness)
+- `/admin/balances` date picker uses:
+  - `availableDates` from RPC `get_balance_dates()` and disables any date not in that list.
+- `get_balance_dates()` reads distinct dates from `balances_raw`, so **no `balances_raw` rows = date not selectable**.
 
