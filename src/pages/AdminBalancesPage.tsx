@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Calendar as CalendarIcon, Upload, CheckCircle2, AlertTriangle, Clock, FileSpreadsheet, Users, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Calendar as CalendarIcon, Upload, CheckCircle2, AlertTriangle, Clock, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Users, Wallet, PiggyBank } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -20,6 +20,15 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, parseISO, isToday, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+
+const formatBDT = (value: number) => {
+  if (value >= 10000000) {
+    return `৳${(value / 10000000).toFixed(2)} Cr`;
+  } else if (value >= 100000) {
+    return `৳${(value / 100000).toFixed(2)} L`;
+  }
+  return `৳${value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+};
 
 const AdminBalancesPage = () => {
   const queryClient = useQueryClient();
@@ -44,7 +53,7 @@ const AdminBalancesPage = () => {
     }
   }, [availableDates, selectedDate]);
 
-  // Fetch import history from eod_run_history (baseline imports)
+  // Fetch import history and summary statistics
   const { data: importHistory, isLoading: historyLoading } = useQuery({
     queryKey: ['admin-balance-import-history'],
     queryFn: async () => {
@@ -96,11 +105,68 @@ const AdminBalancesPage = () => {
     staleTime: 60 * 1000,
   });
 
+  // Fetch latest summary statistics for the cards
+  const { data: summaryStats } = useQuery({
+    queryKey: ['admin-balance-summary-stats'],
+    queryFn: async () => {
+      // Get account type distribution from investors table
+      const { data: investorStats, error: investorError } = await supabase
+        .from('investors')
+        .select('account_type');
+      
+      if (investorError) throw investorError;
+      
+      let totalInvestors = investorStats?.length || 0;
+      let marginInvestors = 0;
+      let cashInvestors = 0;
+      
+      investorStats?.forEach(inv => {
+        if (inv.account_type?.toLowerCase() === 'margin') {
+          marginInvestors++;
+        } else {
+          cashInvestors++;
+        }
+      });
+
+      // Get latest EOD balance data for loan and interest
+      const { data: latestDate } = await supabase
+        .from('eod_investor_balance')
+        .select('trade_date')
+        .order('trade_date', { ascending: false })
+        .limit(1)
+        .single();
+
+      let accruedInterest = 0;
+      let marginLoanAmount = 0;
+
+      if (latestDate?.trade_date) {
+        const { data: balanceStats } = await supabase
+          .from('eod_investor_balance')
+          .select('accrued_int, closing_ledger_balance')
+          .eq('trade_date', latestDate.trade_date);
+
+        balanceStats?.forEach(b => {
+          accruedInterest += b.accrued_int || 0;
+          if (b.closing_ledger_balance < 0) {
+            marginLoanAmount += Math.abs(b.closing_ledger_balance);
+          }
+        });
+      }
+
+      return {
+        totalInvestors,
+        marginInvestors,
+        cashInvestors,
+        accruedInterest,
+        marginLoanAmount,
+      };
+    },
+    staleTime: 60 * 1000,
+  });
+
   // Get today's status
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayImported = availableDates?.includes(todayStr) || false;
-  const latestDate = availableDates?.[0];
-  const latestDateObj = latestDate ? parseISO(latestDate) : null;
 
   // Get last import summary
   const lastImport = importHistory?.[0];
@@ -115,6 +181,7 @@ const AdminBalancesPage = () => {
   const handleImportComplete = () => {
     queryClient.invalidateQueries({ queryKey: ['balances-raw-dates'] });
     queryClient.invalidateQueries({ queryKey: ['admin-balance-import-history'] });
+    queryClient.invalidateQueries({ queryKey: ['admin-balance-summary-stats'] });
   };
 
   return (
@@ -162,9 +229,9 @@ const AdminBalancesPage = () => {
           <ImportAdminBalanceDialog onSuccess={handleImportComplete} />
         </div>
 
-        {/* Status Cards Row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Today's Import Status */}
+        {/* Status Cards Row - 4 cards in responsive grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: Today's Import Status */}
           <Card className={cn(
             "border-2",
             todayImported 
@@ -201,7 +268,7 @@ const AdminBalancesPage = () => {
             </CardContent>
           </Card>
 
-          {/* Last Import Summary */}
+          {/* Card 2: Last Import */}
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
@@ -228,27 +295,59 @@ const AdminBalancesPage = () => {
             </CardContent>
           </Card>
 
-          {/* Total Records */}
+          {/* Card 3: Investor Summary */}
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-muted-foreground" />
-                <CardTitle className="text-base">Last Import Summary</CardTitle>
+                <CardTitle className="text-base">Investor Summary</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
-              {lastImport ? (
-                <div className="space-y-1">
-                  <p className="text-lg font-semibold">
-                    {lastImport.recordCount.toLocaleString()} investors
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    By {lastImport.importedBy?.split('@')[0] || 'System'}
-                  </p>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Total</span>
+                  <span className="text-lg font-bold">{(summaryStats?.totalInvestors || 0).toLocaleString()}</span>
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No data</p>
-              )}
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Margin</span>
+                  <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">
+                    {(summaryStats?.marginInvestors || 0).toLocaleString()}
+                  </Badge>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Cash</span>
+                  <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">
+                    {(summaryStats?.cashInvestors || 0).toLocaleString()}
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Card 4: Loan & Interest Summary */}
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-muted-foreground" />
+                <CardTitle className="text-base">Loan & Interest</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Accrued Interest</span>
+                  <span className="font-semibold text-success">
+                    {formatBDT(summaryStats?.accruedInterest || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Margin Loan</span>
+                  <span className="font-semibold text-destructive">
+                    {formatBDT(summaryStats?.marginLoanAmount || 0)}
+                  </span>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
