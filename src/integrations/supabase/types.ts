@@ -2605,17 +2605,15 @@ export type Database = {
               brokerage: number
               closing_balance: number
               department: string
+              deposits: number
               gross_buy: number
               gross_sell: number
               investor_code: string
               investor_name: string
-              net_trade_value: number
               opening_balance: number
-              rm_email: string
               rm_name: string
               total_count: number
-              total_deposits: number
-              total_withdrawals: number
+              withdrawals: number
             }[]
           }
         | {
