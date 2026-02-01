@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { format, subDays, differenceInDays, parseISO } from "date-fns";
-import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award, ArrowUpDown, GripVertical, AlertTriangle, RefreshCw } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award, ArrowUpDown, GripVertical, AlertTriangle, RefreshCw, Link as LinkIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,7 +22,6 @@ import { toast } from "sonner";
 import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
 import { TradeDetailsDialog } from "./TradeDetailsDialog";
 import { useDebounce } from "@/hooks/useDebounce";
-import { rpcWithRetry, formatRpcError } from "@/lib/rpc-utils";
 
 export interface AccountingRow {
   investor_code: string;
@@ -154,9 +153,8 @@ const AccountingTab = () => {
   const [newFieldFormula, setNewFieldFormula] = useState("");
   const [chartView, setChartView] = useState<ChartView>('commission');
   const [selectedInvestor, setSelectedInvestor] = useState<AccountingRow | null>(null);
-  // Default to today only (single day) to prevent timeouts
-  const [fromDate, setFromDate] = useState<Date>(new Date());
-  const [toDate, setToDate] = useState<Date>(new Date());
+  // Single EOD date selector
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [tradeDetailsOpen, setTradeDetailsOpen] = useState(false);
   const [selectedTradeType, setSelectedTradeType] = useState<'BUY' | 'SELL'>('BUY');
   const [selectedTradeInvestor, setSelectedTradeInvestor] = useState<AccountingRow | null>(null);
@@ -164,13 +162,8 @@ const AccountingTab = () => {
   const [sortColumn, setSortColumn] = useState<string>("investor_code");
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
-  const [dateRangeWarning, setDateRangeWarning] = useState<string | null>(null);
   const [accountTypeFilter, setAccountTypeFilter] = useState<string>("all");
   const [activityFilter, setActivityFilter] = useState<string>("with_trades");
-
-  // Calculate date range in days for guardrails
-  const dateRangeDays = useMemo(() => differenceInDays(toDate, fromDate) + 1, [fromDate, toDate]);
-  const isLargeRange = dateRangeDays > 7;
 
   // Check if user is admin
   useEffect(() => {
@@ -189,60 +182,26 @@ const AccountingTab = () => {
     checkAdmin();
   }, []);
 
-  // Initialize with latest trade date on mount
+  // Initialize with latest EOD date on mount
   useEffect(() => {
-    const fetchLatestTradeDate = async () => {
+    const fetchLatestEodDate = async () => {
       const { data } = await supabase
-        .from('trade_history')
-        .select('trade_date')
-        .order('trade_date', { ascending: false })
+        .from('eod_run_history')
+        .select('run_date')
+        .eq('status', 'completed')
+        .order('run_date', { ascending: false })
         .limit(1)
         .maybeSingle();
       
-      if (data?.trade_date) {
-        // trade_date is in YYYYMMDD format
-        const dateStr = data.trade_date;
-        const year = parseInt(dateStr.substring(0, 4));
-        const month = parseInt(dateStr.substring(4, 6)) - 1;
-        const day = parseInt(dateStr.substring(6, 8));
-        // Normalize to local date to avoid timezone issues
-        const latestDate = normalizeToLocalDate(new Date(year, month, day));
-        setFromDate(latestDate);
-        setToDate(latestDate);
+      if (data?.run_date) {
+        setSelectedDate(parseISO(data.run_date));
       }
     };
-    fetchLatestTradeDate();
+    fetchLatestEodDate();
   }, []);
-
-  // Update date range warning
-  useEffect(() => {
-    if (isLargeRange) {
-      setDateRangeWarning(`Large date range (${dateRangeDays} days) may load slowly.`);
-    } else {
-      setDateRangeWarning(null);
-    }
-  }, [dateRangeDays, isLargeRange]);
 
   // Debounce search term for server-side search
   const debouncedSearch = useDebounce(searchTerm, 300);
-
-  // Handler to sync toDate when fromDate changes (single day mode)
-  const handleFromDateChange = (date: Date | undefined) => {
-    if (date) {
-      // Normalize to local midnight to avoid timezone issues
-      const normalizedDate = normalizeToLocalDate(date);
-      setFromDate(normalizedDate);
-      // If user selects a from date after the to date, sync them
-      if (normalizedDate > toDate) {
-        setToDate(normalizedDate);
-      }
-    }
-  };
-
-  // Handler to set single day mode
-  const handleSetSingleDay = () => {
-    setToDate(fromDate);
-  };
 
   // Load custom fields from localStorage
   useEffect(() => {
@@ -297,78 +256,92 @@ const AccountingTab = () => {
     localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(columns));
   }, [columns]);
 
-  // Format dates for queries
-  // Opening balance date: day BEFORE fromDate (the EOD snapshot we need for opening balance)
-  const openingDateStr = format(subDays(fromDate, 1), 'yyyy-MM-dd');
-  const startDateStr = format(fromDate, 'yyyy-MM-dd'); // Start date for trades/deposits
-  const endDateStr = format(toDate, 'yyyy-MM-dd'); // End date (inclusive)
+  // Format date for queries
+  const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
   
   // Debug logging
-  console.log('[AccountingTab] Date params:', { startDateStr, endDateStr, openingDateStr, fromDate: fromDate.toISOString(), toDate: toDate.toISOString() });
+  console.log('[AccountingTab] EOD Date:', selectedDateStr);
 
-  // Fetch accounting data using optimized RPC function v3
-  const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
-    queryKey: ['accounting-data-v3', debouncedSearch, endDateStr, openingDateStr, accountTypeFilter, activityFilter],
+  // Check if EOD has been run for the selected date
+  const { data: eodStatus, isLoading: loadingEodStatus } = useQuery({
+    queryKey: ['eod-run-status', selectedDateStr],
     queryFn: async () => {
-      const PAGE_SIZE = 1000;
-      let allData: any[] = [];
-      let offset = 0;
-      let hasMore = true;
-
-      while (hasMore) {
-        const { data, error } = await rpcWithRetry<any[]>('get_accounting_data_v3', {
-          _opening_date: openingDateStr,
-          _tx_date: endDateStr,
-          _search: debouncedSearch || '',
-          _account_type_filter: accountTypeFilter || 'all',
-          _has_activity_filter: activityFilter || 'all',
-          _limit: PAGE_SIZE,
-          _offset: offset,
-        });
-        
-        if (error) throw error;
-        if (data) allData = [...allData, ...data];
-        hasMore = data?.length === PAGE_SIZE;
-        offset += PAGE_SIZE;
-      }
-
-      console.log('[AccountingTab] Fetched total:', allData.length, 'rows via v3');
-      return allData;
-    },
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes to reduce redundant fetches
-    retry: (failureCount, error: Error) => {
-      const msg = error?.message || '';
-      // Don't retry on schema errors - they need code fixes
-      if (msg.includes('does not exist') || msg.includes('column')) return false;
-      // Don't retry on timeout/504 errors - compounding the problem
-      if (msg.includes('timeout') || msg.includes('57014') || msg.includes('504') || msg.includes('upstream')) return false;
-      return failureCount < 1; // Only 1 retry for other errors
+      const { data } = await supabase
+        .from('eod_run_history')
+        .select('id, run_date, clients_captured, status')
+        .eq('run_date', selectedDateStr)
+        .eq('status', 'completed')
+        .maybeSingle();
+      return data;
     },
   });
 
-  // Check if error is a timeout
-  const isTimeoutError = useMemo(() => {
-    if (!queryError) return false;
-    const msg = (queryError as Error)?.message || '';
-    return msg.includes('timeout') || msg.includes('57014') || msg.includes('canceling statement') || msg.includes('504') || msg.includes('upstream');
-  }, [queryError]);
+  const hasEodData = !!eodStatus;
 
-  // Summary data can be computed locally from accountingResult
-  const loadingSummary = loadingData;
+  // Fetch accounting data directly from eod_ledger_snapshots
+  const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
+    queryKey: ['accounting-eod-snapshot', selectedDateStr, debouncedSearch, accountTypeFilter, activityFilter],
+    queryFn: async () => {
+      // Build query to eod_ledger_snapshots
+      let query = supabase
+        .from('eod_ledger_snapshots')
+        .select(`
+          investor_code,
+          investor_name,
+          account_type,
+          rm_name,
+          department,
+          opening_balance,
+          total_deposits,
+          total_withdrawals,
+          gross_buy,
+          gross_sell,
+          total_commission,
+          closing_balance
+        `)
+        .eq('eod_date', selectedDateStr);
+
+      // Apply search filter
+      if (debouncedSearch) {
+        query = query.or(`investor_code.ilike.%${debouncedSearch}%,investor_name.ilike.%${debouncedSearch}%,rm_name.ilike.%${debouncedSearch}%`);
+      }
+
+      // Apply account type filter
+      if (accountTypeFilter && accountTypeFilter !== 'all') {
+        query = query.eq('account_type', accountTypeFilter);
+      }
+
+      // Apply activity filter
+      if (activityFilter === 'with_trades') {
+        query = query.or('gross_buy.gt.0,gross_sell.gt.0');
+      } else if (activityFilter === 'no_trades') {
+        query = query.eq('gross_buy', 0).eq('gross_sell', 0);
+      }
+
+      // Order and limit
+      query = query.order('investor_code').limit(1000);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: hasEodData, // Only fetch if EOD data exists
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
 
   // Fetch turnover by department - lazy load only when margin chart is active
   const { data: departmentTurnover } = useQuery({
-    queryKey: ['accounting-turnover-by-department', startDateStr, endDateStr],
+    queryKey: ['accounting-turnover-by-department', selectedDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_accounting_turnover_by_department', {
-        _from_tx_date: startDateStr,
-        _to_tx_date: endDateStr,
+        _from_tx_date: selectedDateStr,
+        _to_tx_date: selectedDateStr,
       });
       if (error) throw error;
       return data || [];
     },
-    enabled: chartView === 'margin', // Only fetch when margin chart is visible
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    enabled: chartView === 'margin' && hasEodData,
+    staleTime: 5 * 60 * 1000,
     retry: (failureCount, error: Error) => {
       const msg = error?.message || '';
       if (msg.includes('timeout') || msg.includes('504') || msg.includes('upstream')) return false;
@@ -378,31 +351,31 @@ const AccountingTab = () => {
 
   // Fetch balance comparison by department (period beginning vs ending)
   const { data: balanceComparison } = useQuery({
-    queryKey: ['accounting-balance-comparison', openingDateStr, endDateStr],
+    queryKey: ['accounting-balance-comparison', selectedDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_margin_composition_by_department', {
-        p_from_date: openingDateStr,
-        p_to_date: endDateStr,
+        p_from_date: selectedDateStr,
+        p_to_date: selectedDateStr,
       });
       if (error) throw error;
       return data || [];
     },
-    enabled: chartView === 'margin',
+    enabled: chartView === 'margin' && hasEodData,
   });
 
   // Fetch commission by department - lazy load only when commission chart is active
   const { data: commissionByDept } = useQuery({
-    queryKey: ['accounting-commission-by-department', startDateStr, endDateStr],
+    queryKey: ['accounting-commission-by-department', selectedDateStr],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_commission_by_department', {
-        _from_tx_date: startDateStr,
-        _to_tx_date: endDateStr,
+        _from_tx_date: selectedDateStr,
+        _to_tx_date: selectedDateStr,
       });
       if (error) throw error;
       return data || [];
     },
-    enabled: chartView === 'commission', // Only fetch when commission chart is visible
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    enabled: chartView === 'commission' && hasEodData,
+    staleTime: 5 * 60 * 1000,
     retry: (failureCount, error: Error) => {
       const msg = error?.message || '';
       if (msg.includes('timeout') || msg.includes('504') || msg.includes('upstream')) return false;
@@ -410,7 +383,7 @@ const AccountingTab = () => {
     },
   });
 
-  // Process accounting data with custom fields (filtering now done server-side)
+  // Process accounting data with custom fields
   const accountingData = useMemo(() => {
     if (!accountingResult) {
       console.log('[AccountingTab] No accountingResult yet');
@@ -424,23 +397,21 @@ const AccountingTab = () => {
         investor_code: row.investor_code || '',
         investor_name: row.investor_name || '',
         account_type: row.account_type || '',
-        // Handle both 'rm' and 'rm_name' field names from different RPC overloads
-        rm_name: row.rm_name ?? row.rm ?? '',
+        rm_name: row.rm_name || '',
         department: row.department || '',
         interest_rate: 0,
         brokerage_commission: 0,
-        // Backend returns: opening_balance, deposits, withdrawals, gross_buy, gross_sell, closing_balance
-        ledger_balance: Number(row.opening_balance ?? row.ledger_balance) || 0,
-        total_deposits: Number(row.deposits ?? row.total_deposits) || 0,
-        total_withdrawals: Number(row.withdrawals ?? row.total_withdrawals) || 0,
+        ledger_balance: Number(row.opening_balance) || 0,
+        total_deposits: Number(row.total_deposits) || 0,
+        total_withdrawals: Number(row.total_withdrawals) || 0,
         gross_buy: Number(row.gross_buy) || 0,
         gross_sell: Number(row.gross_sell) || 0,
         net_buy: Number(row.gross_buy) || 0,
         net_sell: Number(row.gross_sell) || 0,
         adjusted_ledger: 0,
         accrued_interest: 0,
-        brokerage_amount: Number(row.brokerage) || 0,
-        final_balance: Number(row.closing_balance ?? row.final_balance) || 0,
+        brokerage_amount: Number(row.total_commission) || 0,
+        final_balance: Number(row.closing_balance) || 0,
         receivable: 0,
         payable: 0,
       };
@@ -454,8 +425,8 @@ const AccountingTab = () => {
     });
   }, [accountingResult, customFields]);
 
-  // Get total count from first row (all rows have the same total_count)
-  const totalCount = (accountingResult?.[0] as any)?.total_count || accountingResult?.length || 0;
+  // Get total count
+  const totalCount = accountingResult?.length || 0;
 
   // Summary data computed from accountingData
   const summary = useMemo(() => {
@@ -485,7 +456,7 @@ const AccountingTab = () => {
     };
   }, [accountingData]);
 
-  const isLoading = loadingData || loadingSummary;
+  const isLoading = loadingData || loadingEodStatus;
 
   const handleAddField = () => {
     if (!newFieldName.trim() || !newFieldFormula.trim()) {
@@ -568,9 +539,7 @@ const AccountingTab = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = dateRangeDays > 1
-        ? `accounting_${format(fromDate, 'yyyy-MM-dd')}_to_${endDateStr}.csv`
-        : `accounting_${endDateStr}.csv`;
+      a.download = `accounting_${selectedDateStr}.csv`;
       a.click();
       URL.revokeObjectURL(url);
       
@@ -605,7 +574,7 @@ const AccountingTab = () => {
 
   const visibleColumns = columns.filter(c => c.visible);
 
-  // Sort handler - triggers server-side sort
+  // Sort handler
   const handleSort = (columnId: string) => {
     if (sortColumn === columnId) {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -700,12 +669,30 @@ const AccountingTab = () => {
 
   return (
     <div className="space-y-4 lg:space-y-6 w-full overflow-x-hidden">
+      {/* No EOD Data Alert */}
+      {!hasEodData && !loadingEodStatus && (
+        <Alert className="mb-4 border-amber-500/50 bg-amber-500/10">
+          <AlertTriangle className="h-4 w-4 text-amber-400" />
+          <AlertDescription className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <span>
+              No EOD data for <strong>{format(selectedDate, "PPP")}</strong>. Run EOD processing first.
+            </span>
+            <Button variant="outline" size="sm" asChild className="shrink-0 border-amber-500/50 text-amber-400 hover:bg-amber-500/20">
+              <a href="/eod">
+                <LinkIcon className="h-4 w-4 mr-2" />
+                Go to EOD Page
+              </a>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Error Display */}
       {isError && (
         <Alert variant="destructive" className="mb-4">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription className="flex items-center justify-between">
-            <span>{formatRpcError(queryError as Error)}</span>
+            <span>{(queryError as Error)?.message || 'Failed to load accounting data'}</span>
             <Button variant="outline" size="sm" onClick={() => refetch()} className="ml-4">
               <RefreshCw className="h-4 w-4 mr-2" />
               Retry
@@ -746,29 +733,15 @@ const AccountingTab = () => {
             </div>
 
             <div className="flex flex-col lg:flex-row gap-4">
-              {/* Turnover View */}
               {/* Margin Loan View */}
               {chartView === 'margin' && (
                 <div className="w-full space-y-6">
-                  {/* Date Range Indicator */}
-                  {balanceComparison && balanceComparison.length > 0 && (
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
-                        <CalendarIcon className="h-3.5 w-3.5" />
-                        <span className="font-medium">Comparing:</span>
-                        <span className="text-foreground">{balanceComparison[0]?.actual_from_date ? format(new Date(balanceComparison[0].actual_from_date), 'MMM dd, yyyy') : 'N/A'}</span>
-                        <ArrowRight className="h-3 w-3" />
-                        <span className="text-foreground">{balanceComparison[0]?.actual_to_date ? format(new Date(balanceComparison[0].actual_to_date), 'MMM dd, yyyy') : 'N/A'}</span>
-                      </div>
-                      {/* Warning if same date */}
-                      {balanceComparison[0]?.actual_from_date === balanceComparison[0]?.actual_to_date && (
-                        <div className="flex items-center gap-2 text-xs bg-amber-500/10 text-amber-400 rounded-lg px-3 py-1.5 border border-amber-500/20">
-                          <FileText className="h-3.5 w-3.5" />
-                          <span>Same date - no comparison available</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* Date Indicator */}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50 w-fit">
+                    <CalendarIcon className="h-3.5 w-3.5" />
+                    <span className="font-medium">EOD Date:</span>
+                    <span className="text-foreground">{format(selectedDate, 'MMM dd, yyyy')}</span>
+                  </div>
 
                   {/* KPI Metrics Row */}
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -849,12 +822,12 @@ const AccountingTab = () => {
                                   ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
                                   : "bg-red-500/20 text-red-400 border-red-500/30"
                               )}>
-                                {isPositiveChange ? 'DECREASED' : 'INCREASED'}
+                                CHANGE
                               </span>
                             </div>
-                            <p className="text-xs text-muted-foreground mb-1">Net Change</p>
+                            <p className="text-xs text-muted-foreground mb-1">Loan Change</p>
                             <p className={cn(
-                              "text-2xl font-bold flex items-center gap-1",
+                              "text-2xl font-bold",
                               isPositiveChange ? "text-emerald-400" : "text-red-400"
                             )}>
                               {isPositiveChange ? '-' : '+'}{formatCurrency(Math.abs(totalChange))}
@@ -863,45 +836,34 @@ const AccountingTab = () => {
                               "mt-2 flex items-center gap-1 text-xs",
                               isPositiveChange ? "text-emerald-400/80" : "text-red-400/80"
                             )}>
-                              <span>{isPositiveChange ? 'Liability reduced' : 'Liability increased'}</span>
+                              <span>{isPositiveChange ? 'Loan decreased' : 'Loan increased'}</span>
                             </div>
                           </div>
                         </div>
                       );
                     })()}
 
-                    {/* Change Percentage Card */}
-                    {(() => {
-                      const beginningTotal = balanceComparison?.reduce((sum: number, d: { beginning_loan: number }) => sum + Number(d.beginning_loan), 0) || 0;
-                      const totalChange = balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0;
-                      const changePercent = beginningTotal > 0 ? (totalChange / beginningTotal) * 100 : 0;
-                      const isPositive = changePercent <= 0;
-                      return (
-                        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-violet-500/20 via-violet-500/10 to-transparent border border-violet-500/30 p-4 group hover:border-violet-500/50 transition-all duration-300">
-                          <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
-                          <div className="relative">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="p-2 rounded-lg bg-violet-500/20">
-                                <Percent className="h-4 w-4 text-violet-400" />
-                              </div>
-                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-400 border border-violet-500/30">
-                                RATE
-                              </span>
-                            </div>
-                            <p className="text-xs text-muted-foreground mb-1">Change Rate</p>
-                            <p className={cn(
-                              "text-2xl font-bold",
-                              isPositive ? "text-emerald-400" : "text-red-400"
-                            )}>
-                              {isPositive && changePercent !== 0 ? '' : ''}{changePercent.toFixed(2)}%
-                            </p>
-                            <div className="mt-2 flex items-center gap-1 text-xs text-violet-400/80">
-                              <span>Period-over-period</span>
-                            </div>
+                    {/* Client Count Card */}
+                    <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-violet-500/20 via-violet-500/10 to-transparent border border-violet-500/30 p-4 group hover:border-violet-500/50 transition-all duration-300">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
+                      <div className="relative">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="p-2 rounded-lg bg-violet-500/20">
+                            <Users className="h-4 w-4 text-violet-400" />
                           </div>
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-400 border border-violet-500/30">
+                            CLIENTS
+                          </span>
                         </div>
-                      );
-                    })()}
+                        <p className="text-xs text-muted-foreground mb-1">Total Clients</p>
+                        <p className="text-2xl font-bold text-violet-400">
+                          {(balanceComparison?.reduce((sum: number, d: { client_count: number }) => sum + Number(d.client_count || 0), 0) || 0).toLocaleString()}
+                        </p>
+                        <div className="mt-2 flex items-center gap-1 text-xs text-violet-400/80">
+                          <span>Active margin accounts</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Charts and Table Row */}
@@ -1084,23 +1046,6 @@ const AccountingTab = () => {
                       </div>
                     </div>
                   </div>
-
-                  {/* Info/Warning Messages */}
-                  {balanceComparison && balanceComparison.length > 0 && 
-                    balanceComparison[0]?.actual_from_date !== balanceComparison[0]?.actual_to_date &&
-                    (balanceComparison?.reduce((sum: number, d: { loan_change: number }) => sum + Number(d.loan_change), 0) || 0) === 0 && (
-                    <div className="flex items-center gap-3 p-4 rounded-xl bg-gradient-to-r from-blue-500/10 via-blue-500/5 to-transparent border border-blue-500/20">
-                      <div className="p-2 rounded-lg bg-blue-500/20">
-                        <FileText className="h-4 w-4 text-blue-400" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-blue-400">No Changes Detected</p>
-                        <p className="text-xs text-blue-400/70">
-                          The margin loan balance remained unchanged between the comparison dates. This may indicate identical data snapshots.
-                        </p>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -1181,10 +1126,10 @@ const AccountingTab = () => {
 
                   {/* Charts and Table Row */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Enhanced Pie Chart */}
+                    {/* Commission Pie Chart */}
                     <div className="lg:col-span-1 p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-semibold">Distribution</h4>
+                        <h4 className="text-sm font-semibold">Commission Split</h4>
                         <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-full bg-muted/50">
                           By Department
                         </span>
@@ -1195,8 +1140,8 @@ const AccountingTab = () => {
                             <PieChart>
                               <defs>
                                 <linearGradient id="commGrad1" x1="0" y1="0" x2="1" y2="1">
-                                  <stop offset="0%" stopColor="hsl(160, 84%, 39%)" />
-                                  <stop offset="100%" stopColor="hsl(160, 84%, 29%)" />
+                                  <stop offset="0%" stopColor="hsl(160, 84%, 50%)" />
+                                  <stop offset="100%" stopColor="hsl(160, 84%, 35%)" />
                                 </linearGradient>
                                 <linearGradient id="commGrad2" x1="0" y1="0" x2="1" y2="1">
                                   <stop offset="0%" stopColor="hsl(217, 91%, 60%)" />
@@ -1216,7 +1161,7 @@ const AccountingTab = () => {
                                 </linearGradient>
                               </defs>
                               <Pie
-                                data={commissionByDept.map((dept: { department: string; total_commission: number }, index: number) => ({
+                                data={commissionByDept.map((dept: { department: string; total_commission: number }) => ({
                                   name: dept.department || 'Unknown',
                                   value: Number(dept.total_commission),
                                 }))}
@@ -1256,121 +1201,82 @@ const AccountingTab = () => {
                       </div>
                     </div>
 
-                    {/* Department Breakdown Table */}
+                    {/* Commission by Department Table */}
                     <div className="lg:col-span-2 p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="text-sm font-semibold">Department Performance</h4>
-                        {commissionByDept && commissionByDept.length > 0 && (
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              <Award className="h-3 w-3" />
-                              Top: {commissionByDept[0]?.department || 'N/A'}
-                            </span>
-                          </div>
-                        )}
+                        <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-full bg-muted/50">
+                          {commissionByDept?.length || 0} Departments
+                        </span>
                       </div>
-                      <div className="max-h-64 overflow-y-auto rounded-lg border border-border/30">
-                        <Table>
-                          <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm z-10">
-                            <TableRow className="border-border/30">
-                              <TableHead className="text-xs font-semibold text-muted-foreground">#</TableHead>
-                              <TableHead className="text-xs font-semibold text-muted-foreground">Department</TableHead>
-                              <TableHead className="text-xs text-right font-semibold text-muted-foreground">Commission</TableHead>
-                              <TableHead className="text-xs text-right font-semibold text-muted-foreground">Turnover</TableHead>
-                              <TableHead className="text-xs text-right font-semibold text-muted-foreground">Share</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {commissionByDept && commissionByDept.length > 0 ? (() => {
-                              const totalCommission = commissionByDept.reduce((sum: number, d: { total_commission: number }) => sum + Number(d.total_commission), 0);
-                              const GRADIENT_COLORS = [
-                                'from-emerald-500/20 to-emerald-500/5',
-                                'from-blue-500/20 to-blue-500/5',
-                                'from-amber-500/20 to-amber-500/5',
-                                'from-purple-500/20 to-purple-500/5',
-                                'from-rose-500/20 to-rose-500/5',
-                              ];
-                              const BADGE_COLORS = [
-                                'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-                                'bg-blue-500/20 text-blue-400 border-blue-500/30',
-                                'bg-amber-500/20 text-amber-400 border-amber-500/30',
-                                'bg-purple-500/20 text-purple-400 border-purple-500/30',
-                                'bg-rose-500/20 text-rose-400 border-rose-500/30',
-                              ];
-                              
-                              return commissionByDept.map((dept: { department: string; total_commission: number; total_turnover: number }, index: number) => {
-                                const sharePercent = totalCommission > 0 ? (Number(dept.total_commission) / totalCommission) * 100 : 0;
-                                const isTop3 = index < 3;
+                      <div className="max-h-64 overflow-y-auto">
+                        {commissionByDept && commissionByDept.length > 0 ? (
+                          <div className="space-y-2">
+                            {commissionByDept
+                              .sort((a: { total_commission: number }, b: { total_commission: number }) => Number(b.total_commission) - Number(a.total_commission))
+                              .map((dept: { department: string; total_commission: number; total_turnover: number; trade_count: number }, index: number) => {
+                                const maxComm = Math.max(...commissionByDept.map((d: { total_commission: number }) => Number(d.total_commission)));
+                                const barWidth = maxComm > 0 ? (Number(dept.total_commission) / maxComm) * 100 : 0;
+                                
                                 return (
-                                  <TableRow 
-                                    key={index} 
+                                  <div 
+                                    key={index}
                                     className={cn(
-                                      "border-border/20 transition-colors hover:bg-muted/30",
-                                      index % 2 === 0 ? "bg-muted/10" : "bg-transparent"
+                                      "relative p-3 rounded-lg border transition-all duration-200 hover:border-border group",
+                                      index % 2 === 0 ? "bg-muted/20" : "bg-transparent",
+                                      "border-border/30"
                                     )}
                                   >
-                                    <TableCell className="py-3">
-                                      {isTop3 ? (
-                                        <span className={cn(
-                                          "inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold",
-                                          index === 0 ? "bg-gradient-to-br from-yellow-400 to-amber-500 text-black" :
-                                          index === 1 ? "bg-gradient-to-br from-gray-300 to-gray-400 text-black" :
-                                          "bg-gradient-to-br from-amber-600 to-amber-700 text-white"
-                                        )}>
-                                          {index + 1}
-                                        </span>
-                                      ) : (
-                                        <span className="text-xs text-muted-foreground pl-2">{index + 1}</span>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="py-3">
-                                      <div className="flex items-center gap-2">
-                                        <div className={cn(
-                                          "w-2 h-8 rounded-full bg-gradient-to-b",
-                                          GRADIENT_COLORS[index % GRADIENT_COLORS.length]
-                                        )} />
-                                        <span className="text-sm font-medium">{dept.department || 'Unknown'}</span>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="py-3 text-right">
-                                      <span className={cn(
-                                        "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold border",
-                                        BADGE_COLORS[index % BADGE_COLORS.length]
+                                    <div 
+                                      className="absolute left-0 top-0 h-full rounded-lg bg-gradient-to-r from-emerald-500/10 to-transparent transition-all duration-500"
+                                      style={{ width: `${barWidth}%` }}
+                                    />
+                                    
+                                    <div className="relative flex items-center gap-3">
+                                      {/* Rank Badge */}
+                                      <div className={cn(
+                                        "flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
+                                        index === 0 ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30" :
+                                        index === 1 ? "bg-slate-400/20 text-slate-400 ring-1 ring-slate-400/30" :
+                                        index === 2 ? "bg-orange-600/20 text-orange-400 ring-1 ring-orange-600/30" :
+                                        "bg-muted/50 text-muted-foreground"
                                       )}>
-                                        <DollarSign className="h-3 w-3" />
-                                        {formatCurrency(Number(dept.total_commission))}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell className="py-3 text-right">
-                                      <span className="text-xs text-muted-foreground">
-                                        {formatCurrency(Number(dept.total_turnover))}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell className="py-3 text-right">
-                                      <div className="flex items-center justify-end gap-2">
-                                        <div className="w-16 h-2 bg-muted/30 rounded-full overflow-hidden">
-                                          <div 
-                                            className="h-full bg-gradient-to-r from-primary to-primary/60 rounded-full transition-all duration-500"
-                                            style={{ width: `${sharePercent}%` }}
-                                          />
-                                        </div>
-                                        <span className="text-xs font-medium w-12 text-right">
-                                          {sharePercent.toFixed(1)}%
-                                        </span>
+                                        {index + 1}
                                       </div>
-                                    </TableCell>
-                                  </TableRow>
+
+                                      {/* Department Info */}
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium truncate">{dept.department || 'Unknown'}</p>
+                                        <p className="text-[10px] text-muted-foreground">
+                                          {(dept.trade_count || 0).toLocaleString()} trades
+                                        </p>
+                                      </div>
+
+                                      {/* Values */}
+                                      <div className="flex items-center gap-4 text-right">
+                                        <div className="hidden sm:block">
+                                          <p className="text-[10px] text-muted-foreground">Turnover</p>
+                                          <p className="text-xs font-medium text-blue-400">
+                                            {formatCurrency(Number(dept.total_turnover || 0))}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] text-muted-foreground">Commission</p>
+                                          <p className="text-sm font-bold text-emerald-400">
+                                            {formatCurrency(Number(dept.total_commission))}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
                                 );
-                              });
-                            })() : (
-                              <TableRow>
-                                <TableCell colSpan={5} className="text-center text-muted-foreground text-sm py-8">
-                                  No commission data available for this period
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
+                              })}
+                          </div>
+                        ) : (
+                          <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
+                            No commission data available for this period
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1381,28 +1287,25 @@ const AccountingTab = () => {
         </Card>
       </div>
 
-      {/* Controls */}
+      {/* Search and Filters */}
       <div className="space-y-3 lg:space-y-4">
-        {/* Search Row */}
-        <div className="relative w-full lg:max-w-lg group">
-          <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/5 rounded-lg blur-sm opacity-0 group-focus-within:opacity-100 transition-opacity" />
-          <div className="relative flex items-center">
-            <Search className="absolute left-3 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-            <Input
-              placeholder="Search by code or name..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-9 h-10 bg-muted/30 border-muted-foreground/20 focus:border-primary/50 focus:bg-background transition-all"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-3 h-4 w-4 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
+        {/* Search Bar */}
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by code, name, or RM..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 pr-10 bg-muted/30 border-border/50"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
           {debouncedSearch && (
             <span className="absolute -bottom-5 left-0 text-xs text-muted-foreground">
               {totalCount} result{Number(totalCount) !== 1 ? 's' : ''} found
@@ -1436,66 +1339,34 @@ const AccountingTab = () => {
             </SelectContent>
           </Select>
 
-          {/* Date Range Selection */}
+          {/* Single EOD Date Selection */}
           <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
+            <Label className="text-xs text-muted-foreground">EOD Date:</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 px-3">
                   <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(fromDate, 'dd MMM yy')}
+                  {format(selectedDate, 'dd MMM yyyy')}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0 z-50 bg-background border">
                 <Calendar
                   mode="single"
-                  selected={fromDate}
-                  onSelect={handleFromDateChange}
+                  selected={selectedDate}
+                  onSelect={(date) => date && setSelectedDate(normalizeToLocalDate(date))}
                   className="pointer-events-auto"
                 />
               </PopoverContent>
             </Popover>
-            <ArrowRight className="h-4 w-4 text-muted-foreground" />
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 px-3">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {format(toDate, 'dd MMM yy')}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0 z-50 bg-background border">
-                <Calendar
-                  mode="single"
-                  selected={toDate}
-                  onSelect={(d) => d && setToDate(normalizeToLocalDate(d))}
-                  className="pointer-events-auto"
-                />
-              </PopoverContent>
-            </Popover>
-            {/* Single Day Mode Button */}
-            {dateRangeDays > 1 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleSetSingleDay}
-                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-                title="Set To = From (single day)"
-              >
-                1 Day
-              </Button>
-            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs lg:text-sm text-muted-foreground hidden md:inline">
-              Period: {format(fromDate, 'dd MMM')} - {format(toDate, 'dd MMM yyyy')} ({dateRangeDays} day{dateRangeDays !== 1 ? 's' : ''})
-            </span>
-            {isLargeRange && (
-              <span className="text-xs text-amber-400 flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3" />
-                Large range
-              </span>
-            )}
-          </div>
+          {/* EOD Status Indicator */}
+          {hasEodData && eodStatus && (
+            <div className="flex items-center gap-2 text-xs text-emerald-400">
+              <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>{eodStatus.clients_captured?.toLocaleString()} clients captured</span>
+            </div>
+          )}
 
           <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto flex-wrap">
             <Dialog open={isFieldDialogOpen} onOpenChange={setIsFieldDialogOpen}>
@@ -1645,46 +1516,11 @@ const AccountingTab = () => {
         </div>
       </div>
 
-      {/* Error Banner - Enhanced for timeout errors */}
-      {isError && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div>
-                <p className="font-medium">
-                  {isTimeoutError ? 'Query timed out - date range too large' : 'Failed to load accounting data'}
-                </p>
-                <p className="text-sm opacity-80 mt-1">
-                  {isTimeoutError 
-                    ? `The selected ${dateRangeDays}-day range requires too much processing. Try a single day.`
-                    : ((queryError as Error)?.message || 'Unknown error')}
-                </p>
-              </div>
-              {isTimeoutError && dateRangeDays > 1 && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => {
-                    handleSetSingleDay();
-                    setTimeout(() => refetch(), 100);
-                  }}
-                  className="shrink-0"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Try Single Day
-                </Button>
-              )}
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
       {/* Debug Info */}
       <div className="text-xs text-muted-foreground mb-2 flex flex-wrap gap-2 items-center">
         <span>Fetched: <strong>{accountingResult?.length ?? 0}</strong> rows</span>
         <span>|</span>
-        <span>Range: {format(fromDate, 'MMM dd')} → {format(toDate, 'MMM dd, yyyy')}</span>
+        <span>EOD Date: {format(selectedDate, 'MMM dd, yyyy')}</span>
         <span>|</span>
         <span>Visible columns: <strong>{visibleColumns.length}</strong></span>
         {visibleColumns.length === 0 && (
@@ -1720,6 +1556,20 @@ const AccountingTab = () => {
               {Array.from({ length: 10 }).map((_, i) => (
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
+            </div>
+          ) : !hasEodData ? (
+            <div className="p-12 text-center">
+              <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No EOD Data Available</h3>
+              <p className="text-muted-foreground mb-4">
+                EOD processing has not been run for {format(selectedDate, "PPP")}.
+              </p>
+              <Button asChild>
+                <a href="/eod">
+                  <LinkIcon className="h-4 w-4 mr-2" />
+                  Go to EOD Page
+                </a>
+              </Button>
             </div>
           ) : (
             <div>
@@ -1797,77 +1647,66 @@ const AccountingTab = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedData.map((row) => (
-                      <TableRow 
-                        key={row.investor_code}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => setSelectedInvestor(row)}
-                      >
-                        {visibleColumns.map(column => {
-                          const isClickableTrade = column.id === 'gross_buy' || column.id === 'gross_sell';
-                          const cellValue = row[column.id];
-                          const hasValue = typeof cellValue === 'number' && cellValue > 0;
-                          
-                          if (isClickableTrade && hasValue) {
-                            return (
-                              <TableCell 
-                                key={column.id} 
-                                className={cn(
-                                  getCellClassName(row, column),
-                                  "cursor-pointer hover:underline"
-                                )}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedTradeInvestor(row);
-                                  setSelectedTradeType(column.id === 'gross_buy' ? 'BUY' : 'SELL');
-                                  setTradeDetailsOpen(true);
-                                }}
-                              >
-                                {getCellValue(row, column.id)}
-                              </TableCell>
-                            );
-                          }
-                          
-                          return (
-                            <TableCell 
-                              key={column.id} 
-                              className={getCellClassName(row, column)}
-                            >
-                              {getCellValue(row, column.id)}
-                            </TableCell>
-                          );
-                        })}
-                        {customFields.map(field => (
-                          <TableCell key={field.id} className="text-right">
-                            {formatCurrency(Number(row[field.id]) || 0)}
-                          </TableCell>
-                        ))}
-                        <TableCell></TableCell>
-                      </TableRow>
-                    ))}
-                    {sortedData.length === 0 && !isError && (
+                    {sortedData.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={visibleColumns.length + customFields.length + 1} className="text-center py-8">
-                          <p className="text-muted-foreground">
-                            {debouncedSearch 
-                              ? `No investors found matching "${debouncedSearch}"` 
-                              : `No trades or transactions found for ${format(fromDate, 'MMM dd')} - ${format(toDate, 'MMM dd, yyyy')}`}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            Try adjusting the date range or clearing your search
-                          </p>
+                        <TableCell colSpan={visibleColumns.length + customFields.length + 1} className="text-center py-8 text-muted-foreground">
+                          No accounting data found for the selected criteria
                         </TableCell>
                       </TableRow>
+                    ) : (
+                      sortedData.map((row, index) => (
+                        <TableRow 
+                          key={`${row.investor_code}-${index}`}
+                          className="hover:bg-muted/30 cursor-pointer transition-colors"
+                          onClick={() => setSelectedInvestor(row)}
+                        >
+                          {visibleColumns.map(column => (
+                            <TableCell 
+                              key={column.id}
+                              className={getCellClassName(row, column)}
+                            >
+                              {column.id === 'gross_buy' ? (
+                                <button
+                                  className="text-red-400 hover:underline hover:text-red-300 transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTradeInvestor(row);
+                                    setSelectedTradeType('BUY');
+                                    setTradeDetailsOpen(true);
+                                  }}
+                                >
+                                  {getCellValue(row, column.id)}
+                                </button>
+                              ) : column.id === 'gross_sell' ? (
+                                <button
+                                  className="text-green-400 hover:underline hover:text-green-300 transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedTradeInvestor(row);
+                                    setSelectedTradeType('SELL');
+                                    setTradeDetailsOpen(true);
+                                  }}
+                                >
+                                  {getCellValue(row, column.id)}
+                                </button>
+                              ) : (
+                                getCellValue(row, column.id)
+                              )}
+                            </TableCell>
+                          ))}
+                          {customFields.map(field => (
+                            <TableCell key={field.id} className="text-right text-primary">
+                              {typeof row[field.id] === 'number' 
+                                ? formatCurrency(row[field.id] as number)
+                                : row[field.id]}
+                            </TableCell>
+                          ))}
+                          <TableCell className="w-[40px]" />
+                        </TableRow>
+                      ))
                     )}
                   </TableBody>
                 </Table>
-              </div>
-
-              {/* Record Count */}
-              <div className="flex items-center justify-between px-6 py-4 border-t">
-                <span className="text-sm text-muted-foreground">
-                  Showing all {Number(totalCount).toLocaleString()} records
-                </span>
               </div>
             </div>
           )}
@@ -1878,22 +1717,22 @@ const AccountingTab = () => {
       {selectedInvestor && (
         <AccountingReconciliationDialog
           investor={selectedInvestor}
-          fromDate={fromDate}
-          toDate={toDate}
           onClose={() => setSelectedInvestor(null)}
+          fromDate={selectedDate}
+          toDate={selectedDate}
         />
       )}
 
       {/* Trade Details Dialog */}
       {selectedTradeInvestor && (
         <TradeDetailsDialog
+          open={tradeDetailsOpen}
+          onOpenChange={setTradeDetailsOpen}
           investorCode={selectedTradeInvestor.investor_code}
           investorName={selectedTradeInvestor.investor_name}
           tradeType={selectedTradeType}
-          fromDate={fromDate}
-          toDate={toDate}
-          open={tradeDetailsOpen}
-          onOpenChange={setTradeDetailsOpen}
+          fromDate={selectedDate}
+          toDate={selectedDate}
         />
       )}
     </div>
