@@ -3076,6 +3076,14 @@ export type Database = {
         Returns: Json
       }
       sync_departments_from_employees: { Args: never; Returns: Json }
+      update_investor_balances_bulk: {
+        Args: { updates: Json }
+        Returns: number
+      }
+      update_investor_commissions_bulk: {
+        Args: { updates: Json }
+        Returns: number
+      }
     }
     Enums: {
       app_role: "admin" | "rm" | "user" | "agent" | "mancom" | "branch_manager"
