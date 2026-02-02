@@ -1,104 +1,102 @@
 
-# Fix EOD Opening Balance Priority to Use Official Baseline
 
-## Problem Analysis
-The Feb 1st closing balances are incorrect because `process_staged_trades` uses the **snapshot chain** (`eod_ledger_snapshots`) instead of the **official baseline** (`eod_investor_balance`) for opening balances.
+# Fix Deposits/Withdrawals Import for Excel File
 
-### Evidence
-| Investor | Excel (Expected) | DB Actual | Difference |
-|----------|-----------------|-----------|------------|
-| 13839 | -201,784 | -719,678 | 517,894 (wrong) |
-| 20337 | -158,519 | +3,439,298 | 3.6M (wrong) |
-| 21878 | -73,474 | -681,679 | 608,205 (wrong) |
-| OBO4135 | -458,336 | -565,362 | 107,026 (wrong) |
+## Problem Summary
+The import is failing because footer rows in the Excel file are not being properly filtered out. The file has summary rows like "Total of 2026-02-02 :", "Grand Total :", and "Print Date & Time :" that are passing through the current filter and causing validation errors.
 
-### Root Cause
-The `process_staged_trades` function (lines 84-102) gets opening balances from:
-```sql
-SELECT closing_balance AS opening_balance
-FROM eod_ledger_snapshots
-WHERE eod_date = v_prev_date;
-```
+## Root Cause Analysis
+The file contains 401 valid data rows followed by 3 footer rows:
+- Row 409: `|Total of 2026-02-02 :|34,013,947.52|113,326,241.83|...`
+- Row 410: `|Grand Total :|34,013,947.52|113,326,241.83|...`
+- Row 411: `|Print Date & Time : 2/2/2026 3:57:06PM|Powered By Cygnus Innovation Ltd.|...`
 
-It does NOT check `eod_investor_balance.closing_ledger_balance` first, which contains the official imported baseline.
+The current filter in `DepositsImportDialog.tsx` (lines 181-186) only checks:
+- If the first column contains "date" (but "Total" does not contain "date")
+- If the first column is empty
+- If the SL column is not a number (but footer rows don't have the "SL" key)
 
----
+These footer rows pass the filter and get mapped to records with:
+- `investor_code`: "Total of 2026-02-02 :" (invalid)
+- `amount`: some number value (from Debit/Credit columns)
+
+This causes validation to fail or produces invalid records.
 
 ## Solution
 
-### Database Migration: Update process_staged_trades function
-
-Modify STEP 2 to implement the correct priority chain:
+### Enhance Footer Row Detection
+Update the filter logic in `DepositsImportDialog.tsx` to exclude common footer patterns:
 
 ```text
-Priority 1: eod_investor_balance.closing_ledger_balance (official baseline)
-Priority 2: eod_ledger_snapshots.closing_balance (previous day snapshot)
-Priority 3: investors.ledger_balance (master table)
-Priority 4: 0 (new accounts)
+Current filter:
+- Contains "date" -> exclude
+- Empty first column -> exclude  
+- SL column exists but is not a number -> exclude
+
+Enhanced filter (add these checks):
+- Contains "total" -> exclude
+- Contains "grand" -> exclude
+- Contains "print" -> exclude
+- Contains "page" -> exclude
+- Contains "powered" -> exclude
 ```
 
 ### Implementation Changes
 
-```sql
--- STEP 2: Get opening balances with correct priority
-CREATE TEMP TABLE tmp_opening_balances ON COMMIT DROP AS
-SELECT 
-  COALESCE(ob.investor_code, ls.investor_code) AS investor_code,
-  -- Priority 1: Official baseline, Priority 2: Snapshot chain
-  COALESCE(ob.closing_ledger_balance, ls.closing_balance) AS opening_balance,
-  COALESCE(ls.cumulative_interest, 0) AS cumulative_interest
-FROM eod_investor_balance ob
-FULL OUTER JOIN eod_ledger_snapshots ls 
-  ON ob.investor_code = ls.investor_code
-  AND ls.eod_date = v_prev_date
-WHERE ob.trade_date = v_prev_date;
+**File: `src/components/eod/DepositsImportDialog.tsx`**
+
+Modify lines 181-186 to add additional footer row exclusion patterns:
+
+```typescript
+// Filter out rows that are date headers, footer rows, or empty
+const filteredData = jsonData.filter((row: any) => {
+  const firstCol = String(row["SL"] || row["Sl"] || row["sl"] || row["S.L"] || row["S.L."] || Object.values(row)[0] || '').trim().toLowerCase();
+  
+  // Exclude date header rows
+  if (firstCol.includes('date')) return false;
+  
+  // Exclude empty rows
+  if (!firstCol) return false;
+  
+  // Exclude footer/summary rows
+  if (firstCol.includes('total')) return false;
+  if (firstCol.includes('grand')) return false;
+  if (firstCol.includes('print')) return false;
+  if (firstCol.includes('page')) return false;
+  if (firstCol.includes('powered')) return false;
+  
+  // If SL column exists, it must be a valid number
+  if (row["SL"] !== undefined && isNaN(Number(firstCol))) return false;
+  
+  return true;
+});
 ```
 
-This ensures:
-1. If an official baseline exists for the previous date, use it
-2. Fall back to snapshot chain only if no baseline imported
-3. New accounts without either get 0 from master table
+### Additional Safety Check
+Also add validation to skip records where the investor_code looks like a footer:
 
----
+```typescript
+// In mappedRecords mapping, skip invalid investor codes
+if (!investorCode || 
+    investorCode.toLowerCase().includes('total') ||
+    investorCode.toLowerCase().includes('grand') ||
+    investorCode.toLowerCase().includes('print')) {
+  return null;
+}
+```
 
-## Verification After Fix
+Then filter out the null values after mapping.
 
-1. Clear Feb 1st EOD data
-2. Re-run `process_staged_trades('2026-02-01')`
-3. Verify closing balances match Excel reference:
-   - 13839: -201,784
-   - 20337: -158,519
-   - 21878: -73,474
-   - OBO4135: -458,336
-
----
+## Expected Outcome
+After this fix:
+- The 401 valid data rows will be imported correctly
+- Footer rows (Total, Grand Total, Print Date) will be excluded
+- Deposits: ~113.3M (from Credit column for "Receipt" rows)
+- Withdrawals: ~34M (from Debit column for "Paid" rows)
 
 ## Files to Modify
 
-| File | Action |
+| File | Change |
 |------|--------|
-| Database function `process_staged_trades` | Update STEP 2 to use priority chain |
+| `src/components/eod/DepositsImportDialog.tsx` | Add footer row exclusion patterns to the filter logic |
 
----
-
-## Technical Details
-
-The fix changes the opening balance source from:
-
-**Before (Current - Broken):**
-```sql
-SELECT closing_balance FROM eod_ledger_snapshots WHERE eod_date = v_prev_date
-```
-
-**After (Fixed):**
-```sql
-SELECT 
-  COALESCE(
-    eod_investor_balance.closing_ledger_balance,  -- Priority 1
-    eod_ledger_snapshots.closing_balance,         -- Priority 2
-    investors.ledger_balance,                      -- Priority 3
-    0                                              -- Priority 4
-  ) AS opening_balance
-```
-
-This aligns with the documented fallback chain in the system architecture and ensures that official baseline imports act as authoritative "resets" for corrupted snapshot chains.
