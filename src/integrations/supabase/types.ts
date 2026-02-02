@@ -2541,7 +2541,7 @@ export type Database = {
     Functions: {
       auto_create_missing_investors: {
         Args: { p_trade_date: string }
-        Returns: number
+        Returns: Json
       }
       bulk_assign_department_heads: {
         Args: { head_emails: string[] }
