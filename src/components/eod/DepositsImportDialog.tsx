@@ -177,12 +177,24 @@ export function DepositsImportDialog({
         defval: null 
       });
       
-      // Filter out rows that are date headers or empty
+      // Filter out rows that are date headers, footer/summary rows, or empty
       const filteredData = jsonData.filter((row: any) => {
         const firstCol = String(row["SL"] || row["Sl"] || row["sl"] || row["S.L"] || row["S.L."] || Object.values(row)[0] || '').trim();
-        if (firstCol.toLowerCase().includes('date')) return false;
+        const firstColLower = firstCol.toLowerCase();
+        
+        // Exclude date header rows
+        if (firstColLower.includes('date')) return false;
+        
+        // Exclude empty rows
         if (!firstCol) return false;
+        
+        // Exclude footer/summary rows
+        const footerKeywords = ['total', 'grand', 'print', 'page', 'powered', 'generated', 'report'];
+        if (footerKeywords.some(keyword => firstColLower.includes(keyword))) return false;
+        
+        // If SL column exists, it must be a valid number
         if (row["SL"] !== undefined && isNaN(Number(firstCol))) return false;
+        
         return true;
       });
 
@@ -206,6 +218,16 @@ export function DepositsImportDialog({
           row["Code"] ||
           ""
         ).trim();
+
+        // Skip rows with invalid investor codes (additional safety check for footer rows)
+        const investorCodeLower = investorCode.toLowerCase();
+        if (!investorCode || 
+            investorCodeLower.includes('total') ||
+            investorCodeLower.includes('grand') ||
+            investorCodeLower.includes('print') ||
+            investorCodeLower.includes('powered')) {
+          return null;
+        }
 
         let rawType = String(
           row["Tr. Type"] ||
@@ -306,7 +328,7 @@ export function DepositsImportDialog({
           remarks: remarks,
           rm_email: row["RM Email"] || row["rm_email"] || row["RM_Email"] || row["RM"] || null,
         };
-      });
+      }).filter((record): record is NonNullable<typeof record> => record !== null);
 
       // Validate records
       const { valid, errors } = validateRecords(
