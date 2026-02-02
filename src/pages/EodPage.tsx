@@ -465,8 +465,8 @@ export default function EodPage() {
 
         {/* Historical Data Alert - show when viewing saved EOD data */}
         {historicalData && !running && !stagedResult && dayResults.length === 0 && (
-          <Alert>
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
+          <Alert variant="success">
+            <CheckCircle2 className="h-4 w-4" />
             <AlertTitle>EOD Data Available</AlertTitle>
             <AlertDescription className="mt-1">
               Showing saved EOD data from {format(new Date(historicalData.run_at), "PPp")}
