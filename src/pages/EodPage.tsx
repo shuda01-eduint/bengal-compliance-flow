@@ -467,7 +467,7 @@ export default function EodPage() {
         />
 
         {/* Error Alert - show prominently when EOD fails */}
-        {lastError && failedCount > 0 && (
+        {lastError && (failedCount > 0 || (stagedResult && !stagedResult.success)) && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>EOD Processing Failed</AlertTitle>
@@ -478,7 +478,7 @@ export default function EodPage() {
         )}
 
         {/* Stale Data Warning - show when staging data differs from historical */}
-        {isDataStale && !running && !stagedResult && dayResults.length === 0 && (
+        {isDataStale && !running && (!stagedResult || !stagedResult.success) && dayResults.length === 0 && (
           <Alert variant="warning">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Data Changed Since Last EOD</AlertTitle>
@@ -489,8 +489,8 @@ export default function EodPage() {
           </Alert>
         )}
 
-        {/* Historical Data Alert - show when viewing saved EOD data */}
-        {historicalData && !running && !stagedResult && dayResults.length === 0 && !isDataStale && (
+        {/* Historical Data Alert - show when viewing saved EOD data (even after failed processing) */}
+        {historicalData && !running && (!stagedResult || !stagedResult.success) && dayResults.length === 0 && !isDataStale && (
           <Alert variant="success">
             <CheckCircle2 className="h-4 w-4" />
             <AlertTitle>EOD Data Available</AlertTitle>
@@ -501,65 +501,65 @@ export default function EodPage() {
           </Alert>
         )}
 
-        {/* Summary Cards - Priority: staged result > batch result > historical data */}
-        <EodSummaryCards
-          totalTrades={
-            stagedResult?.trade_count ?? 
-            (dayResults.length > 0 ? summary.totalTrades : null) ?? 
-            historicalData?.trade_files_count ?? 
-            0
-          }
-          clientsCaptured={
-            stagedResult?.snapshots_created ?? 
-            (dayResults.length > 0 ? summary.clientsCaptured : null) ?? 
-            historicalData?.clients_captured ?? 
-            0
-          }
-          grossBuy={
-            stagedResult?.gross_buy ?? 
-            (dayResults.length > 0 ? summary.grossBuy : null) ?? 
-            historicalData?.gross_buy ?? 
-            0
-          }
-          grossSell={
-            stagedResult?.gross_sell ?? 
-            (dayResults.length > 0 ? summary.grossSell : null) ?? 
-            historicalData?.gross_sell ?? 
-            0
-          }
-          totalCommission={
-            stagedResult?.total_commission ?? 
-            (dayResults.length > 0 ? summary.totalCommission : null) ?? 
-            historicalData?.total_commission ?? 
-            0
-          }
-          totalDeposits={
-            stagedResult?.total_deposits ?? 
-            (dayResults.length > 0 ? summary.totalDeposits : null) ?? 
-            stagingSummary?.totalDeposits ??
-            historicalData?.total_deposits ?? 
-            0
-          }
-          totalWithdrawals={
-            stagedResult?.total_withdrawals ?? 
-            (dayResults.length > 0 ? summary.totalWithdrawals : null) ?? 
-            stagingSummary?.totalWithdrawals ??
-            historicalData?.total_withdrawals ?? 
-            0
-          }
-          errorsCount={
-            stagedResult ? (stagedResult.success ? 0 : 1) : 
-            (dayResults.length > 0 ? summary.errorsCount : 0)
-          }
-          positionsCaptured={stagedResult?.positions_captured ?? 0}
-          totalMarketValue={stagedResult?.total_market_value ?? 0}
-          marginAccounts={stagedResult?.margin_accounts ?? 0}
-          marginExposure={stagedResult?.margin_exposure ?? 0}
-          dailyInterestTotal={stagedResult?.daily_interest_total ?? 0}
-          totalEquity={stagedResult?.total_equity ?? 0}
-          negativeEquityCount={stagedResult?.negative_equity_count ?? 0}
-          visible={showSummary || !!historicalData}
-        />
+        {/* Summary Cards - Priority: successful staged result > batch result > historical data */}
+        {(() => {
+          // Only use stagedResult if it was successful
+          const useStaged = stagedResult?.success === true;
+          const useBatch = dayResults.length > 0;
+          
+          return (
+            <EodSummaryCards
+              totalTrades={
+                useStaged ? (stagedResult?.trade_count ?? 0) :
+                useBatch ? summary.totalTrades :
+                historicalData?.trade_files_count ?? 0
+              }
+              clientsCaptured={
+                useStaged ? (stagedResult?.snapshots_created ?? 0) :
+                useBatch ? summary.clientsCaptured :
+                historicalData?.clients_captured ?? 0
+              }
+              grossBuy={
+                useStaged ? (stagedResult?.gross_buy ?? 0) :
+                useBatch ? summary.grossBuy :
+                historicalData?.gross_buy ?? 0
+              }
+              grossSell={
+                useStaged ? (stagedResult?.gross_sell ?? 0) :
+                useBatch ? summary.grossSell :
+                historicalData?.gross_sell ?? 0
+              }
+              totalCommission={
+                useStaged ? (stagedResult?.total_commission ?? 0) :
+                useBatch ? summary.totalCommission :
+                historicalData?.total_commission ?? 0
+              }
+              totalDeposits={
+                useStaged ? (stagedResult?.total_deposits ?? 0) :
+                useBatch ? summary.totalDeposits :
+                stagingSummary?.totalDeposits ?? historicalData?.total_deposits ?? 0
+              }
+              totalWithdrawals={
+                useStaged ? (stagedResult?.total_withdrawals ?? 0) :
+                useBatch ? summary.totalWithdrawals :
+                stagingSummary?.totalWithdrawals ?? historicalData?.total_withdrawals ?? 0
+              }
+              errorsCount={
+                useStaged ? 0 :
+                useBatch ? summary.errorsCount :
+                0
+              }
+              positionsCaptured={useStaged ? (stagedResult?.positions_captured ?? 0) : 0}
+              totalMarketValue={useStaged ? (stagedResult?.total_market_value ?? 0) : 0}
+              marginAccounts={useStaged ? (stagedResult?.margin_accounts ?? 0) : 0}
+              marginExposure={useStaged ? (stagedResult?.margin_exposure ?? 0) : 0}
+              dailyInterestTotal={useStaged ? (stagedResult?.daily_interest_total ?? 0) : 0}
+              totalEquity={useStaged ? (stagedResult?.total_equity ?? 0) : 0}
+              negativeEquityCount={useStaged ? (stagedResult?.negative_equity_count ?? 0) : 0}
+              visible={showSummary || !!historicalData}
+            />
+          );
+        })()}
 
         {/* EOD Log Table */}
         <div className="space-y-4">
