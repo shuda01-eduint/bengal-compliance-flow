@@ -1,144 +1,99 @@
-# ✅ IMPLEMENTED: Fix Commission/Data Mismatch in Accounting Page
 
 
-## Problem Identified
+## Plan: Fix EOD Summary Display and Missing Investor Auto-Creation
 
-The Accounting page shows different totals than expected because:
+### Problem Summary
+After running staged processing for Feb 02, 2026, the EOD Summary cards display all zeros and show "1 error" despite valid historical data existing in the EOD Run History table. This is caused by two issues:
 
-1. **Missing Investor Master Records**: 1,287 trades (~BDT 61.7M) on Feb 02 are from investor codes that don't exist in the `investors` master table
-2. **Snapshot-Only Capture**: The `process_staged_trades` function only creates `eod_ledger_snapshots` for investors that exist in the `investors` table
-3. **History vs Snapshot Mismatch**: `eod_run_history` records totals from ALL staging data, but `eod_ledger_snapshots` only has matched investors
-
-### Data Comparison for Feb 02, 2026
-
-| Metric | eod_run_history | eod_ledger_snapshots | Difference |
-|--------|-----------------|----------------------|------------|
-| Gross Buy | 696.9M | 654.0M | -42.9M (missing) |
-| Gross Sell | 691.1M | 672.3M | -18.8M (missing) |
-| Commission | 4.47M | 4.22M | -246K (missing) |
-| Deposits | 113.3M | 82.5M | -30.9M (missing) |
-| Withdrawals | 34.0M | 33.0M | -1.0M (missing) |
-
-### Missing Investor Examples
-
-Top unmatched investor codes with trades:
-- 14255: 19.9M (single trade)
-- 22339: 2.9M
-- 9999: 2.9M
-- GCML5689: 2.6M
-- 22569: 2.6M
+1. **Summary display logic bug**: When batch processing fails, the UI shows the failed result (all zeros) instead of falling back to historical data
+2. **Missing investors**: 175 investor codes in staging data are not in the `investors` master table, which may cause EOD processing to timeout
 
 ---
 
-## Solution Options
+### Technical Analysis
 
-### Option A: Add Missing Investors to Master Table (Recommended)
-
-Import the missing investor codes into the `investors` table so they're captured in EOD snapshots.
-
-**Steps:**
-1. Create a query to identify all investor codes in staging tables not in investors master
-2. Auto-generate investor records with default values for missing codes
-3. Re-run EOD processing to capture all data
-
-### Option B: Modify EOD Processing to Auto-Create Missing Investors
-
-Update `process_staged_trades` to automatically create placeholder investor records for any investor_code found in trades/deposits that doesn't exist in the master table.
-
-**Implementation:**
-```sql
--- Before processing, insert missing investors with defaults
-INSERT INTO investors (investor_code, investor_name, brokerage_commission)
-SELECT DISTINCT 
-  tf.investor_code,
-  'Auto-created: ' || tf.investor_code,
-  0.004  -- Default 0.4% commission
-FROM trade_file tf
-LEFT JOIN investors i ON i.investor_code = tf.investor_code
-WHERE i.investor_code IS NULL
-  AND tf.trade_date = p_trade_date
-ON CONFLICT (investor_code) DO NOTHING;
+**Root Cause 1: Display Priority Bug**
+The current code in `EodPage.tsx` (lines 506-561) prioritizes data sources as:
+```
+1. Successful staged result (stagedResult?.success === true)
+2. Batch results (dayResults.length > 0)  ← BUG: This includes failed results
+3. Historical data (historicalData)
 ```
 
-### Option C: Show Unmatched Data Warning in Accounting Page
+When a batch run fails, `dayResults.length > 0` is true, so it shows the failed result's zeros instead of the valid historical data.
 
-Add a warning banner showing how much data is unmatched, with a link to import missing investors.
+**Root Cause 2: Missing Investors**
+- 117 unique investor codes in `trade_file` for Feb 02 not found in `investors`
+- 78 unique investor codes in `cash_ledger_txn` for Feb 02 not found in `investors`  
+- Total: 175 unique missing codes
+- Sample codes: 11144, 11283, 11469, 13264, 13557, etc.
+
+**Root Cause 3: Statement Timeout**
+Database logs show "canceling statement due to statement timeout" errors, likely because the EOD processing is too slow when handling unmatched data.
 
 ---
 
-## Recommended Approach: Option B + Option C
+### Solution Steps
 
-1. **Modify EOD Function** to auto-create placeholder investor records during processing
-2. **Add Warning UI** in Accounting page when there's unmatched staging data
-3. **Create Admin Tool** to review and update auto-created investor records
-
----
-
-## Technical Implementation
-
-### Step 1: Update process_staged_trades Function
-
-Add auto-creation of missing investors at the start of processing:
-
-```sql
--- Step 0: Create placeholder records for missing investors
-INSERT INTO investors (investor_code, investor_name, brokerage_commission, status, created_at)
-SELECT DISTINCT
-  COALESCE(tf.investor_code, clt.investor_code),
-  'Pending Update',
-  0.004,
-  'Auto-Created',
-  NOW()
-FROM (
-  SELECT DISTINCT investor_code FROM trade_file WHERE trade_date = p_trade_date
-  UNION
-  SELECT DISTINCT investor_code FROM cash_ledger_txn WHERE txn_date = p_trade_date
-) combined(investor_code)
-LEFT JOIN investors i ON i.investor_code = combined.investor_code
-WHERE i.investor_code IS NULL
-ON CONFLICT (investor_code) DO NOTHING;
-```
-
-### Step 2: Add Unmatched Data Warning to Accounting Page
-
-Create a query to check for unmatched staging data and display a warning:
+#### Step 1: Fix Summary Display Priority Logic
+Modify `EodPage.tsx` to only use batch results when they are **successful**:
 
 ```typescript
-// Query to check unmatched trades
-const { data: unmatchedStats } = useQuery({
-  queryKey: ['unmatched-staging-data', selectedDateStr],
-  queryFn: async () => {
-    const { data } = await supabase.rpc('get_unmatched_staging_summary', {
-      p_trade_date: selectedDateStr
-    });
-    return data;
-  }
-});
+// Current (buggy):
+const useBatch = dayResults.length > 0;
+
+// Fixed:
+const useBatch = dayResults.length > 0 && dayResults.some(r => r.success);
 ```
 
-### Step 3: Create Missing Investors Report
+This ensures that failed batch runs don't hide valid historical data.
 
-Add admin tool to view and update auto-created investor records with proper details.
+#### Step 2: Add "Auto-Create Missing Investors" Button to EOD Page
+Add a UI action to invoke the `auto_create_missing_investors` function for the selected date:
+- Add an "Auto-Create Missing" button in `EodActionButtons.tsx`
+- Show unmatched data count/warning on the EOD page when there's significant unmatched data
+- Wire up the RPC call to `auto_create_missing_investors`
+
+#### Step 3: Add Unmatched Data Warning to EOD Page
+Display a prominent alert when the `useUnmatchedStagingData` hook detects missing investor codes:
+- Show count of unmatched trades and deposits/withdrawals
+- Display sample codes so admin knows which investors are missing
+- Prompt to run auto-creation before processing
 
 ---
 
-## Files to Modify
+### Files to Modify
 
-| File | Change |
-|------|--------|
-| SQL Migration | Update `process_staged_trades` to auto-create missing investors |
-| SQL Migration | Add `get_unmatched_staging_summary` RPC function |
-| `src/components/trade-history/AccountingTab.tsx` | Add unmatched data warning banner |
-| `src/pages/InvestorsPage.tsx` | Add filter to show "Auto-Created" status investors |
+| File | Changes |
+|------|---------|
+| `src/pages/EodPage.tsx` | Fix `useBatch` logic; add auto-create handler; display unmatched warning |
+| `src/components/eod/EodActionButtons.tsx` | Add "Auto-Create Missing" button |
 
 ---
 
-## Expected Outcome
+### Implementation Details
+
+**EodPage.tsx Changes:**
+
+1. Import the `useUnmatchedStagingData` hook
+2. Add state for auto-create processing
+3. Add handler for auto-create RPC call
+4. Fix the `useBatch` priority calculation
+5. Add Alert component for unmatched data warning
+
+**EodActionButtons.tsx Changes:**
+
+1. Add new prop `onAutoCreateMissing`
+2. Add new prop `isAutoCreating`
+3. Add new button for auto-creation
+
+---
+
+### Expected Outcome
 
 After implementation:
-1. All 1,287 missing investors will be auto-created during EOD processing
-2. Commission calculations will include all trades (full 4.47M instead of 4.22M)
-3. Deposits/withdrawals will match (full 113.3M instead of 82.5M)
-4. Accounting page totals will match source data exactly
-5. Admins can review and update auto-created investor details
+1. Failed EOD runs will show the last successful historical data instead of zeros
+2. Admins will see a warning when there are unmatched investor codes
+3. Admins can click "Auto-Create Missing" to generate placeholder records
+4. Re-running EOD will include all investors in snapshots
 
