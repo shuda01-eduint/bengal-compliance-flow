@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { format, eachDayOfInterval } from "date-fns";
 import { rpcWithRetry, formatRpcError } from "@/lib/rpc-utils";
 import type { DateRange } from "react-day-picker";
-import { AlertCircle, CheckCircle2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import { EodDateSelector, type EodMode } from "@/components/eod/EodDateSelector";
@@ -20,6 +20,7 @@ import { CseTradeImportDialog } from "@/components/eod/CseTradeImportDialog";
 import { DepositsImportDialog } from "@/components/eod/DepositsImportDialog";
 import { SettlementCalculationDialog } from "@/components/eod/SettlementCalculationDialog";
 import { useEodHistoricalData } from "@/hooks/useEodHistoricalData";
+import { useEodStagingSummary } from "@/hooks/useEodStagingSummary";
 
 interface BatchEodResult {
   success: boolean;
@@ -92,6 +93,19 @@ export default function EodPage() {
 
   // Fetch historical data for selected date
   const { data: historicalData, isLoading: loadingHistorical } = useEodHistoricalData(selectedDate);
+  
+  // Fetch current staging summary for selected date
+  const { data: stagingSummary } = useEodStagingSummary(selectedDate);
+
+  // Detect if staging data differs from historical data (stale data warning)
+  const isDataStale = !!(
+    historicalData && 
+    stagingSummary && 
+    (
+      Math.abs((historicalData.total_deposits ?? 0) - stagingSummary.totalDeposits) > 0.01 ||
+      Math.abs((historicalData.total_withdrawals ?? 0) - stagingSummary.totalWithdrawals) > 0.01
+    )
+  );
 
   // Import dialog state
   const [dseImportDialogOpen, setDseImportDialogOpen] = useState(false);
@@ -463,8 +477,20 @@ export default function EodPage() {
           </Alert>
         )}
 
+        {/* Stale Data Warning - show when staging data differs from historical */}
+        {isDataStale && !running && !stagedResult && dayResults.length === 0 && (
+          <Alert variant="warning">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Data Changed Since Last EOD</AlertTitle>
+            <AlertDescription className="mt-1">
+              Deposits/Withdrawals have been updated since the last EOD run. 
+              Click "Process Staged" or "Run Full EOD" to recalculate with the new data.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Historical Data Alert - show when viewing saved EOD data */}
-        {historicalData && !running && !stagedResult && dayResults.length === 0 && (
+        {historicalData && !running && !stagedResult && dayResults.length === 0 && !isDataStale && (
           <Alert variant="success">
             <CheckCircle2 className="h-4 w-4" />
             <AlertTitle>EOD Data Available</AlertTitle>
@@ -510,12 +536,14 @@ export default function EodPage() {
           totalDeposits={
             stagedResult?.total_deposits ?? 
             (dayResults.length > 0 ? summary.totalDeposits : null) ?? 
+            stagingSummary?.totalDeposits ??
             historicalData?.total_deposits ?? 
             0
           }
           totalWithdrawals={
             stagedResult?.total_withdrawals ?? 
             (dayResults.length > 0 ? summary.totalWithdrawals : null) ?? 
+            stagingSummary?.totalWithdrawals ??
             historicalData?.total_withdrawals ?? 
             0
           }
