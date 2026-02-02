@@ -8,6 +8,7 @@ import {
   Square,
   Trash2,
   Wallet,
+  UserPlus,
 } from "lucide-react";
 
 interface EodActionButtonsProps {
@@ -20,10 +21,12 @@ interface EodActionButtonsProps {
   onGenerateReport: () => void;
   onClearSelected?: () => void;
   onStop?: () => void;
+  onAutoCreateMissing?: () => void;
   isRunning: boolean;
   isStopping?: boolean;
   isClearing?: boolean;
   isProcessingStaged?: boolean;
+  isAutoCreating?: boolean;
   disabled?: boolean;
   hasDateSelected?: boolean;
 }
@@ -38,10 +41,12 @@ export function EodActionButtons({
   onGenerateReport,
   onClearSelected,
   onStop,
+  onAutoCreateMissing,
   isRunning,
   isStopping,
   isClearing,
   isProcessingStaged,
+  isAutoCreating,
   disabled,
   hasDateSelected,
 }: EodActionButtonsProps) {
@@ -86,6 +91,22 @@ export function EodActionButtons({
         )}
         {isProcessingStaged ? "Processing..." : "Process Staged Trades"}
       </Button>
+
+      {onAutoCreateMissing && (
+        <Button
+          variant="outline"
+          onClick={onAutoCreateMissing}
+          disabled={disabled || isRunning || isAutoCreating || !hasDateSelected}
+          className="text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/30"
+        >
+          {isAutoCreating ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <UserPlus className="mr-2 h-4 w-4" />
+          )}
+          {isAutoCreating ? "Creating..." : "Auto-Create Missing"}
+        </Button>
+      )}
 
       <Button
         variant="outline"

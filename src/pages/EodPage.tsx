@@ -21,6 +21,8 @@ import { DepositsImportDialog } from "@/components/eod/DepositsImportDialog";
 import { SettlementCalculationDialog } from "@/components/eod/SettlementCalculationDialog";
 import { useEodHistoricalData } from "@/hooks/useEodHistoricalData";
 import { useEodStagingSummary } from "@/hooks/useEodStagingSummary";
+import { useUnmatchedStagingData, hasSignificantUnmatchedData } from "@/hooks/useUnmatchedStagingData";
+import { UserPlus } from "lucide-react";
 
 interface BatchEodResult {
   success: boolean;
@@ -96,6 +98,13 @@ export default function EodPage() {
   
   // Fetch current staging summary for selected date
   const { data: stagingSummary } = useEodStagingSummary(selectedDate);
+
+  // Fetch unmatched staging data (missing investors)
+  const { data: unmatchedData, refetch: refetchUnmatched } = useUnmatchedStagingData(selectedDate);
+  const hasUnmatchedData = hasSignificantUnmatchedData(unmatchedData);
+
+  // Auto-create missing investors state
+  const [autoCreating, setAutoCreating] = useState(false);
 
   // Detect if staging data differs from historical data (stale data warning)
   const isDataStale = !!(
@@ -383,6 +392,38 @@ export default function EodPage() {
     toast.info("Generate Report - Coming soon");
   };
 
+  const handleAutoCreateMissing = async () => {
+    if (!selectedDate) {
+      toast.error("Please select a date first");
+      return;
+    }
+
+    setAutoCreating(true);
+    try {
+      const dateStr = format(selectedDate, "yyyy-MM-dd");
+      const { data, error } = await supabase.rpc("auto_create_missing_investors" as any, {
+        p_trade_date: dateStr,
+      });
+
+      if (error) throw error;
+
+      const result = data as { inserted_count?: number; sample_codes?: string[] } | null;
+      if (result?.inserted_count && result.inserted_count > 0) {
+        toast.success(`Created ${result.inserted_count} missing investor(s)`, {
+          description: `Sample: ${result.sample_codes?.slice(0, 5).join(", ")}...`,
+        });
+        refetchUnmatched();
+        queryClient.invalidateQueries({ queryKey: ["investors"] });
+      } else {
+        toast.info("No missing investors to create");
+      }
+    } catch (error: any) {
+      toast.error("Failed to create missing investors", { description: error.message });
+    } finally {
+      setAutoCreating(false);
+    }
+  };
+
   return (
     <MainLayout title="EOD Processing" subtitle="Process end-of-day calculations and settlements">
       <div className="space-y-6">
@@ -417,12 +458,38 @@ export default function EodPage() {
           onGenerateReport={() => toast.info("Generate Report - Coming soon")}
           onClearSelected={handleClearSelected}
           onStop={handleStop}
+          onAutoCreateMissing={handleAutoCreateMissing}
           isRunning={running}
           isStopping={stopping}
           isClearing={clearing}
           isProcessingStaged={processingStaged}
+          isAutoCreating={autoCreating}
           hasDateSelected={hasDateSelected}
         />
+
+        {/* Unmatched Data Warning - show when there are missing investors */}
+        {hasUnmatchedData && !running && hasDateSelected && (
+          <Alert variant="warning">
+            <UserPlus className="h-4 w-4" />
+            <AlertTitle>Missing Investor Records Detected</AlertTitle>
+            <AlertDescription className="mt-1">
+              <p>
+                Found <strong>{unmatchedData?.unmatched_trade_count}</strong> trades and{" "}
+                <strong>{(unmatchedData?.unmatched_deposit_count ?? 0) + (unmatchedData?.unmatched_withdrawal_count ?? 0)}</strong> cash transactions 
+                with investor codes not in the master table.
+              </p>
+              {unmatchedData?.sample_codes && unmatchedData.sample_codes.length > 0 && (
+                <p className="mt-1 text-xs">
+                  Sample codes: {unmatchedData.sample_codes.slice(0, 8).join(", ")}
+                  {unmatchedData.sample_codes.length > 8 && "..."}
+                </p>
+              )}
+              <p className="mt-2 text-xs">
+                Click "Auto-Create Missing" to generate placeholder records before processing.
+              </p>
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* DSE Trade Import Dialog */}
         <DseTradeImportDialog
@@ -501,11 +568,12 @@ export default function EodPage() {
           </Alert>
         )}
 
-        {/* Summary Cards - Priority: successful staged result > batch result > historical data */}
+        {/* Summary Cards - Priority: successful staged result > successful batch result > historical data */}
         {(() => {
           // Only use stagedResult if it was successful
           const useStaged = stagedResult?.success === true;
-          const useBatch = dayResults.length > 0;
+          // Only use batch results if at least one was successful (don't hide historical data for failed runs)
+          const useBatch = dayResults.length > 0 && dayResults.some(r => r.success);
           
           return (
             <EodSummaryCards
