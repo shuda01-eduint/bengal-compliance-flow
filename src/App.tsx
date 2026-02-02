@@ -22,6 +22,7 @@ import AdminPanelPage from "./pages/AdminPanelPage";
 import ViolationsPage from "./pages/ViolationsPage";
 import MarginLoanPage from "./pages/MarginLoanPage";
 import EodPage from "./pages/EodPage";
+import MarketPage from "./pages/MarketPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
@@ -38,6 +39,7 @@ const App = () => (
             <Route path="/auth" element={<AuthPage />} />
             {/* Public pages for all approved users */}
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+            <Route path="/market" element={<ProtectedRoute><MarketPage /></ProtectedRoute>} />
             <Route path="/admin/balances" element={<ProtectedRoute><AdminBalancesPage /></ProtectedRoute>} />
             
             {/* Admin-only pages */}
