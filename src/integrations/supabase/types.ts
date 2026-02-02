@@ -2539,6 +2539,10 @@ export type Database = {
       }
     }
     Functions: {
+      auto_create_missing_investors: {
+        Args: { p_trade_date: string }
+        Returns: number
+      }
       bulk_assign_department_heads: {
         Args: { head_emails: string[] }
         Returns: Json
@@ -3048,6 +3052,18 @@ export type Database = {
           record_count: number
           total_value: number
           unique_clients: number
+        }[]
+      }
+      get_unmatched_staging_summary: {
+        Args: { p_trade_date: string }
+        Returns: {
+          sample_codes: string[]
+          unmatched_deposit_count: number
+          unmatched_deposit_value: number
+          unmatched_trade_count: number
+          unmatched_trade_value: number
+          unmatched_withdrawal_count: number
+          unmatched_withdrawal_value: number
         }[]
       }
       has_role: {

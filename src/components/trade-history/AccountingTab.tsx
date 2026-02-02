@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog";
 import { TradeDetailsDialog } from "./TradeDetailsDialog";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useUnmatchedStagingData, hasSignificantUnmatchedData } from "@/hooks/useUnmatchedStagingData";
 
 export interface AccountingRow {
   investor_code: string;
@@ -141,6 +142,43 @@ type ChartView = 'margin' | 'commission';
 // Normalize a date to local midnight to avoid timezone issues with react-day-picker
 const normalizeToLocalDate = (date: Date): Date => {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+};
+
+// Component to show warning when there's unmatched staging data
+const UnmatchedDataWarning = ({ selectedDate }: { selectedDate: Date }) => {
+  const { data: unmatchedData, isLoading } = useUnmatchedStagingData(selectedDate);
+  
+  if (isLoading || !hasSignificantUnmatchedData(unmatchedData)) {
+    return null;
+  }
+
+  const totalUnmatchedTrades = unmatchedData?.unmatched_trade_count || 0;
+  const totalUnmatchedValue = unmatchedData?.unmatched_trade_value || 0;
+  const sampleCodes = unmatchedData?.sample_codes?.slice(0, 5) || [];
+
+  return (
+    <Alert variant="warning" className="mb-4">
+      <AlertTriangle className="h-4 w-4" />
+      <AlertDescription className="flex flex-col gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <span>
+            <strong>{totalUnmatchedTrades.toLocaleString()} trades</strong> ({formatCurrency(totalUnmatchedValue)}) from unregistered investor codes are not captured in EOD snapshots.
+          </span>
+          <Button variant="outline" size="sm" asChild className="shrink-0 border-amber-500/50 text-amber-400 hover:bg-amber-500/20">
+            <a href="/investors">
+              <Users className="h-4 w-4 mr-2" />
+              Manage Investors
+            </a>
+          </Button>
+        </div>
+        {sampleCodes.length > 0 && (
+          <div className="text-xs text-muted-foreground">
+            Sample codes: {sampleCodes.join(', ')}{sampleCodes.length < totalUnmatchedTrades ? '...' : ''}
+          </div>
+        )}
+      </AlertDescription>
+    </Alert>
+  );
 };
 
 const AccountingTab = () => {
@@ -700,6 +738,9 @@ const AccountingTab = () => {
           </AlertDescription>
         </Alert>
       )}
+
+      {/* Unmatched Investors Warning */}
+      <UnmatchedDataWarning selectedDate={selectedDate} />
 
       {/* Summary Cards - Sticky */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 pb-3 lg:pb-4 -mx-4 px-4 pt-2">
