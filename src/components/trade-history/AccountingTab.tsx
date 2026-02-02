@@ -349,12 +349,16 @@ const AccountingTab = () => {
         query = query.eq('account_type', accountTypeFilter);
       }
 
-      // Apply activity filter
+      // Apply activity filter using explicit conditions that work with .eq()
       if (activityFilter === 'with_trades') {
+        // Use .neq to find rows where at least one has value > 0
+        // Alternative: use .gt with separate conditions combined
         query = query.or('gross_buy.gt.0,gross_sell.gt.0');
       } else if (activityFilter === 'no_trades') {
-        query = query.eq('gross_buy', 0).eq('gross_sell', 0);
+        // Both must be 0 or null
+        query = query.or('gross_buy.is.null,gross_buy.eq.0').or('gross_sell.is.null,gross_sell.eq.0');
       }
+      // 'all' - no additional filter
 
       // Order and limit
       query = query.order('investor_code').limit(1000);
@@ -1354,11 +1358,11 @@ const AccountingTab = () => {
           )}
         </div>
 
-        {/* Actions Row */}
-        <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-2 lg:gap-3">
+        {/* Actions Row - Filters and Date */}
+        <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-3">
           {/* Account Type Filter */}
           <Select value={accountTypeFilter} onValueChange={setAccountTypeFilter}>
-            <SelectTrigger className="w-[130px] h-8 bg-muted/30 border-border/50">
+            <SelectTrigger className="w-[130px] h-9 bg-muted/30 border-border/50">
               <SelectValue placeholder="Account Type" />
             </SelectTrigger>
             <SelectContent className="bg-popover border z-50">
@@ -1370,22 +1374,22 @@ const AccountingTab = () => {
 
           {/* Activity Filter */}
           <Select value={activityFilter} onValueChange={setActivityFilter}>
-            <SelectTrigger className="w-[140px] h-8 bg-muted/30 border-border/50">
+            <SelectTrigger className="w-[140px] h-9 bg-muted/30 border-border/50">
               <SelectValue placeholder="Activity" />
             </SelectTrigger>
             <SelectContent className="bg-popover border z-50">
-              <SelectItem value="all">All Accounts</SelectItem>
+              <SelectItem value="all">All Clients</SelectItem>
               <SelectItem value="with_trades">With Trades</SelectItem>
               <SelectItem value="no_trades">No Trades</SelectItem>
             </SelectContent>
           </Select>
 
           {/* Single EOD Date Selection */}
-          <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
-            <Label className="text-xs text-muted-foreground">EOD Date:</Label>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/30 rounded-lg border border-border/50">
+            <Label className="text-xs text-muted-foreground whitespace-nowrap">EOD Date:</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 px-3">
+                <Button variant="ghost" size="sm" className="h-8 px-3 font-medium">
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {format(selectedDate, 'dd MMM yyyy')}
                 </Button>
@@ -1403,7 +1407,7 @@ const AccountingTab = () => {
 
           {/* EOD Status Indicator */}
           {hasEodData && eodStatus && (
-            <div className="flex items-center gap-2 text-xs text-emerald-400">
+            <div className="flex items-center gap-2 text-xs text-emerald-400 px-2">
               <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
               <span>{eodStatus.clients_captured?.toLocaleString()} clients captured</span>
             </div>
