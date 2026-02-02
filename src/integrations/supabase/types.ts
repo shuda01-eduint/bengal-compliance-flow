@@ -2882,6 +2882,128 @@ export type Database = {
         }
         Relationships: []
       }
+      vw_api_stock_daily: {
+        Row: {
+          category: string | null
+          change: number | null
+          change_pct: number | null
+          close_price: number | null
+          code: string | null
+          date: string | null
+          eps: number | null
+          haircut_pct: number | null
+          is_marginable: boolean | null
+          market: string | null
+          market_cap: number | null
+          name: string | null
+          pe_ratio: number | null
+          prev_close: number | null
+          sector: string | null
+        }
+        Relationships: []
+      }
+      vw_api_stock_fundamentals: {
+        Row: {
+          authorized_cap: number | null
+          category: string | null
+          code: string | null
+          eps: number | null
+          face_value: number | null
+          free_float_mcap: number | null
+          haircut_pct: number | null
+          instrument_type: string | null
+          is_active: boolean | null
+          is_marginable: boolean | null
+          isin: string | null
+          last_agm_date: string | null
+          last_synced_at: string | null
+          listing_year: number | null
+          lot_size: number | null
+          market: string | null
+          market_cap: number | null
+          name: string | null
+          nav: number | null
+          paid_up_cap: number | null
+          pe_ratio: number | null
+          sector: string | null
+          total_shares: number | null
+          updated_at: string | null
+          week_52_high: number | null
+          week_52_low: number | null
+        }
+        Insert: {
+          authorized_cap?: number | null
+          category?: string | null
+          code?: string | null
+          eps?: number | null
+          face_value?: number | null
+          free_float_mcap?: number | null
+          haircut_pct?: number | null
+          instrument_type?: string | null
+          is_active?: boolean | null
+          is_marginable?: boolean | null
+          isin?: string | null
+          last_agm_date?: string | null
+          last_synced_at?: string | null
+          listing_year?: number | null
+          lot_size?: number | null
+          market?: string | null
+          market_cap?: number | null
+          name?: string | null
+          nav?: number | null
+          paid_up_cap?: number | null
+          pe_ratio?: number | null
+          sector?: string | null
+          total_shares?: number | null
+          updated_at?: string | null
+          week_52_high?: number | null
+          week_52_low?: number | null
+        }
+        Update: {
+          authorized_cap?: number | null
+          category?: string | null
+          code?: string | null
+          eps?: number | null
+          face_value?: number | null
+          free_float_mcap?: number | null
+          haircut_pct?: number | null
+          instrument_type?: string | null
+          is_active?: boolean | null
+          is_marginable?: boolean | null
+          isin?: string | null
+          last_agm_date?: string | null
+          last_synced_at?: string | null
+          listing_year?: number | null
+          lot_size?: number | null
+          market?: string | null
+          market_cap?: number | null
+          name?: string | null
+          nav?: number | null
+          paid_up_cap?: number | null
+          pe_ratio?: number | null
+          sector?: string | null
+          total_shares?: number | null
+          updated_at?: string | null
+          week_52_high?: number | null
+          week_52_low?: number | null
+        }
+        Relationships: []
+      }
+      vw_api_stock_historical: {
+        Row: {
+          close_price: number | null
+          code: string | null
+          date: string | null
+          high_price: number | null
+          low_price: number | null
+          name: string | null
+          open_price: number | null
+          trade_count: number | null
+          value_mn: number | null
+          volume: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       auto_create_missing_investors: {
@@ -3374,6 +3496,84 @@ export type Database = {
           closing_balance: number
           event_date: string
           rm_name: string
+        }[]
+      }
+      get_stock_daily: {
+        Args: {
+          _code?: string
+          _date?: string
+          _limit?: number
+          _offset?: number
+          _sector?: string
+        }
+        Returns: {
+          category: string
+          change: number
+          change_pct: number
+          close_price: number
+          code: string
+          date: string
+          eps: number
+          haircut_pct: number
+          is_marginable: boolean
+          market: string
+          market_cap: number
+          name: string
+          pe_ratio: number
+          prev_close: number
+          sector: string
+        }[]
+      }
+      get_stock_fundamentals: {
+        Args: { _code: string }
+        Returns: {
+          authorized_cap: number
+          category: string
+          code: string
+          eps: number
+          face_value: number
+          free_float_mcap: number
+          haircut_pct: number
+          instrument_type: string
+          is_active: boolean
+          is_marginable: boolean
+          isin: string
+          last_agm_date: string
+          last_synced_at: string
+          listing_year: number
+          lot_size: number
+          market: string
+          market_cap: number
+          name: string
+          nav: number
+          paid_up_cap: number
+          pe_ratio: number
+          sector: string
+          total_shares: number
+          updated_at: string
+          week_52_high: number
+          week_52_low: number
+        }[]
+      }
+      get_stock_historical: {
+        Args: {
+          _code: string
+          _from_date?: string
+          _limit?: number
+          _offset?: number
+          _to_date?: string
+        }
+        Returns: {
+          close_price: number
+          code: string
+          date: string
+          high_price: number
+          low_price: number
+          name: string
+          open_price: number
+          trade_count: number
+          value_mn: number
+          volume: number
         }[]
       }
       get_top_margin_clients: {
