@@ -146,3 +146,20 @@ export function useSectors() {
     },
   });
 }
+
+export function useLatestTradeDate() {
+  return useQuery({
+    queryKey: ['latest-trade-date'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('instrument_prices_eod')
+        .select('trade_date')
+        .order('trade_date', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (error) return null;
+      return data?.trade_date as string | null;
+    },
+  });
+}
