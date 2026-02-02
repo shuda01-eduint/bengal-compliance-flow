@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { format, eachDayOfInterval } from "date-fns";
 import { rpcWithRetry, formatRpcError } from "@/lib/rpc-utils";
 import type { DateRange } from "react-day-picker";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import { EodDateSelector, type EodMode } from "@/components/eod/EodDateSelector";
@@ -19,6 +19,7 @@ import { DseTradeImportDialog } from "@/components/eod/DseTradeImportDialog";
 import { CseTradeImportDialog } from "@/components/eod/CseTradeImportDialog";
 import { DepositsImportDialog } from "@/components/eod/DepositsImportDialog";
 import { SettlementCalculationDialog } from "@/components/eod/SettlementCalculationDialog";
+import { useEodHistoricalData } from "@/hooks/useEodHistoricalData";
 
 interface BatchEodResult {
   success: boolean;
@@ -83,16 +84,20 @@ interface ProcessStagedResult {
 
 export default function EodPage() {
   const queryClient = useQueryClient();
+  
+  // Date selection
+  const [mode, setMode] = useState<EodMode>("single");
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+
+  // Fetch historical data for selected date
+  const { data: historicalData, isLoading: loadingHistorical } = useEodHistoricalData(selectedDate);
 
   // Import dialog state
   const [dseImportDialogOpen, setDseImportDialogOpen] = useState(false);
   const [cseImportDialogOpen, setCseImportDialogOpen] = useState(false);
   const [depositsDialogOpen, setDepositsDialogOpen] = useState(false);
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
-  // Date selection
-  const [mode, setMode] = useState<EodMode>("single");
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   // Processing state
   const [running, setRunning] = useState(false);
@@ -458,16 +463,66 @@ export default function EodPage() {
           </Alert>
         )}
 
-        {/* Summary Cards - show from staged result or batch result */}
+        {/* Historical Data Alert - show when viewing saved EOD data */}
+        {historicalData && !running && !stagedResult && dayResults.length === 0 && (
+          <Alert>
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+            <AlertTitle>EOD Data Available</AlertTitle>
+            <AlertDescription className="mt-1">
+              Showing saved EOD data from {format(new Date(historicalData.run_at), "PPp")}
+              {historicalData.run_by_email && ` by ${historicalData.run_by_email}`}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Summary Cards - Priority: staged result > batch result > historical data */}
         <EodSummaryCards
-          totalTrades={stagedResult?.trade_count ?? summary.totalTrades}
-          clientsCaptured={stagedResult?.snapshots_created ?? summary.clientsCaptured}
-          grossBuy={stagedResult?.gross_buy ?? summary.grossBuy}
-          grossSell={stagedResult?.gross_sell ?? summary.grossSell}
-          totalCommission={stagedResult?.total_commission ?? summary.totalCommission}
-          totalDeposits={stagedResult?.total_deposits ?? summary.totalDeposits}
-          totalWithdrawals={stagedResult?.total_withdrawals ?? summary.totalWithdrawals}
-          errorsCount={stagedResult ? (stagedResult.success ? 0 : 1) : summary.errorsCount}
+          totalTrades={
+            stagedResult?.trade_count ?? 
+            (dayResults.length > 0 ? summary.totalTrades : null) ?? 
+            historicalData?.trade_files_count ?? 
+            0
+          }
+          clientsCaptured={
+            stagedResult?.snapshots_created ?? 
+            (dayResults.length > 0 ? summary.clientsCaptured : null) ?? 
+            historicalData?.clients_captured ?? 
+            0
+          }
+          grossBuy={
+            stagedResult?.gross_buy ?? 
+            (dayResults.length > 0 ? summary.grossBuy : null) ?? 
+            historicalData?.gross_buy ?? 
+            0
+          }
+          grossSell={
+            stagedResult?.gross_sell ?? 
+            (dayResults.length > 0 ? summary.grossSell : null) ?? 
+            historicalData?.gross_sell ?? 
+            0
+          }
+          totalCommission={
+            stagedResult?.total_commission ?? 
+            (dayResults.length > 0 ? summary.totalCommission : null) ?? 
+            historicalData?.total_commission ?? 
+            0
+          }
+          totalDeposits={
+            stagedResult?.total_deposits ?? 
+            (dayResults.length > 0 ? summary.totalDeposits : null) ?? 
+            historicalData?.total_deposits ?? 
+            0
+          }
+          totalWithdrawals={
+            stagedResult?.total_withdrawals ?? 
+            (dayResults.length > 0 ? summary.totalWithdrawals : null) ?? 
+            historicalData?.total_withdrawals ?? 
+            0
+          }
+          errorsCount={
+            stagedResult ? (stagedResult.success ? 0 : 1) : 
+            (dayResults.length > 0 ? summary.errorsCount : 0)
+          }
           positionsCaptured={stagedResult?.positions_captured ?? 0}
           totalMarketValue={stagedResult?.total_market_value ?? 0}
           marginAccounts={stagedResult?.margin_accounts ?? 0}
@@ -475,7 +530,7 @@ export default function EodPage() {
           dailyInterestTotal={stagedResult?.daily_interest_total ?? 0}
           totalEquity={stagedResult?.total_equity ?? 0}
           negativeEquityCount={stagedResult?.negative_equity_count ?? 0}
-          visible={showSummary}
+          visible={showSummary || !!historicalData}
         />
 
         {/* EOD Log Table */}
