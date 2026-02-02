@@ -483,8 +483,20 @@ const AccountingTab = () => {
         totalBuy: 0,
         totalSell: 0,
         totalTradeValue: 0,
+        totalCommission: 0,
+        clientsWithTrades: 0,
+        uniqueDepartments: 0,
       };
     }
+    
+    // Count clients with trades (either buy or sell > 0)
+    const clientsWithTrades = accountingData.filter(row => 
+      (row.gross_buy || 0) > 0 || (row.gross_sell || 0) > 0
+    ).length;
+    
+    // Count unique departments
+    const departments = new Set(accountingData.map(row => row.department).filter(Boolean));
+    
     return {
       totalAccounts: accountingData.length,
       marginAccounts: 0,
@@ -495,6 +507,9 @@ const AccountingTab = () => {
       totalBuy: accountingData.reduce((sum, row) => sum + (row.gross_buy || 0), 0),
       totalSell: accountingData.reduce((sum, row) => sum + (row.gross_sell || 0), 0),
       totalTradeValue: accountingData.reduce((sum, row) => sum + (row.gross_buy || 0) + (row.gross_sell || 0), 0),
+      totalCommission: accountingData.reduce((sum, row) => sum + (row.brokerage_amount || 0), 0),
+      clientsWithTrades,
+      uniqueDepartments: departments.size,
     };
   }, [accountingData]);
 
@@ -1113,12 +1128,12 @@ const AccountingTab = () => {
                         </div>
                         <p className="text-xs text-muted-foreground mb-1">Total Commission</p>
                         <p className="text-2xl font-bold text-emerald-400">
-                          {formatCurrency(commissionByDept?.reduce((sum: number, d: { total_commission: number }) => sum + Number(d.total_commission), 0) || 0)}
+                          {formatCurrency(summary.totalCommission)}
                         </p>
                         <div className="mt-2 flex items-center gap-1 text-xs text-emerald-400/80">
                           <span className="inline-flex items-center gap-0.5">
                             <DollarSign className="h-3 w-3" />
-                            {commissionByDept?.length || 0} departments
+                            {summary.uniqueDepartments} departments
                           </span>
                         </div>
                       </div>
@@ -1138,7 +1153,7 @@ const AccountingTab = () => {
                         </div>
                         <p className="text-xs text-muted-foreground mb-1">Total Turnover</p>
                         <p className="text-2xl font-bold text-blue-400">
-                          {formatCurrency(commissionByDept?.reduce((sum: number, d: { total_turnover: number }) => sum + Number(d.total_turnover || 0), 0) || 0)}
+                          {formatCurrency(summary.totalTradeValue)}
                         </p>
                         <div className="mt-2 flex items-center gap-1 text-xs text-blue-400/80">
                           <span>Across all departments</span>
@@ -1146,24 +1161,24 @@ const AccountingTab = () => {
                       </div>
                     </div>
 
-                    {/* Trade Count Card */}
+                    {/* Clients with Trades Card */}
                     <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-amber-500/20 via-amber-500/10 to-transparent border border-amber-500/30 p-4 group hover:border-amber-500/50 transition-all duration-300">
                       <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl transform translate-x-8 -translate-y-8" />
                       <div className="relative">
                         <div className="flex items-center justify-between mb-2">
                           <div className="p-2 rounded-lg bg-amber-500/20">
-                            <ArrowUpRight className="h-4 w-4 text-amber-400" />
+                            <Users className="h-4 w-4 text-amber-400" />
                           </div>
                           <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
                             ACTIVITY
                           </span>
                         </div>
-                        <p className="text-xs text-muted-foreground mb-1">Total Trades</p>
+                        <p className="text-xs text-muted-foreground mb-1">Clients with Trades</p>
                         <p className="text-2xl font-bold text-amber-400">
-                          {(commissionByDept?.reduce((sum: number, d: { trade_count: number }) => sum + Number(d.trade_count || 0), 0) || 0).toLocaleString()}
+                          {summary.clientsWithTrades.toLocaleString()}
                         </p>
                         <div className="mt-2 flex items-center gap-1 text-xs text-amber-400/80">
-                          <span>Executed transactions</span>
+                          <span>Active trading accounts</span>
                         </div>
                       </div>
                     </div>
