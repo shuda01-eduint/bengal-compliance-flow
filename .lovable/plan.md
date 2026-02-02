@@ -1,85 +1,111 @@
 
 
-## Plan: Remove Batch EOD Feature from UI
+## Plan: Fix Accounting Summary Cards to Show Correct EOD Date Totals
 
-### Overview
-Remove the batch EOD processing capability from the EOD page, keeping only single-day processing via "Process Staged Trades".
+### Problem
 
----
-
-### What Will Be Removed
-
-| Component | Current | After |
-|-----------|---------|-------|
-| Date selector | Single Day + Date Range tabs | Single Day only |
-| Run Full EOD button | Present | Removed |
-| Stop button | Shows during batch run | Removed |
-| Progress bar | Shows batch progress | Removed |
-| Batch results tracking | `dayResults`, progress state | Removed |
+The Commission view summary cards show incorrect totals because:
+1. Data is fetched with a **LIMIT 1000** (line 364) but Feb 2 has 1,884 clients with trades
+2. Summary is calculated from this limited dataset, not the complete day data
+3. Expected: ৳4,219,971 Commission, ৳1,326,315,061 Turnover, 1,884 Clients
+4. Current: ৳512,647 Commission, ৳198,195,380 Turnover, 65 Clients
 
 ---
 
-### What Will Be Kept
+### Solution
 
-- **Import DSE Trades** button
-- **Import CSE Trades** button  
-- **Import Deposits/Withdrawals** button
-- **Process Staged Trades** button (primary EOD action)
-- **Auto-Create Missing** button
-- **Calculate Settlements** button
-- **Generate Report** button
-- **Clear Selected** button
-- **EOD Summary Cards** (showing `stagedResult` or `historicalData`)
-- **EOD Log Table** (history of runs)
-- **Alerts** (error, stale data, historical data)
+Create a separate query that fetches **aggregate totals only** for the selected EOD date without the 1000 row limit. The table can continue to paginate, but summary cards will show complete data.
 
 ---
 
-### Files to Modify
+### Changes
 
-| File | Changes |
-|------|---------|
-| `src/pages/EodPage.tsx` | Remove range mode, batch run logic, progress tracking, and related state |
-| `src/components/eod/EodDateSelector.tsx` | Remove mode toggle, simplify to single date picker only |
-| `src/components/eod/EodActionButtons.tsx` | Remove Run Full EOD, Stop button, and related props |
-| `src/components/eod/EodProgressBar.tsx` | Consider deletion (no longer needed) |
-| `src/components/eod/EodStatusDashboard.tsx` | Simplify or remove if only used for batch status |
+**File: `src/components/trade-history/AccountingTab.tsx`**
+
+1. **Add new query for summary aggregates** (around line 315):
+   - Create a new `useQuery` that fetches aggregate totals directly from `eod_ledger_snapshots`
+   - Query: `SELECT SUM(total_commission), SUM(gross_buy), SUM(gross_sell), COUNT(*) ...`
+   - No LIMIT, so it covers all clients for the selected date
+
+2. **Update summary useMemo** (around line 474):
+   - Use the new aggregate query results for the summary cards instead of calculating from limited `accountingData`
+   - Fallback to calculating from `accountingData` if aggregate query fails
+
+3. **Summary cards will use aggregate data**:
+   - Total Commission: From aggregate SUM
+   - Total Turnover: From aggregate SUM(gross_buy + gross_sell) 
+   - Clients with Trades: From aggregate COUNT where gross_buy > 0 OR gross_sell > 0
+   - Departments: From aggregate COUNT(DISTINCT department)
 
 ---
 
 ### Technical Details
 
-**EodPage.tsx changes:**
-- Remove `mode`, `dateRange`, `setDateRange` state
-- Remove `running`, `stopping`, `stopRequested` state
-- Remove `progress`, `currentDateProcessing`, `processedDays`, `totalDays` state
-- Remove `dayResults`, `summary` aggregation
-- Remove `handleRunFullEod`, `handleStop`, `runSingleDayEod` functions
-- Remove `EodProgressBar` component usage
-- Simplify `hasDateSelected` to just check `selectedDate`
-- Remove `completedCount`, `failedCount`, `skippedCount` calculations
+**New Query Structure:**
+```typescript
+const { data: summaryAggregates } = useQuery({
+  queryKey: ['accounting-summary-aggregates', selectedDateStr],
+  queryFn: async () => {
+    const { data, error } = await supabase
+      .from('eod_ledger_snapshots')
+      .select('total_commission, gross_buy, gross_sell, department')
+      .eq('eod_date', selectedDateStr);
+    
+    if (error) throw error;
+    
+    // Calculate aggregates
+    let totalCommission = 0;
+    let totalBuy = 0;
+    let totalSell = 0;
+    let clientsWithTrades = 0;
+    const departments = new Set<string>();
+    
+    (data || []).forEach(row => {
+      totalCommission += Number(row.total_commission) || 0;
+      totalBuy += Number(row.gross_buy) || 0;
+      totalSell += Number(row.gross_sell) || 0;
+      if ((row.gross_buy || 0) > 0 || (row.gross_sell || 0) > 0) {
+        clientsWithTrades++;
+      }
+      if (row.department) departments.add(row.department);
+    });
+    
+    return {
+      totalCommission,
+      totalTurnover: totalBuy + totalSell,
+      clientsWithTrades,
+      uniqueDepartments: departments.size
+    };
+  },
+  enabled: hasEodData,
+});
+```
 
-**EodDateSelector.tsx changes:**
-- Remove `mode`, `onModeChange` props
-- Remove `dateRange`, `onRangeChange` props
-- Remove Tabs component (mode toggle)
-- Remove range calendar option
-- Keep only single date picker with quick date buttons
-
-**EodActionButtons.tsx changes:**
-- Remove `onRunFullEod`, `onStop` props
-- Remove `isRunning`, `isStopping` props
-- Remove Run Full EOD button
-- Remove Stop button
-- Update disabled logic to only use `isProcessingStaged` and `isClearing`
+**Updated Summary Object:**
+```typescript
+const summary = useMemo(() => {
+  // Use aggregate data for cards (complete day totals)
+  return {
+    totalCommission: summaryAggregates?.totalCommission ?? 0,
+    totalTradeValue: summaryAggregates?.totalTurnover ?? 0,
+    clientsWithTrades: summaryAggregates?.clientsWithTrades ?? 0,
+    uniqueDepartments: summaryAggregates?.uniqueDepartments ?? 0,
+    // Keep table-specific calculations from accountingData
+    totalAccounts: accountingData.length,
+    ...
+  };
+}, [summaryAggregates, accountingData]);
+```
 
 ---
 
-### Expected Outcome
+### Expected Result
 
 After implementation:
-- EOD page will have a simpler, single-day focused workflow
-- Users will use "Process Staged Trades" as the primary EOD action
-- No batch/range processing capability in UI
-- Cleaner, more maintainable code with fewer state variables
+- **Total Commission**: ৳4,219,971 (from complete EOD snapshot)
+- **Total Turnover**: ৳1,326,315,061 (from complete EOD snapshot)  
+- **Clients with Trades**: 1,884 (from complete EOD snapshot)
+- **Departments**: Correct count from all data
+
+The table will still show paginated/limited results, but summary cards will reflect the full day's activity.
 
