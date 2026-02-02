@@ -326,6 +326,8 @@ export default function EodPage() {
 
     setProcessingStaged(true);
     setStagedResult(null);
+    setDayResults([]); // Clear batch results so staged results show correctly
+    setLastError(null);
     
     try {
       const dateStr = format(selectedDate, "yyyy-MM-dd");
@@ -345,11 +347,13 @@ export default function EodPage() {
         setShowSummary(true);
         queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
       } else {
+        setLastError(result.error || "Unknown error");
         toast.error("Processing failed", {
           description: result.error,
         });
       }
     } catch (error: any) {
+      setLastError(error.message);
       toast.error("Failed to process staged trades", { description: error.message });
     } finally {
       setProcessingStaged(false);
@@ -463,7 +467,7 @@ export default function EodPage() {
           totalCommission={stagedResult?.total_commission ?? summary.totalCommission}
           totalDeposits={stagedResult?.total_deposits ?? summary.totalDeposits}
           totalWithdrawals={stagedResult?.total_withdrawals ?? summary.totalWithdrawals}
-          errorsCount={summary.errorsCount}
+          errorsCount={stagedResult ? (stagedResult.success ? 0 : 1) : summary.errorsCount}
           positionsCaptured={stagedResult?.positions_captured ?? 0}
           totalMarketValue={stagedResult?.total_market_value ?? 0}
           marginAccounts={stagedResult?.margin_accounts ?? 0}
