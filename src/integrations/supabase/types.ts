@@ -326,6 +326,54 @@ export type Database = {
         }
         Relationships: []
       }
+      cash_ledger: {
+        Row: {
+          balance: number | null
+          created_at: string | null
+          credit: number | null
+          debit: number | null
+          description: string | null
+          id: string
+          investor_code: string
+          reference: string | null
+          source_id: string | null
+          source_table: string | null
+          txn_date: string
+          txn_type: string
+          value_date: string | null
+        }
+        Insert: {
+          balance?: number | null
+          created_at?: string | null
+          credit?: number | null
+          debit?: number | null
+          description?: string | null
+          id?: string
+          investor_code: string
+          reference?: string | null
+          source_id?: string | null
+          source_table?: string | null
+          txn_date: string
+          txn_type: string
+          value_date?: string | null
+        }
+        Update: {
+          balance?: number | null
+          created_at?: string | null
+          credit?: number | null
+          debit?: number | null
+          description?: string | null
+          id?: string
+          investor_code?: string
+          reference?: string | null
+          source_id?: string | null
+          source_table?: string | null
+          txn_date?: string
+          txn_type?: string
+          value_date?: string | null
+        }
+        Relationships: []
+      }
       cash_ledger_txn: {
         Row: {
           amount: number
@@ -1246,6 +1294,63 @@ export type Database = {
         }
         Relationships: []
       }
+      files: {
+        Row: {
+          created_at: string | null
+          error_count: number | null
+          error_details: Json | null
+          file_name: string
+          file_size: number | null
+          file_type: string | null
+          id: string
+          mime_type: string | null
+          processed_at: string | null
+          records_count: number | null
+          status: string | null
+          storage_path: string | null
+          success_count: number | null
+          upload_date: string | null
+          uploaded_by: string | null
+          uploaded_by_email: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          error_count?: number | null
+          error_details?: Json | null
+          file_name: string
+          file_size?: number | null
+          file_type?: string | null
+          id?: string
+          mime_type?: string | null
+          processed_at?: string | null
+          records_count?: number | null
+          status?: string | null
+          storage_path?: string | null
+          success_count?: number | null
+          upload_date?: string | null
+          uploaded_by?: string | null
+          uploaded_by_email?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          error_count?: number | null
+          error_details?: Json | null
+          file_name?: string
+          file_size?: number | null
+          file_type?: string | null
+          id?: string
+          mime_type?: string | null
+          processed_at?: string | null
+          records_count?: number | null
+          status?: string | null
+          storage_path?: string | null
+          success_count?: number | null
+          upload_date?: string | null
+          uploaded_by?: string | null
+          uploaded_by_email?: string | null
+        }
+        Relationships: []
+      }
       forced_liquidations: {
         Row: {
           approved_by: string | null
@@ -1344,6 +1449,99 @@ export type Database = {
           total_stock?: number | null
           trading_code?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      instrument: {
+        Row: {
+          authorized_cap: number | null
+          category: string | null
+          created_at: string | null
+          eps: number | null
+          face_value: number | null
+          free_float_mcap: number | null
+          full_name: string | null
+          haircut_pct: number | null
+          id: string
+          instrument_type: string | null
+          is_active: boolean | null
+          is_marginable: boolean | null
+          isin: string | null
+          last_agm_date: string | null
+          last_synced_at: string | null
+          listing_year: number | null
+          lot_size: number | null
+          market: string | null
+          market_cap: number | null
+          nav: number | null
+          paid_up_cap: number | null
+          pe_ratio: number | null
+          sector: string | null
+          total_shares: number | null
+          trading_code: string
+          updated_at: string | null
+          week_52_high: number | null
+          week_52_low: number | null
+        }
+        Insert: {
+          authorized_cap?: number | null
+          category?: string | null
+          created_at?: string | null
+          eps?: number | null
+          face_value?: number | null
+          free_float_mcap?: number | null
+          full_name?: string | null
+          haircut_pct?: number | null
+          id?: string
+          instrument_type?: string | null
+          is_active?: boolean | null
+          is_marginable?: boolean | null
+          isin?: string | null
+          last_agm_date?: string | null
+          last_synced_at?: string | null
+          listing_year?: number | null
+          lot_size?: number | null
+          market?: string | null
+          market_cap?: number | null
+          nav?: number | null
+          paid_up_cap?: number | null
+          pe_ratio?: number | null
+          sector?: string | null
+          total_shares?: number | null
+          trading_code: string
+          updated_at?: string | null
+          week_52_high?: number | null
+          week_52_low?: number | null
+        }
+        Update: {
+          authorized_cap?: number | null
+          category?: string | null
+          created_at?: string | null
+          eps?: number | null
+          face_value?: number | null
+          free_float_mcap?: number | null
+          full_name?: string | null
+          haircut_pct?: number | null
+          id?: string
+          instrument_type?: string | null
+          is_active?: boolean | null
+          is_marginable?: boolean | null
+          isin?: string | null
+          last_agm_date?: string | null
+          last_synced_at?: string | null
+          listing_year?: number | null
+          lot_size?: number | null
+          market?: string | null
+          market_cap?: number | null
+          nav?: number | null
+          paid_up_cap?: number | null
+          pe_ratio?: number | null
+          sector?: string | null
+          total_shares?: number | null
+          trading_code?: string
+          updated_at?: string | null
+          week_52_high?: number | null
+          week_52_low?: number | null
         }
         Relationships: []
       }
@@ -2320,6 +2518,93 @@ export type Database = {
         }
         Relationships: []
       }
+      stg_deposit_withdrawal: {
+        Row: {
+          amount: number
+          bank_name: string | null
+          cheque_no: string | null
+          created_at: string | null
+          description: string | null
+          file_id: string | null
+          id: string
+          investor_code: string
+          processed_at: string | null
+          reference: string | null
+          status: string | null
+          txn_date: string
+          txn_type: string
+        }
+        Insert: {
+          amount: number
+          bank_name?: string | null
+          cheque_no?: string | null
+          created_at?: string | null
+          description?: string | null
+          file_id?: string | null
+          id?: string
+          investor_code: string
+          processed_at?: string | null
+          reference?: string | null
+          status?: string | null
+          txn_date: string
+          txn_type: string
+        }
+        Update: {
+          amount?: number
+          bank_name?: string | null
+          cheque_no?: string | null
+          created_at?: string | null
+          description?: string | null
+          file_id?: string | null
+          id?: string
+          investor_code?: string
+          processed_at?: string | null
+          reference?: string | null
+          status?: string | null
+          txn_date?: string
+          txn_type?: string
+        }
+        Relationships: []
+      }
+      stg_trade_xml: {
+        Row: {
+          created_at: string | null
+          error_message: string | null
+          exchange_code: string | null
+          file_name: string | null
+          id: string
+          parsed_data: Json | null
+          processed_at: string | null
+          raw_xml: string | null
+          status: string | null
+          trade_date: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          error_message?: string | null
+          exchange_code?: string | null
+          file_name?: string | null
+          id?: string
+          parsed_data?: Json | null
+          processed_at?: string | null
+          raw_xml?: string | null
+          status?: string | null
+          trade_date?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          error_message?: string | null
+          exchange_code?: string | null
+          file_name?: string | null
+          id?: string
+          parsed_data?: Json | null
+          processed_at?: string | null
+          raw_xml?: string | null
+          status?: string | null
+          trade_date?: string | null
+        }
+        Relationships: []
+      }
       trade_file: {
         Row: {
           category: string | null
@@ -2494,6 +2779,66 @@ export type Database = {
           trader_dealer_id?: string | null
           uploaded_at?: string
           value?: number | null
+        }
+        Relationships: []
+      }
+      trades: {
+        Row: {
+          commission: number | null
+          created_at: string | null
+          exchange_code: string | null
+          id: string
+          instrument: string
+          investor_code: string
+          net_value: number
+          order_id: string | null
+          other_charges: number | null
+          price: number
+          quantity: number
+          settlement_date: string | null
+          side: string
+          status: string | null
+          trade_date: string
+          trade_id: string | null
+          trade_value: number
+        }
+        Insert: {
+          commission?: number | null
+          created_at?: string | null
+          exchange_code?: string | null
+          id?: string
+          instrument: string
+          investor_code: string
+          net_value: number
+          order_id?: string | null
+          other_charges?: number | null
+          price: number
+          quantity: number
+          settlement_date?: string | null
+          side: string
+          status?: string | null
+          trade_date: string
+          trade_id?: string | null
+          trade_value: number
+        }
+        Update: {
+          commission?: number | null
+          created_at?: string | null
+          exchange_code?: string | null
+          id?: string
+          instrument?: string
+          investor_code?: string
+          net_value?: number
+          order_id?: string | null
+          other_charges?: number | null
+          price?: number
+          quantity?: number
+          settlement_date?: string | null
+          side?: string
+          status?: string | null
+          trade_date?: string
+          trade_id?: string | null
+          trade_value?: number
         }
         Relationships: []
       }
