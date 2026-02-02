@@ -316,6 +316,47 @@ const AccountingTab = () => {
 
   const hasEodData = !!eodStatus;
 
+  // Fetch FULL summary aggregates (no limit) for accurate cards
+  const { data: summaryAggregates } = useQuery({
+    queryKey: ['accounting-summary-aggregates', selectedDateStr],
+    queryFn: async () => {
+      // Fetch only the columns needed for aggregation (no limit)
+      const { data, error } = await supabase
+        .from('eod_ledger_snapshots')
+        .select('total_commission, gross_buy, gross_sell, department')
+        .eq('eod_date', selectedDateStr);
+      
+      if (error) throw error;
+      
+      // Calculate aggregates from full dataset
+      let totalCommission = 0;
+      let totalBuy = 0;
+      let totalSell = 0;
+      let clientsWithTrades = 0;
+      const departments = new Set<string>();
+      
+      (data || []).forEach(row => {
+        totalCommission += Number(row.total_commission) || 0;
+        totalBuy += Number(row.gross_buy) || 0;
+        totalSell += Number(row.gross_sell) || 0;
+        if ((Number(row.gross_buy) || 0) > 0 || (Number(row.gross_sell) || 0) > 0) {
+          clientsWithTrades++;
+        }
+        if (row.department) departments.add(row.department);
+      });
+      
+      return {
+        totalCommission,
+        totalTurnover: totalBuy + totalSell,
+        clientsWithTrades,
+        uniqueDepartments: departments.size,
+        totalRecords: data?.length || 0,
+      };
+    },
+    enabled: hasEodData,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Fetch accounting data directly from eod_ledger_snapshots
   const { data: accountingResult, isLoading: loadingData, isError, error: queryError, refetch } = useQuery({
     queryKey: ['accounting-eod-snapshot', selectedDateStr, debouncedSearch, accountTypeFilter, activityFilter],
@@ -470,48 +511,26 @@ const AccountingTab = () => {
   // Get total count
   const totalCount = accountingResult?.length || 0;
 
-  // Summary data computed from accountingData
+  // Summary data - use aggregate query for FULL totals (not limited to 1000 rows)
   const summary = useMemo(() => {
-    if (!accountingData || accountingData.length === 0) {
-      return {
-        totalAccounts: 0,
-        marginAccounts: 0,
-        totalMarginLoan: 0,
-        totalAccruedInterest: 0,
-        totalReceivable: 0,
-        totalPayable: 0,
-        totalBuy: 0,
-        totalSell: 0,
-        totalTradeValue: 0,
-        totalCommission: 0,
-        clientsWithTrades: 0,
-        uniqueDepartments: 0,
-      };
-    }
-    
-    // Count clients with trades (either buy or sell > 0)
-    const clientsWithTrades = accountingData.filter(row => 
-      (row.gross_buy || 0) > 0 || (row.gross_sell || 0) > 0
-    ).length;
-    
-    // Count unique departments
-    const departments = new Set(accountingData.map(row => row.department).filter(Boolean));
-    
+    // Use summaryAggregates for accurate full-day totals (cards)
+    // Fall back to accountingData if aggregates not loaded yet
     return {
-      totalAccounts: accountingData.length,
+      totalAccounts: summaryAggregates?.totalRecords ?? accountingData.length,
       marginAccounts: 0,
       totalMarginLoan: 0,
       totalAccruedInterest: 0,
       totalReceivable: 0,
       totalPayable: 0,
-      totalBuy: accountingData.reduce((sum, row) => sum + (row.gross_buy || 0), 0),
-      totalSell: accountingData.reduce((sum, row) => sum + (row.gross_sell || 0), 0),
-      totalTradeValue: accountingData.reduce((sum, row) => sum + (row.gross_buy || 0) + (row.gross_sell || 0), 0),
-      totalCommission: accountingData.reduce((sum, row) => sum + (row.brokerage_amount || 0), 0),
-      clientsWithTrades,
-      uniqueDepartments: departments.size,
+      totalBuy: 0,
+      totalSell: 0,
+      // Use aggregate data for accurate totals (covers ALL clients, not just first 1000)
+      totalTradeValue: summaryAggregates?.totalTurnover ?? accountingData.reduce((sum, row) => sum + (row.gross_buy || 0) + (row.gross_sell || 0), 0),
+      totalCommission: summaryAggregates?.totalCommission ?? accountingData.reduce((sum, row) => sum + (row.brokerage_amount || 0), 0),
+      clientsWithTrades: summaryAggregates?.clientsWithTrades ?? accountingData.filter(row => (row.gross_buy || 0) > 0 || (row.gross_sell || 0) > 0).length,
+      uniqueDepartments: summaryAggregates?.uniqueDepartments ?? new Set(accountingData.map(row => row.department).filter(Boolean)).size,
     };
-  }, [accountingData]);
+  }, [summaryAggregates, accountingData]);
 
   const isLoading = loadingData || loadingEodStatus;
 
