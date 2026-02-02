@@ -1,102 +1,117 @@
 
-
-# Fix Deposits/Withdrawals Import for Excel File
+# Fix: Display Deposits/Withdrawals in EOD Summary Cards
 
 ## Problem Summary
-The import is failing because footer rows in the Excel file are not being properly filtered out. The file has summary rows like "Total of 2026-02-02 :", "Grand Total :", and "Print Date & Time :" that are passing through the current filter and causing validation errors.
+The EOD Summary cards show zeros for deposits/withdrawals on Feb 02, even though the data was successfully imported. This happens because:
+- EOD processing was run **before** the deposits/withdrawals file was imported
+- The `eod_run_history` table stored the totals at that time (zeros)
+- After import, the `cash_ledger_txn` table now contains the data (251 deposits = BDT 113.3M, 150 withdrawals = BDT 34M)
+- The UI displays the stale historical record, not the current staging data
 
-## Root Cause Analysis
-The file contains 401 valid data rows followed by 3 footer rows:
-- Row 409: `|Total of 2026-02-02 :|34,013,947.52|113,326,241.83|...`
-- Row 410: `|Grand Total :|34,013,947.52|113,326,241.83|...`
-- Row 411: `|Print Date & Time : 2/2/2026 3:57:06PM|Powered By Cygnus Innovation Ltd.|...`
+## Solution Overview
+Add a "stale data" detection system that compares what's in the staging tables (`cash_ledger_txn`) against what's recorded in `eod_run_history`. When there's a mismatch, show a warning prompting the user to re-run EOD.
 
-The current filter in `DepositsImportDialog.tsx` (lines 181-186) only checks:
-- If the first column contains "date" (but "Total" does not contain "date")
-- If the first column is empty
-- If the SL column is not a number (but footer rows don't have the "SL" key)
+---
 
-These footer rows pass the filter and get mapped to records with:
-- `investor_code`: "Total of 2026-02-02 :" (invalid)
-- `amount`: some number value (from Debit/Credit columns)
+## Implementation Plan
 
-This causes validation to fail or produces invalid records.
+### Step 1: Create Staging Summary Hook
+Create a new hook that fetches the current totals from `cash_ledger_txn` for a selected date.
 
-## Solution
+**New file: `src/hooks/useEodStagingSummary.ts`**
 
-### Enhance Footer Row Detection
-Update the filter logic in `DepositsImportDialog.tsx` to exclude common footer patterns:
+This hook will:
+- Query `cash_ledger_txn` for the selected date
+- Aggregate deposits and withdrawals
+- Return totals for comparison with historical data
 
-```text
-Current filter:
-- Contains "date" -> exclude
-- Empty first column -> exclude  
-- SL column exists but is not a number -> exclude
+### Step 2: Add Stale Data Detection to EOD Page
+Update `src/pages/EodPage.tsx` to:
+- Use the new staging summary hook
+- Compare staging totals with historical totals
+- Display a warning alert when data has changed since last EOD run
+- Show the current staging data in the summary cards when no EOD has been run yet
 
-Enhanced filter (add these checks):
-- Contains "total" -> exclude
-- Contains "grand" -> exclude
-- Contains "print" -> exclude
-- Contains "page" -> exclude
-- Contains "powered" -> exclude
-```
+### Step 3: Update Summary Card Data Source Priority
+Change the data priority for deposits/withdrawals in summary cards to:
+1. Current staged result (from active processing)
+2. Batch run summary (from current session batch)
+3. **NEW: Current staging data** (from `cash_ledger_txn`)
+4. Historical data (from `eod_run_history`) - only if matches staging
 
-### Implementation Changes
+### Step 4: Add Stale Data Warning Alert
+Add a warning alert that appears when:
+- Historical EOD data exists for the date
+- Current staging totals differ from historical totals
+- Prompt user to "Re-run EOD" to capture the new data
 
-**File: `src/components/eod/DepositsImportDialog.tsx`**
+---
 
-Modify lines 181-186 to add additional footer row exclusion patterns:
+## Technical Details
 
+### New Hook: `useEodStagingSummary.ts`
 ```typescript
-// Filter out rows that are date headers, footer rows, or empty
-const filteredData = jsonData.filter((row: any) => {
-  const firstCol = String(row["SL"] || row["Sl"] || row["sl"] || row["S.L"] || row["S.L."] || Object.values(row)[0] || '').trim().toLowerCase();
-  
-  // Exclude date header rows
-  if (firstCol.includes('date')) return false;
-  
-  // Exclude empty rows
-  if (!firstCol) return false;
-  
-  // Exclude footer/summary rows
-  if (firstCol.includes('total')) return false;
-  if (firstCol.includes('grand')) return false;
-  if (firstCol.includes('print')) return false;
-  if (firstCol.includes('page')) return false;
-  if (firstCol.includes('powered')) return false;
-  
-  // If SL column exists, it must be a valid number
-  if (row["SL"] !== undefined && isNaN(Number(firstCol))) return false;
-  
-  return true;
-});
-```
+export interface EodStagingSummary {
+  totalDeposits: number;
+  totalWithdrawals: number;
+  depositCount: number;
+  withdrawalCount: number;
+}
 
-### Additional Safety Check
-Also add validation to skip records where the investor_code looks like a footer:
-
-```typescript
-// In mappedRecords mapping, skip invalid investor codes
-if (!investorCode || 
-    investorCode.toLowerCase().includes('total') ||
-    investorCode.toLowerCase().includes('grand') ||
-    investorCode.toLowerCase().includes('print')) {
-  return null;
+export function useEodStagingSummary(selectedDate: Date | undefined) {
+  // Query cash_ledger_txn for current staging data
+  // Returns aggregated totals for the date
 }
 ```
 
-Then filter out the null values after mapping.
+### EodPage.tsx Changes
+```typescript
+// Compare historical vs staging
+const isStale = historicalData && stagingSummary && (
+  Math.abs(historicalData.total_deposits - stagingSummary.totalDeposits) > 0.01 ||
+  Math.abs(historicalData.total_withdrawals - stagingSummary.totalWithdrawals) > 0.01
+);
 
-## Expected Outcome
-After this fix:
-- The 401 valid data rows will be imported correctly
-- Footer rows (Total, Grand Total, Print Date) will be excluded
-- Deposits: ~113.3M (from Credit column for "Receipt" rows)
-- Withdrawals: ~34M (from Debit column for "Paid" rows)
+// Show warning when stale
+{isStale && (
+  <Alert variant="warning">
+    <AlertTriangle className="h-4 w-4" />
+    <AlertTitle>Data Changed Since Last EOD</AlertTitle>
+    <AlertDescription>
+      Deposits/Withdrawals have been updated since the last EOD run. 
+      Click "Process Staged" or "Run Full EOD" to recalculate.
+    </AlertDescription>
+  </Alert>
+)}
+```
+
+### Summary Card Priority Update
+For `totalDeposits` and `totalWithdrawals`:
+```typescript
+totalDeposits={
+  stagedResult?.total_deposits ?? 
+  (dayResults.length > 0 ? summary.totalDeposits : null) ?? 
+  stagingSummary?.totalDeposits ??  // NEW: Show staging data
+  historicalData?.total_deposits ?? 
+  0
+}
+```
+
+---
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/components/eod/DepositsImportDialog.tsx` | Add footer row exclusion patterns to the filter logic |
+| `src/hooks/useEodStagingSummary.ts` | **NEW** - Hook to fetch current staging totals |
+| `src/pages/EodPage.tsx` | Add stale detection, warning alert, update card priorities |
+| `src/components/ui/alert.tsx` | Add `warning` variant (amber styling) |
 
+---
+
+## Expected Outcome
+After implementation:
+1. When selecting Feb 02, the UI will show the **current staging data** (৳113.3M deposits, ৳34M withdrawals)
+2. A warning will appear indicating EOD needs to be re-run
+3. After re-running EOD, the historical data will match and the warning will disappear
+4. Future imports will trigger the same warning until EOD is re-processed
