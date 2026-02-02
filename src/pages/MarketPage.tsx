@@ -1,16 +1,26 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { MarketSummaryCards } from "@/components/market/MarketSummaryCards";
 import { SectorBreakdownChart } from "@/components/market/SectorBreakdownChart";
 import { StockDataTable } from "@/components/market/StockDataTable";
 import { StockDetailDialog } from "@/components/market/StockDetailDialog";
-import { useStockDaily, useSectors } from "@/hooks/useMarketData";
+import { useStockDaily, useSectors, useLatestTradeDate } from "@/hooks/useMarketData";
 import { format } from "date-fns";
 
 export default function MarketPage() {
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const { data: latestDate } = useLatestTradeDate();
+  const [selectedDate, setSelectedDate] = useState("");
   const [selectedSector, setSelectedSector] = useState("all");
   const [selectedStock, setSelectedStock] = useState<string | null>(null);
+
+  // Set date to latest available when loaded
+  useEffect(() => {
+    if (latestDate && !selectedDate) {
+      setSelectedDate(latestDate);
+    } else if (!latestDate && !selectedDate) {
+      setSelectedDate(format(new Date(), "yyyy-MM-dd"));
+    }
+  }, [latestDate, selectedDate]);
 
   const { data: stocks = [], isLoading: stocksLoading } = useStockDaily({
     trade_date: selectedDate || undefined,
