@@ -1,101 +1,125 @@
 
-# Fix: Display Deposits/Withdrawals in EOD Summary Cards
 
-## Problem Summary
-The EOD Summary cards show zeros for deposits/withdrawals on Feb 02, even though the data was successfully imported. This happens because:
-- EOD processing was run **before** the deposits/withdrawals file was imported
-- The `eod_run_history` table stored the totals at that time (zeros)
-- After import, the `cash_ledger_txn` table now contains the data (251 deposits = BDT 113.3M, 150 withdrawals = BDT 34M)
-- The UI displays the stale historical record, not the current staging data
+# Fix Commission/Data Mismatch in Accounting Page
 
-## Solution Overview
-Add a "stale data" detection system that compares what's in the staging tables (`cash_ledger_txn`) against what's recorded in `eod_run_history`. When there's a mismatch, show a warning prompting the user to re-run EOD.
+## Problem Identified
 
----
+The Accounting page shows different totals than expected because:
 
-## Implementation Plan
+1. **Missing Investor Master Records**: 1,287 trades (~BDT 61.7M) on Feb 02 are from investor codes that don't exist in the `investors` master table
+2. **Snapshot-Only Capture**: The `process_staged_trades` function only creates `eod_ledger_snapshots` for investors that exist in the `investors` table
+3. **History vs Snapshot Mismatch**: `eod_run_history` records totals from ALL staging data, but `eod_ledger_snapshots` only has matched investors
 
-### Step 1: Create Staging Summary Hook
-Create a new hook that fetches the current totals from `cash_ledger_txn` for a selected date.
+### Data Comparison for Feb 02, 2026
 
-**New file: `src/hooks/useEodStagingSummary.ts`**
+| Metric | eod_run_history | eod_ledger_snapshots | Difference |
+|--------|-----------------|----------------------|------------|
+| Gross Buy | 696.9M | 654.0M | -42.9M (missing) |
+| Gross Sell | 691.1M | 672.3M | -18.8M (missing) |
+| Commission | 4.47M | 4.22M | -246K (missing) |
+| Deposits | 113.3M | 82.5M | -30.9M (missing) |
+| Withdrawals | 34.0M | 33.0M | -1.0M (missing) |
 
-This hook will:
-- Query `cash_ledger_txn` for the selected date
-- Aggregate deposits and withdrawals
-- Return totals for comparison with historical data
+### Missing Investor Examples
 
-### Step 2: Add Stale Data Detection to EOD Page
-Update `src/pages/EodPage.tsx` to:
-- Use the new staging summary hook
-- Compare staging totals with historical totals
-- Display a warning alert when data has changed since last EOD run
-- Show the current staging data in the summary cards when no EOD has been run yet
-
-### Step 3: Update Summary Card Data Source Priority
-Change the data priority for deposits/withdrawals in summary cards to:
-1. Current staged result (from active processing)
-2. Batch run summary (from current session batch)
-3. **NEW: Current staging data** (from `cash_ledger_txn`)
-4. Historical data (from `eod_run_history`) - only if matches staging
-
-### Step 4: Add Stale Data Warning Alert
-Add a warning alert that appears when:
-- Historical EOD data exists for the date
-- Current staging totals differ from historical totals
-- Prompt user to "Re-run EOD" to capture the new data
+Top unmatched investor codes with trades:
+- 14255: 19.9M (single trade)
+- 22339: 2.9M
+- 9999: 2.9M
+- GCML5689: 2.6M
+- 22569: 2.6M
 
 ---
 
-## Technical Details
+## Solution Options
 
-### New Hook: `useEodStagingSummary.ts`
-```typescript
-export interface EodStagingSummary {
-  totalDeposits: number;
-  totalWithdrawals: number;
-  depositCount: number;
-  withdrawalCount: number;
-}
+### Option A: Add Missing Investors to Master Table (Recommended)
 
-export function useEodStagingSummary(selectedDate: Date | undefined) {
-  // Query cash_ledger_txn for current staging data
-  // Returns aggregated totals for the date
-}
+Import the missing investor codes into the `investors` table so they're captured in EOD snapshots.
+
+**Steps:**
+1. Create a query to identify all investor codes in staging tables not in investors master
+2. Auto-generate investor records with default values for missing codes
+3. Re-run EOD processing to capture all data
+
+### Option B: Modify EOD Processing to Auto-Create Missing Investors
+
+Update `process_staged_trades` to automatically create placeholder investor records for any investor_code found in trades/deposits that doesn't exist in the master table.
+
+**Implementation:**
+```sql
+-- Before processing, insert missing investors with defaults
+INSERT INTO investors (investor_code, investor_name, brokerage_commission)
+SELECT DISTINCT 
+  tf.investor_code,
+  'Auto-created: ' || tf.investor_code,
+  0.004  -- Default 0.4% commission
+FROM trade_file tf
+LEFT JOIN investors i ON i.investor_code = tf.investor_code
+WHERE i.investor_code IS NULL
+  AND tf.trade_date = p_trade_date
+ON CONFLICT (investor_code) DO NOTHING;
 ```
 
-### EodPage.tsx Changes
-```typescript
-// Compare historical vs staging
-const isStale = historicalData && stagingSummary && (
-  Math.abs(historicalData.total_deposits - stagingSummary.totalDeposits) > 0.01 ||
-  Math.abs(historicalData.total_withdrawals - stagingSummary.totalWithdrawals) > 0.01
-);
+### Option C: Show Unmatched Data Warning in Accounting Page
 
-// Show warning when stale
-{isStale && (
-  <Alert variant="warning">
-    <AlertTriangle className="h-4 w-4" />
-    <AlertTitle>Data Changed Since Last EOD</AlertTitle>
-    <AlertDescription>
-      Deposits/Withdrawals have been updated since the last EOD run. 
-      Click "Process Staged" or "Run Full EOD" to recalculate.
-    </AlertDescription>
-  </Alert>
-)}
+Add a warning banner showing how much data is unmatched, with a link to import missing investors.
+
+---
+
+## Recommended Approach: Option B + Option C
+
+1. **Modify EOD Function** to auto-create placeholder investor records during processing
+2. **Add Warning UI** in Accounting page when there's unmatched staging data
+3. **Create Admin Tool** to review and update auto-created investor records
+
+---
+
+## Technical Implementation
+
+### Step 1: Update process_staged_trades Function
+
+Add auto-creation of missing investors at the start of processing:
+
+```sql
+-- Step 0: Create placeholder records for missing investors
+INSERT INTO investors (investor_code, investor_name, brokerage_commission, status, created_at)
+SELECT DISTINCT
+  COALESCE(tf.investor_code, clt.investor_code),
+  'Pending Update',
+  0.004,
+  'Auto-Created',
+  NOW()
+FROM (
+  SELECT DISTINCT investor_code FROM trade_file WHERE trade_date = p_trade_date
+  UNION
+  SELECT DISTINCT investor_code FROM cash_ledger_txn WHERE txn_date = p_trade_date
+) combined(investor_code)
+LEFT JOIN investors i ON i.investor_code = combined.investor_code
+WHERE i.investor_code IS NULL
+ON CONFLICT (investor_code) DO NOTHING;
 ```
 
-### Summary Card Priority Update
-For `totalDeposits` and `totalWithdrawals`:
+### Step 2: Add Unmatched Data Warning to Accounting Page
+
+Create a query to check for unmatched staging data and display a warning:
+
 ```typescript
-totalDeposits={
-  stagedResult?.total_deposits ?? 
-  (dayResults.length > 0 ? summary.totalDeposits : null) ?? 
-  stagingSummary?.totalDeposits ??  // NEW: Show staging data
-  historicalData?.total_deposits ?? 
-  0
-}
+// Query to check unmatched trades
+const { data: unmatchedStats } = useQuery({
+  queryKey: ['unmatched-staging-data', selectedDateStr],
+  queryFn: async () => {
+    const { data } = await supabase.rpc('get_unmatched_staging_summary', {
+      p_trade_date: selectedDateStr
+    });
+    return data;
+  }
+});
 ```
+
+### Step 3: Create Missing Investors Report
+
+Add admin tool to view and update auto-created investor records with proper details.
 
 ---
 
@@ -103,15 +127,19 @@ totalDeposits={
 
 | File | Change |
 |------|--------|
-| `src/hooks/useEodStagingSummary.ts` | **NEW** - Hook to fetch current staging totals |
-| `src/pages/EodPage.tsx` | Add stale detection, warning alert, update card priorities |
-| `src/components/ui/alert.tsx` | Add `warning` variant (amber styling) |
+| SQL Migration | Update `process_staged_trades` to auto-create missing investors |
+| SQL Migration | Add `get_unmatched_staging_summary` RPC function |
+| `src/components/trade-history/AccountingTab.tsx` | Add unmatched data warning banner |
+| `src/pages/InvestorsPage.tsx` | Add filter to show "Auto-Created" status investors |
 
 ---
 
 ## Expected Outcome
+
 After implementation:
-1. When selecting Feb 02, the UI will show the **current staging data** (৳113.3M deposits, ৳34M withdrawals)
-2. A warning will appear indicating EOD needs to be re-run
-3. After re-running EOD, the historical data will match and the warning will disappear
-4. Future imports will trigger the same warning until EOD is re-processed
+1. All 1,287 missing investors will be auto-created during EOD processing
+2. Commission calculations will include all trades (full 4.47M instead of 4.22M)
+3. Deposits/withdrawals will match (full 113.3M instead of 82.5M)
+4. Accounting page totals will match source data exactly
+5. Admins can review and update auto-created investor details
+
