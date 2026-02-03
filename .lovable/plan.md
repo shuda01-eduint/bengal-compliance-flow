@@ -1,183 +1,95 @@
 
+Goal
+- Fix the “Negative Balance (Cash)” card so it strictly excludes margin accounts and returns the full result set (not capped/truncated), while keeping Days Negative + Department working.
 
-## Over Buy (Margin) Card Implementation Plan
+What I found (from the current backend + live queries)
+- The investors table does NOT have acc_type, and does NOT have a code column.
+  - It has: investors.investor_code, investors.account_type, investors.department, investors.status, etc.
+- investors.account_type values are:
+  - “Cash” (~30,659 rows)
+  - “Margin” (~1,440 rows)
+  - NULL (~175 rows)
+- Current SQL filter in both of your “cash negative” functions is:
+  - inv.account_type != 'M' (or NULL/empty)
+  - This does NOT exclude “Margin”, so margin accounts are currently included.
+- Proof: get_all_negative_cash_balances currently returns 4,994 rows for the latest date, and 313 of those rows are margin accounts (account_type = 'Margin').
+- I also saw the frontend request try to fetch up to 10,000 rows in one call and hit a database statement timeout in the browser network log. So we need to avoid “one huge fetch” patterns.
 
-### Overview
-This plan implements the new "Over Buy (Margin)" violation detection logic that identifies margin accounts where the loan/liability has increased during the selected date range, indicating over-buying on margin.
+Root causes
+1) Wrong margin exclusion logic
+- Your data uses investors.account_type = 'Margin' (not 'M').
+- So checking only != 'M' lets “Margin” through.
 
-### Business Logic
-```text
-+---------------------------+      +---------------------------+
-|    Opening Balance        |      |    Closing Balance        |
-|    (Start of Period)      |      |    (End of Period)        |
-|    e.g., -100,000         | ---> |    e.g., -150,000         |
-+---------------------------+      +---------------------------+
-                                   
-Loan Increase = ABS(-150,000) - ABS(-100,000) = 50,000
-Condition: closing_balance < opening_balance (both negative)
-```
+2) Fetching large result sets in one request is brittle
+- The UI currently requests a very large limit (limit=10000). Even though the function returns ~5k rows, the query + serialization can exceed the backend timeout in the browser context.
+- If we page the results (e.g., 1000 at a time), we avoid timeouts and also bypass any max-rows constraints.
 
----
+Plan (what I will change)
 
-### Implementation Steps
+A) Backend (database function) fix: exclude Margin correctly
+- Update BOTH RPCs used by the violations page:
+  1) public.get_all_negative_cash_balances(p_target_date date)
+  2) public.get_negative_balance_codes(p_from_date date, p_to_date date, p_search text, p_lookback_days int)
 
-#### Step 1: Create RPC Function `get_over_buy_margin_codes`
+- Replace the current filter:
+  - (inv.account_type IS NULL OR inv.account_type = '' OR inv.account_type != 'M')
+- With a robust “exclude margin” filter that matches your real data:
+  - inv.account_type IS NULL
+    OR trim(inv.account_type) = ''
+    OR upper(trim(inv.account_type)) NOT IN ('M', 'MARGIN')
 
-Create a new database function that:
-- Takes `p_from_date` and `p_to_date` parameters
-- Compares the first date's balance with the last date's balance in the range
-- Filters for `account_type = 'Margin'` only
-- Excludes closed accounts via JOIN with `investors` table
-- Returns accounts where the loan increased (closing more negative than opening)
-- Calculates `loan_increase = ABS(closing_balance) - ABS(opening_balance)`
-- Orders results by loan increase amount descending
+- (Optional safety) Also consider excluding if the snapshot itself says “Margin”:
+  - upper(trim(els.account_type)) NOT IN ('M','MARGIN')
+  - This protects you if investors.account_type is missing/incorrect for any records.
 
-**Return columns:**
-- `client_code` (investor_code)
-- `client_name` (from investors table)
-- `rm_name` (from investors table)
-- `opening_balance` (ledger_balance on first date in range)
-- `closing_balance` (ledger_balance on last date in range)
-- `loan_increase` (calculated increase amount)
-- `first_date` (start of observation period)
-- `last_date` (end of observation period)
+- Keep existing “exclude CLOSED accounts” rule and existing date-snapping logic.
 
-#### Step 2: Update `useViolations` Hook
+Expected outcome after this change
+- “All Negative (Cash)” count should drop by exactly the number of margin negatives currently leaking in.
+  - Based on current data: 4,994 total negatives, 313 are margin ⇒ expected cash-only ≈ 4,681.
 
-Modify `src/hooks/useViolations.ts`:
-- Replace the existing `overBuyData` query (lines 85-116) with a call to the new RPC function
-- Update the return type to include the new fields (opening_balance, closing_balance, loan_increase)
-- Update summary calculation to sum `loan_increase` instead of the old amount calculation
-- Update record mapping to use the new data structure
+B) Frontend fix: fetch results in pages (prevents timeouts and hard caps)
+- In src/hooks/useViolations.ts, for both negative-balance RPC calls:
+  - get_all_negative_cash_balances (mode: “all”)
+  - get_negative_balance_codes (mode: “new_only”)
+- Replace the single call with .range(0, 9999) with a small “fetch all pages” helper:
+  - pageSize = 1000 (or 500 if needed)
+  - loop:
+    - request .range(offset, offset + pageSize - 1)
+    - append results
+    - stop when returnedRows < pageSize
+    - add a hard stop like maxPages = 20 to avoid infinite loops
 
-#### Step 3: Update ViolationRecord Interface
+Why this is important
+- It avoids the “statement timeout” seen in your network logs.
+- It ensures the card/table/export can show the full dataset reliably.
 
-Extend the `ViolationRecord` interface in `ViolationsTable.tsx` to support additional fields:
-- Add optional `opening_balance?: number`
-- Add optional `closing_balance?: number` 
-- Add optional `loan_increase?: number`
+C) Verification steps (I’ll do these after implementing)
+1) Backend sanity checks
+- Confirm the investors schema/values:
+  - distinct account_type values are Cash/Margin/NULL
+- Confirm function output contains 0 margin rows:
+  - call get_all_negative_cash_balances(latest_date) and verify none of the returned client_codes have investors.account_type='Margin'
 
-#### Step 4: Update ViolationsTable Component
+2) UI verification on /violations
+- Set Negative Balance mode = “All Negative”
+  - Verify the count is ~4.6k (not 1000)
+  - Spot-check several client codes that are known margin accounts (previously appearing) no longer show
+  - Days Negative + Department columns still render
+- Toggle to “New Only”
+  - Verify margin accounts are excluded here too
+- Export Excel
+  - Ensure export includes the same row count shown in the table (and doesn’t error)
 
-Modify `src/components/violations/ViolationsTable.tsx` to display different columns based on violation type:
-- When `over_buy` filter is active, show specialized columns:
-  - Client Code (clickable)
-  - Client Name
-  - Opening Balance
-  - Closing Balance
-  - Loan Increase
-  - RM Name
-- For other violation types, keep the existing column structure
+Risks / edge cases
+- If there are other margin representations besides “Margin” (e.g., “M ”, “margin”), the TRIM+UPPER logic covers them.
+- Paging means more requests; but at ~5k rows it should be ~5 calls, which is acceptable and far more stable than a single large call.
+- If we still see timeouts even with paging (unlikely), we’ll additionally optimize the SQL by adding a partial index on eod_ledger_snapshots for negative balances (safe, non-destructive).
 
----
-
-### Technical Details
-
-#### Database Migration - RPC Function
-
-```sql
-CREATE OR REPLACE FUNCTION public.get_over_buy_margin_codes(
-  p_from_date date DEFAULT NULL,
-  p_to_date date DEFAULT NULL
-)
-RETURNS TABLE(
-  client_code text,
-  client_name text,
-  rm_name text,
-  opening_balance numeric,
-  closing_balance numeric,
-  loan_increase numeric,
-  first_date date,
-  last_date date
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = 'public'
-AS $$
-BEGIN
-  RETURN QUERY
-  WITH date_range AS (
-    SELECT 
-      COALESCE(p_from_date, CURRENT_DATE - INTERVAL '30 days')::date as start_dt,
-      COALESCE(p_to_date, CURRENT_DATE)::date as end_dt
-  ),
-  first_last_balances AS (
-    SELECT 
-      e.investor_code,
-      FIRST_VALUE(e.ledger_balance) OVER (
-        PARTITION BY e.investor_code 
-        ORDER BY e.eod_date ASC
-      ) as opening_bal,
-      FIRST_VALUE(e.ledger_balance) OVER (
-        PARTITION BY e.investor_code 
-        ORDER BY e.eod_date DESC
-      ) as closing_bal,
-      FIRST_VALUE(e.eod_date) OVER (
-        PARTITION BY e.investor_code 
-        ORDER BY e.eod_date ASC
-      ) as first_dt,
-      FIRST_VALUE(e.eod_date) OVER (
-        PARTITION BY e.investor_code 
-        ORDER BY e.eod_date DESC
-      ) as last_dt,
-      ROW_NUMBER() OVER (
-        PARTITION BY e.investor_code 
-        ORDER BY e.eod_date ASC
-      ) as rn
-    FROM eod_ledger_snapshots e
-    CROSS JOIN date_range d
-    WHERE LOWER(e.account_type) = 'margin'
-      AND e.eod_date >= d.start_dt
-      AND e.eod_date <= d.end_dt
-  )
-  SELECT 
-    f.investor_code as client_code,
-    COALESCE(i.investor_name, '') as client_name,
-    COALESCE(i.rm_name, '') as rm_name,
-    f.opening_bal as opening_balance,
-    f.closing_bal as closing_balance,
-    (ABS(f.closing_bal) - ABS(f.opening_bal)) as loan_increase,
-    f.first_dt as first_date,
-    f.last_dt as last_date
-  FROM first_last_balances f
-  LEFT JOIN investors i ON i.investor_code = f.investor_code
-  WHERE f.rn = 1
-    AND f.closing_bal < 0
-    AND f.opening_bal < 0
-    AND f.closing_bal < f.opening_bal  -- Loan increased (more negative)
-    AND (i.status IS NULL OR UPPER(i.status) NOT IN ('CLOSED'))
-  ORDER BY (ABS(f.closing_bal) - ABS(f.opening_bal)) DESC;
-END;
-$$;
-```
-
-#### Frontend Hook Changes
-
-The `useViolations` hook will be updated to:
-1. Call `get_over_buy_margin_codes` RPC instead of direct table query
-2. Pass the date range parameters
-3. Map response to include the new fields for display
-
-#### Table Display Logic
-
-The ViolationsTable will conditionally render columns:
-- Default view: Event Date, Client Code, Client Name, Violation Type, Amount, RM Name
-- Over Buy filtered view: Client Code, Client Name, Opening Balance, Closing Balance, Loan Increase, RM Name
-
----
-
-### Files to be Modified
-
-| File | Changes |
-|------|---------|
-| `supabase/migrations/[timestamp].sql` | New RPC function `get_over_buy_margin_codes` |
-| `src/hooks/useViolations.ts` | Replace overBuy query with RPC call, update types |
-| `src/components/violations/ViolationsTable.tsx` | Add conditional columns for over_buy type |
-
-### Testing Considerations
-- Verify that only margin accounts appear in the Over Buy card
-- Confirm closed accounts are excluded
-- Validate the loan_increase calculation matches expected values
-- Test date range filtering works correctly
-- Ensure the table displays correct columns when Over Buy filter is active
-
+Files/functions that will be updated (implementation phase)
+- Database migration:
+  - Update function definitions for:
+    - public.get_all_negative_cash_balances(date)
+    - public.get_negative_balance_codes(date, date, text, integer)
+- Frontend:
+  - src/hooks/useViolations.ts (add paged RPC fetching for negative-balance queries)
