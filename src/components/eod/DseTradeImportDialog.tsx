@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Upload, Loader2, FileText, CheckCircle2, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -25,6 +26,12 @@ interface DseTradeImportDialogProps {
 
 type ImportStep = "upload" | "importing" | "complete" | "error";
 
+interface JobResult {
+  trade_count?: number;
+  gross_buy?: number;
+  gross_sell?: number;
+}
+
 export function DseTradeImportDialog({
   open,
   onOpenChange,
@@ -36,28 +43,73 @@ export function DseTradeImportDialog({
   const [file, setFile] = useState<File | null>(null);
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{
-    trade_count?: number;
-    gross_buy?: number;
-    gross_sell?: number;
-    error?: string;
-  } | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [result, setResult] = useState<JobResult & { error?: string } | null>(null);
 
-  const resetState = () => {
+  const resetState = useCallback(() => {
     setStep("upload");
     setFile(null);
     setReplaceExisting(false);
     setImporting(false);
+    setProgress(0);
+    setJobId(null);
     setResult(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  };
+  }, []);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     resetState();
     onOpenChange(false);
-  };
+  }, [resetState, onOpenChange]);
+
+  // Poll for job status
+  useEffect(() => {
+    if (!jobId || step !== "importing") return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const { data: job, error } = await supabase
+          .from("processing_jobs")
+          .select("status, progress, result, error")
+          .eq("id", jobId)
+          .single();
+
+        if (error) {
+          console.error("Error polling job:", error);
+          return;
+        }
+
+        if (job) {
+          setProgress(job.progress || 0);
+
+          if (job.status === "completed") {
+            clearInterval(pollInterval);
+            const jobResult = job.result as JobResult | null;
+            setResult(jobResult || {});
+            setStep("complete");
+            setImporting(false);
+            toast.success("DSE trades imported", {
+              description: `${jobResult?.trade_count?.toLocaleString()} trades imported`,
+            });
+            onImportComplete?.();
+          } else if (job.status === "failed") {
+            clearInterval(pollInterval);
+            setResult({ error: job.error || "Import failed" });
+            setStep("error");
+            setImporting(false);
+            toast.error("Import failed", { description: job.error });
+          }
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }, 2000);
+
+    return () => clearInterval(pollInterval);
+  }, [jobId, step, onImportComplete]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -83,6 +135,7 @@ export function DseTradeImportDialog({
 
     setImporting(true);
     setStep("importing");
+    setProgress(0);
 
     try {
       const content = await file.text();
@@ -116,19 +169,29 @@ export function DseTradeImportDialog({
         throw new Error(data.error || "Import failed");
       }
 
-      setResult(data);
-      setStep("complete");
-      toast.success("DSE trades imported", {
-        description: `${data.trade_count?.toLocaleString()} trades imported for ${tradeDate}`,
-      });
-      onImportComplete?.();
+      // Store job ID for polling
+      if (data.job_id) {
+        setJobId(data.job_id);
+        toast.info("Import started", {
+          description: `Processing ${data.trade_count?.toLocaleString()} trades...`,
+        });
+      } else {
+        // Fallback for immediate response (shouldn't happen with new code)
+        setResult(data);
+        setStep("complete");
+        setImporting(false);
+        toast.success("DSE trades imported", {
+          description: `${data.trade_count?.toLocaleString()} trades imported for ${tradeDate}`,
+        });
+        onImportComplete?.();
+      }
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Import error:", error);
-      setResult({ error: error.message });
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setResult({ error: message });
       setStep("error");
-      toast.error("Import failed", { description: error.message });
-    } finally {
+      toast.error("Import failed", { description: message });
       setImporting(false);
     }
   };
@@ -191,12 +254,18 @@ export function DseTradeImportDialog({
         )}
 
         {step === "importing" && (
-          <div className="py-8 text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-4" />
-            <p className="font-medium">Importing DSE trades...</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              This may take a moment for large files
-            </p>
+          <div className="py-8 text-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+            <div>
+              <p className="font-medium">Importing DSE trades...</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                This may take a moment for large files
+              </p>
+            </div>
+            <div className="px-4">
+              <Progress value={progress} className="h-2" />
+              <p className="text-xs text-muted-foreground mt-2">{progress}% complete</p>
+            </div>
           </div>
         )}
 
