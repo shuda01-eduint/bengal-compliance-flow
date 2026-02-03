@@ -409,7 +409,7 @@ export function DepositsImportDialog({
         }
       }
 
-      // Calculate preview totals
+      // Calculate preview totals for unique records (non-duplicates)
       let totalDeposits = 0;
       let totalWithdrawals = 0;
       let depositCount = 0;
@@ -426,6 +426,23 @@ export function DepositsImportDialog({
         }
       });
 
+      // Calculate totals for ALL valid records (for replace mode)
+      let allTotalDeposits = 0;
+      let allTotalWithdrawals = 0;
+      let allDepositCount = 0;
+      let allWithdrawalCount = 0;
+
+      valid.forEach(record => {
+        const upper = record.transaction_type.toUpperCase();
+        if (upper === "DEPOSIT") {
+          allTotalDeposits += record.amount;
+          allDepositCount++;
+        } else if (upper === "WITHDRAW") {
+          allTotalWithdrawals += record.amount;
+          allWithdrawalCount++;
+        }
+      });
+
       const preview: ImportPreviewData = {
         fileDate: fileDate || (detectedDates.length === 1 ? detectedDates[0] : null),
         totalRows: filteredData.length,
@@ -438,6 +455,10 @@ export function DepositsImportDialog({
         depositCount,
         withdrawalCount,
         existingRecordsCount,
+        allTotalDeposits,
+        allTotalWithdrawals,
+        allDepositCount,
+        allWithdrawalCount,
       };
 
       setPendingRecords(uniqueRecords);

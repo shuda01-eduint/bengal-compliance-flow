@@ -27,6 +27,11 @@ export interface ImportPreviewData {
   depositCount: number;
   withdrawalCount: number;
   existingRecordsCount?: number;
+  // Totals for ALL valid records (used when "Replace" is selected)
+  allTotalDeposits?: number;
+  allTotalWithdrawals?: number;
+  allDepositCount?: number;
+  allWithdrawalCount?: number;
 }
 
 interface ImportPreviewDialogProps {
@@ -59,7 +64,21 @@ export const ImportPreviewDialog = ({
     }).format(value);
   };
 
-  const netAmount = previewData.totalDeposits - previewData.totalWithdrawals;
+  // Use ALL records totals when replacing, otherwise use unique records totals
+  const displayDeposits = replaceExisting && previewData.allTotalDeposits !== undefined
+    ? previewData.allTotalDeposits 
+    : previewData.totalDeposits;
+  const displayWithdrawals = replaceExisting && previewData.allTotalWithdrawals !== undefined
+    ? previewData.allTotalWithdrawals 
+    : previewData.totalWithdrawals;
+  const displayDepositCount = replaceExisting && previewData.allDepositCount !== undefined
+    ? previewData.allDepositCount 
+    : previewData.depositCount;
+  const displayWithdrawalCount = replaceExisting && previewData.allWithdrawalCount !== undefined
+    ? previewData.allWithdrawalCount 
+    : previewData.withdrawalCount;
+
+  const netAmount = displayDeposits - displayWithdrawals;
   const recordsToImport = replaceExisting ? previewData.validRows : previewData.newRows;
 
   return (
@@ -170,22 +189,22 @@ export const ImportPreviewDialog = ({
                 <div className="flex items-center gap-2 text-sm">
                   <ArrowDown className="h-4 w-4 text-green-500" />
                   <span>
-                    Deposits <span className="text-muted-foreground">({previewData.depositCount})</span>
+                    Deposits <span className="text-muted-foreground">({displayDepositCount})</span>
                   </span>
                 </div>
                 <span className="font-mono font-medium text-green-600">
-                  ৳{formatCurrency(previewData.totalDeposits)}
+                  ৳{formatCurrency(displayDeposits)}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm">
                   <ArrowUp className="h-4 w-4 text-red-500" />
                   <span>
-                    Withdrawals <span className="text-muted-foreground">({previewData.withdrawalCount})</span>
+                    Withdrawals <span className="text-muted-foreground">({displayWithdrawalCount})</span>
                   </span>
                 </div>
                 <span className="font-mono font-medium text-red-600">
-                  ৳{formatCurrency(previewData.totalWithdrawals)}
+                  ৳{formatCurrency(displayWithdrawals)}
                 </span>
               </div>
               <div className="border-t pt-2">
