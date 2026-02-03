@@ -3669,6 +3669,23 @@ export type Database = {
           unmatched_withdrawal_value: number
         }[]
       }
+      get_z_group_violations: {
+        Args: { p_from_date?: string; p_to_date?: string }
+        Returns: {
+          adjustment_amount: number
+          client_code: string
+          client_name: string
+          department: string
+          event_date: string
+          matured_balance: number
+          opening_balance: number
+          other_buy_value: number
+          other_sell_value: number
+          rm_name: string
+          z_buy_value: number
+          z_sell_value: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

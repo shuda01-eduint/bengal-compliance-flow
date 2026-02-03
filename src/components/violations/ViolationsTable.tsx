@@ -27,6 +27,12 @@ export interface ViolationRecord {
   // Negative Balance specific fields
   previous_balance?: number;
   department?: string;
+  // Z Group Adjustment specific fields
+  z_buy_value?: number;
+  z_sell_value?: number;
+  other_buy_value?: number;
+  other_sell_value?: number;
+  matured_balance?: number;
 }
 
 interface ViolationsTableProps {
@@ -55,6 +61,7 @@ export function ViolationsTable({ records, isLoading, activeFilter, negativeBala
   
   const isOverBuyView = activeFilter === "over_buy";
   const isNegativeBalanceView = activeFilter === "negative_balance";
+  const isZGroupView = activeFilter === "z_group_adjustment";
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-BD", {
@@ -135,6 +142,79 @@ export function ViolationsTable({ records, isLoading, activeFilter, negativeBala
                   )}
                   <TableCell className="text-right font-medium text-destructive">
                     {formatCurrency(record.closing_balance ?? 0)}
+                  </TableCell>
+                  <TableCell>{record.department || '-'}</TableCell>
+                  <TableCell>{record.rm_name}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <InvestorViolationDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          clientCode={selectedClientCode}
+        />
+      </>
+    );
+  }
+
+  // Render Z Group Adjustment specific table
+  if (isZGroupView) {
+    return (
+      <>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Client Code</TableHead>
+                <TableHead>Client Name</TableHead>
+                <TableHead className="text-right">Z Buy</TableHead>
+                <TableHead className="text-right">Z Sell</TableHead>
+                <TableHead className="text-right">Other Buy</TableHead>
+                <TableHead className="text-right">Other Sell</TableHead>
+                <TableHead className="text-right">Opening Bal</TableHead>
+                <TableHead className="text-right">Matured Bal</TableHead>
+                <TableHead className="text-right">Adjustment</TableHead>
+                <TableHead>Department</TableHead>
+                <TableHead>RM Name</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {records.map((record, index) => (
+                <TableRow key={`${record.client_code}-${record.event_date}-${index}`}>
+                  <TableCell>{formatEventDate(record.event_date)}</TableCell>
+                  <TableCell>
+                    <button
+                      onClick={() => handleClientClick(record.client_code)}
+                      className="font-medium text-primary hover:text-primary/80 hover:underline cursor-pointer transition-colors"
+                    >
+                      {record.client_code}
+                    </button>
+                  </TableCell>
+                  <TableCell>{record.client_name}</TableCell>
+                  <TableCell className="text-right font-medium text-orange-500">
+                    {formatCurrency(record.z_buy_value ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium text-green-600">
+                    {formatCurrency(record.z_sell_value ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium">
+                    {formatCurrency(record.other_buy_value ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium">
+                    {formatCurrency(record.other_sell_value ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium">
+                    {formatCurrency(record.opening_balance ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium">
+                    {formatCurrency(record.matured_balance ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium text-destructive">
+                    {formatCurrency(record.amount)}
                   </TableCell>
                   <TableCell>{record.department || '-'}</TableCell>
                   <TableCell>{record.rm_name}</TableCell>
