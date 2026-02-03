@@ -412,58 +412,158 @@ const AccountingTab = () => {
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 
-  // Fetch turnover by department - lazy load only when margin chart is active
+  // Fetch turnover by department from eod_ledger_snapshots
   const { data: departmentTurnover } = useQuery({
     queryKey: ['accounting-turnover-by-department', selectedDateStr],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_accounting_turnover_by_department', {
-        _from_tx_date: selectedDateStr,
-        _to_tx_date: selectedDateStr,
-      });
+      const { data, error } = await supabase
+        .from('eod_ledger_snapshots')
+        .select('department, gross_buy, gross_sell')
+        .eq('eod_date', selectedDateStr);
+      
       if (error) throw error;
-      return data || [];
+      
+      // Group by department
+      const deptMap = new Map<string, { department: string; total_buy: number; total_sell: number; turnover: number }>();
+      
+      (data || []).forEach(row => {
+        const dept = row.department || 'Unknown';
+        const buy = Number(row.gross_buy) || 0;
+        const sell = Number(row.gross_sell) || 0;
+        const existing = deptMap.get(dept);
+        
+        if (existing) {
+          existing.total_buy += buy;
+          existing.total_sell += sell;
+          existing.turnover += buy + sell;
+        } else {
+          deptMap.set(dept, {
+            department: dept,
+            total_buy: buy,
+            total_sell: sell,
+            turnover: buy + sell,
+          });
+        }
+      });
+      
+      return Array.from(deptMap.values())
+        .filter(d => d.turnover > 0)
+        .sort((a, b) => b.turnover - a.turnover);
     },
     enabled: chartView === 'margin' && hasEodData,
     staleTime: 5 * 60 * 1000,
-    retry: (failureCount, error: Error) => {
-      const msg = error?.message || '';
-      if (msg.includes('timeout') || msg.includes('504') || msg.includes('upstream')) return false;
-      return failureCount < 1;
-    },
   });
 
-  // Fetch balance comparison by department (period beginning vs ending)
+  // Fetch balance comparison by department from eod_ledger_snapshots
   const { data: balanceComparison } = useQuery({
     queryKey: ['accounting-balance-comparison', selectedDateStr],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_margin_composition_by_department', {
-        p_from_date: selectedDateStr,
-        p_to_date: selectedDateStr,
-      });
+      const { data, error } = await supabase
+        .from('eod_ledger_snapshots')
+        .select('department, opening_balance, closing_balance')
+        .eq('eod_date', selectedDateStr);
+      
       if (error) throw error;
-      return data || [];
+      
+      // Group by department and calculate margin loans (negative balances)
+      const deptMap = new Map<string, {
+        department: string;
+        beginning_loan: number;
+        ending_loan: number;
+        loan_change: number;
+        change_percent: number;
+        client_count: number;
+      }>();
+      
+      (data || []).forEach(row => {
+        const dept = row.department || 'Unknown';
+        // Margin loan = absolute value of negative balance
+        const openingLoan = Number(row.opening_balance) < 0 ? Math.abs(Number(row.opening_balance)) : 0;
+        const closingLoan = Number(row.closing_balance) < 0 ? Math.abs(Number(row.closing_balance)) : 0;
+        const isMarginClient = openingLoan > 0 || closingLoan > 0;
+        
+        const existing = deptMap.get(dept);
+        
+        if (existing) {
+          existing.beginning_loan += openingLoan;
+          existing.ending_loan += closingLoan;
+          existing.client_count += isMarginClient ? 1 : 0;
+        } else {
+          deptMap.set(dept, {
+            department: dept,
+            beginning_loan: openingLoan,
+            ending_loan: closingLoan,
+            loan_change: 0,
+            change_percent: 0,
+            client_count: isMarginClient ? 1 : 0,
+          });
+        }
+      });
+      
+      // Calculate change and percentage
+      return Array.from(deptMap.values())
+        .map(d => ({
+          ...d,
+          loan_change: d.ending_loan - d.beginning_loan,
+          change_percent: d.beginning_loan > 0 
+            ? ((d.ending_loan - d.beginning_loan) / d.beginning_loan) * 100 
+            : 0,
+        }))
+        .filter(d => d.ending_loan > 0 || d.beginning_loan > 0)
+        .sort((a, b) => b.ending_loan - a.ending_loan);
     },
     enabled: chartView === 'margin' && hasEodData,
+    staleTime: 5 * 60 * 1000,
   });
 
-  // Fetch commission by department - lazy load only when commission chart is active
+  // Fetch commission by department from eod_ledger_snapshots - aggregated correctly
   const { data: commissionByDept } = useQuery({
     queryKey: ['accounting-commission-by-department', selectedDateStr],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_commission_by_department', {
-        _from_tx_date: selectedDateStr,
-        _to_tx_date: selectedDateStr,
-      });
+      // Aggregate commission data directly from eod_ledger_snapshots (the correct source)
+      const { data, error } = await supabase
+        .from('eod_ledger_snapshots')
+        .select('department, total_commission, gross_buy, gross_sell')
+        .eq('eod_date', selectedDateStr);
+      
       if (error) throw error;
-      return data || [];
+      
+      // Group by department and calculate totals
+      const deptMap = new Map<string, { 
+        department: string; 
+        total_commission: number; 
+        total_turnover: number; 
+        trade_count: number 
+      }>();
+      
+      (data || []).forEach(row => {
+        const dept = row.department || 'Unknown';
+        const existing = deptMap.get(dept);
+        const commission = Number(row.total_commission) || 0;
+        const turnover = (Number(row.gross_buy) || 0) + (Number(row.gross_sell) || 0);
+        const hasTrade = turnover > 0 ? 1 : 0;
+        
+        if (existing) {
+          existing.total_commission += commission;
+          existing.total_turnover += turnover;
+          existing.trade_count += hasTrade;
+        } else {
+          deptMap.set(dept, {
+            department: dept,
+            total_commission: commission,
+            total_turnover: turnover,
+            trade_count: hasTrade,
+          });
+        }
+      });
+      
+      // Convert to array and sort by commission descending
+      return Array.from(deptMap.values())
+        .filter(d => d.total_commission > 0)
+        .sort((a, b) => b.total_commission - a.total_commission);
     },
     enabled: chartView === 'commission' && hasEodData,
     staleTime: 5 * 60 * 1000,
-    retry: (failureCount, error: Error) => {
-      const msg = error?.message || '';
-      if (msg.includes('timeout') || msg.includes('504') || msg.includes('upstream')) return false;
-      return failureCount < 1;
-    },
   });
 
   // Process accounting data with custom fields
