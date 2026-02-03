@@ -12,11 +12,17 @@ import { NegativeBalanceLookbackFilter } from "./NegativeBalanceLookbackFilter";
 import { NegativeBalanceModeToggle } from "./NegativeBalanceModeToggle";
 import * as XLSX from "xlsx";
 
+// Default both dates to yesterday
+const getYesterday = () => {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
 export function ViolationsDashboard() {
-  const [fromDate, setFromDate] = useState<Date | undefined>(
-    new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-  );
-  const [toDate, setToDate] = useState<Date | undefined>(new Date());
+  const [fromDate, setFromDate] = useState<Date | undefined>(getYesterday());
+  const [toDate, setToDate] = useState<Date | undefined>(getYesterday());
   const [searchTerm, setSearchTerm] = useState("");
   const [negativeBalanceThreshold, setNegativeBalanceThreshold] = useState<number | null>(null);
   const [negativeBalanceLookbackDays, setNegativeBalanceLookbackDays] = useState<number>(7);
