@@ -80,6 +80,7 @@ export function useViolations(
           closing_balance: number;
           previous_balance: number;
           days_negative: number;
+          department: string;
         }>;
         
         // Apply threshold filter if set
@@ -89,36 +90,37 @@ export function useViolations(
         
         return results;
       } else {
-        // "all" mode - get all currently negative balances from eod_ledger_snapshots
-        // Filter for cash accounts only (account_type != 'M')
+        // "all" mode - use RPC that properly joins with investors table for cash account filtering
         const targetDate = toDate ? format(toDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
         
-        const { data, error } = await supabase
-          .from("eod_ledger_snapshots")
-          .select("eod_date, investor_code, investor_name, rm_name, closing_balance, account_type")
-          .eq("eod_date", targetDate)
-          .lt("closing_balance", 0)
-          .or("account_type.neq.M,account_type.is.null,account_type.eq.")
-          .order("closing_balance", { ascending: true });
+        const { data, error } = await supabase.rpc("get_all_negative_cash_balances", {
+          p_target_date: targetDate,
+        });
         
         if (error) throw error;
         
-        let results = (data || []).map(r => ({
-          event_date: r.eod_date,
-          client_code: r.investor_code,
-          client_name: r.investor_name || '',
-          rm_name: r.rm_name || '',
-          closing_balance: r.closing_balance || 0,
+        let results = (data || []) as Array<{
+          event_date: string;
+          client_code: string;
+          client_name: string;
+          rm_name: string;
+          closing_balance: number;
+          days_negative: number;
+          department: string;
+        }>;
+        
+        // Map to include previous_balance for consistency
+        let mappedResults = results.map(r => ({
+          ...r,
           previous_balance: 0,
-          days_negative: 0,
         }));
         
         // Apply threshold filter if set
         if (negativeBalanceThreshold !== null) {
-          results = results.filter(r => r.closing_balance < negativeBalanceThreshold);
+          mappedResults = mappedResults.filter(r => r.closing_balance < negativeBalanceThreshold);
         }
         
-        return results;
+        return mappedResults;
       }
     },
   });
@@ -298,6 +300,7 @@ export function useViolations(
         previous_balance: r.previous_balance,
         closing_balance: r.closing_balance,
         days_negative: r.days_negative,
+        department: r.department,
       });
     });
 

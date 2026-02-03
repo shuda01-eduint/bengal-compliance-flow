@@ -3320,6 +3320,18 @@ export type Database = {
           value: number
         }[]
       }
+      get_all_negative_cash_balances: {
+        Args: { p_target_date?: string }
+        Returns: {
+          client_code: string
+          client_name: string
+          closing_balance: number
+          days_negative: number
+          department: string
+          event_date: string
+          rm_name: string
+        }[]
+      }
       get_balance_dates: {
         Args: never
         Returns: {
@@ -3527,6 +3539,7 @@ export type Database = {
               client_name: string
               closing_balance: number
               days_negative: number
+              department: string
               event_date: string
               previous_balance: number
               rm_name: string
