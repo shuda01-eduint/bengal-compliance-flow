@@ -3326,7 +3326,6 @@ export type Database = {
           client_code: string
           client_name: string
           closing_balance: number
-          days_negative: number
           department: string
           event_date: string
           rm_name: string
@@ -3538,7 +3537,6 @@ export type Database = {
               client_code: string
               client_name: string
               closing_balance: number
-              days_negative: number
               department: string
               event_date: string
               previous_balance: number
