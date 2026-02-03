@@ -8,6 +8,7 @@ import { ViolationsFilters } from "./ViolationsFilters";
 import { useViolations, ViolationType } from "@/hooks/useViolations";
 import { useDebounce } from "@/hooks/useDebounce";
 import { NegativeBalanceThresholdFilter, ThresholdBadge } from "./NegativeBalanceThresholdFilter";
+import { NegativeBalanceLookbackFilter } from "./NegativeBalanceLookbackFilter";
 import * as XLSX from "xlsx";
 
 export function ViolationsDashboard() {
@@ -17,6 +18,7 @@ export function ViolationsDashboard() {
   const [toDate, setToDate] = useState<Date | undefined>(new Date());
   const [searchTerm, setSearchTerm] = useState("");
   const [negativeBalanceThreshold, setNegativeBalanceThreshold] = useState<number | null>(null);
+  const [negativeBalanceLookbackDays, setNegativeBalanceLookbackDays] = useState<number>(7);
   const debouncedSearch = useDebounce(searchTerm, 300);
 
   const {
@@ -26,7 +28,7 @@ export function ViolationsDashboard() {
     activeFilter,
     setActiveFilter,
     refetchAll,
-  } = useViolations(fromDate, toDate, debouncedSearch, negativeBalanceThreshold);
+  } = useViolations(fromDate, toDate, debouncedSearch, negativeBalanceThreshold, negativeBalanceLookbackDays);
 
   const handleCardClick = (type: ViolationType) => {
     setActiveFilter(activeFilter === type ? "all" : type);
@@ -64,11 +66,17 @@ export function ViolationsDashboard() {
           onClick={() => handleCardClick("negative_balance")}
           isLoading={isLoading}
           filterComponent={
-            <NegativeBalanceThresholdFilter
-              threshold={negativeBalanceThreshold}
-              onThresholdChange={setNegativeBalanceThreshold}
-              variant="danger"
-            />
+            <div className="flex items-center gap-1">
+              <NegativeBalanceLookbackFilter
+                lookbackDays={negativeBalanceLookbackDays}
+                onLookbackChange={setNegativeBalanceLookbackDays}
+              />
+              <NegativeBalanceThresholdFilter
+                threshold={negativeBalanceThreshold}
+                onThresholdChange={setNegativeBalanceThreshold}
+                variant="danger"
+              />
+            </div>
           }
           filterBadge={
             negativeBalanceThreshold ? (

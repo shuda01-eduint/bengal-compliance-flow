@@ -3500,16 +3500,38 @@ export type Database = {
           rm_name: string
         }[]
       }
-      get_negative_balance_codes: {
-        Args: { p_from_date?: string; p_search?: string; p_to_date?: string }
-        Returns: {
-          client_code: string
-          client_name: string
-          closing_balance: number
-          event_date: string
-          rm_name: string
-        }[]
-      }
+      get_negative_balance_codes:
+        | {
+            Args: {
+              p_from_date?: string
+              p_search?: string
+              p_to_date?: string
+            }
+            Returns: {
+              client_code: string
+              client_name: string
+              closing_balance: number
+              event_date: string
+              rm_name: string
+            }[]
+          }
+        | {
+            Args: {
+              p_from_date?: string
+              p_lookback_days?: number
+              p_search?: string
+              p_to_date?: string
+            }
+            Returns: {
+              client_code: string
+              client_name: string
+              closing_balance: number
+              days_negative: number
+              event_date: string
+              previous_balance: number
+              rm_name: string
+            }[]
+          }
       get_over_buy_margin_codes: {
         Args: { p_from_date?: string; p_to_date?: string }
         Returns: {
