@@ -65,12 +65,15 @@ export function useViolations(
     queryFn: async () => {
       if (negativeBalanceMode === "new_only") {
         // Use RPC for new negative balances only
-        const { data, error } = await supabase.rpc("get_negative_balance_codes", {
-          p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
-          p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
-          p_search: "",
-          p_lookback_days: negativeBalanceLookbackDays,
-        });
+        // NOTE: backend queries are capped to 1000 rows by default; request a larger range.
+        const { data, error } = await supabase
+          .rpc("get_negative_balance_codes", {
+            p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
+            p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
+            p_search: "",
+            p_lookback_days: negativeBalanceLookbackDays,
+          })
+          .range(0, 9999);
         if (error) throw error;
         let results = (data || []) as Array<{
           event_date: string;
@@ -93,9 +96,12 @@ export function useViolations(
         // "all" mode - use RPC that properly joins with investors table for cash account filtering
         const targetDate = toDate ? format(toDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
         
-        const { data, error } = await supabase.rpc("get_all_negative_cash_balances", {
-          p_target_date: targetDate,
-        });
+        // NOTE: backend queries are capped to 1000 rows by default; request a larger range.
+        const { data, error } = await supabase
+          .rpc("get_all_negative_cash_balances", {
+            p_target_date: targetDate,
+          })
+          .range(0, 9999);
         
         if (error) throw error;
         
