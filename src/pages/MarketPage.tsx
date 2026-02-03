@@ -5,39 +5,42 @@ import { SectorBreakdownChart } from "@/components/market/SectorBreakdownChart";
 import { StockDataTable } from "@/components/market/StockDataTable";
 import { StockDetailDialog } from "@/components/market/StockDetailDialog";
 import { useStockDaily, useSectors, useLatestTradeDate } from "@/hooks/useMarketData";
-import { format } from "date-fns";
 
 export default function MarketPage() {
-  const { data: latestDate } = useLatestTradeDate();
-  const [selectedDate, setSelectedDate] = useState("");
+  const { data: latestDate, isLoading: latestDateLoading } = useLatestTradeDate();
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSector, setSelectedSector] = useState("all");
   const [selectedStock, setSelectedStock] = useState<string | null>(null);
 
   // Set date to latest available when loaded
   useEffect(() => {
-    if (latestDate && !selectedDate) {
+    if (latestDate && selectedDate === null) {
       setSelectedDate(latestDate);
-    } else if (!latestDate && !selectedDate) {
-      setSelectedDate(format(new Date(), "yyyy-MM-dd"));
     }
   }, [latestDate, selectedDate]);
 
+  // Use the effective date - either selected or latest
+  const effectiveDate = selectedDate || latestDate;
+
   const { data: stocks = [], isLoading: stocksLoading } = useStockDaily({
-    trade_date: selectedDate || undefined,
+    trade_date: effectiveDate || undefined,
     sector_filter: selectedSector !== "all" ? selectedSector : undefined,
   });
 
   const { data: sectors = [] } = useSectors();
 
+  // Show loading while fetching the latest date
+  const isLoading = stocksLoading || latestDateLoading || !effectiveDate;
+
   return (
     <MainLayout title="Market" subtitle="Stock market overview and analytics">
       <div className="space-y-6">
         {/* Summary Cards */}
-        <MarketSummaryCards stocks={stocks} isLoading={stocksLoading} />
+        <MarketSummaryCards stocks={stocks} isLoading={isLoading} />
 
         {/* Charts Section */}
         <div className="grid gap-6 lg:grid-cols-2">
-          <SectorBreakdownChart stocks={stocks} isLoading={stocksLoading} />
+          <SectorBreakdownChart stocks={stocks} isLoading={isLoading} />
           
           {/* Quick Stats Card */}
           <div className="grid gap-4 md:grid-cols-2">
@@ -72,9 +75,9 @@ export default function MarketPage() {
         <StockDataTable
           stocks={stocks}
           sectors={sectors}
-          isLoading={stocksLoading}
+          isLoading={isLoading}
           onStockClick={setSelectedStock}
-          selectedDate={selectedDate}
+          selectedDate={effectiveDate || ""}
           onDateChange={setSelectedDate}
           selectedSector={selectedSector}
           onSectorChange={setSelectedSector}
