@@ -27,6 +27,7 @@ export interface ViolationRecord {
   // Negative Balance specific fields
   previous_balance?: number;
   days_negative?: number;
+  department?: string;
 }
 
 interface ViolationsTableProps {
@@ -96,8 +97,10 @@ export function ViolationsTable({ records, isLoading, activeFilter, negativeBala
     );
   }
 
-  // Render Negative Balance specific table (only for "new_only" mode)
-  if (isNegativeBalanceView && negativeBalanceMode === "new_only") {
+  // Render Negative Balance specific table
+  if (isNegativeBalanceView) {
+    const showPreviousBalance = negativeBalanceMode === "new_only";
+    
     return (
       <>
         <div className="overflow-x-auto">
@@ -106,9 +109,12 @@ export function ViolationsTable({ records, isLoading, activeFilter, negativeBala
               <TableRow>
                 <TableHead>Client Code</TableHead>
                 <TableHead>Client Name</TableHead>
-                <TableHead className="text-right">Previous Balance</TableHead>
+                {showPreviousBalance && (
+                  <TableHead className="text-right">Previous Balance</TableHead>
+                )}
                 <TableHead className="text-right">Current Balance</TableHead>
                 <TableHead className="text-right">Days Negative</TableHead>
+                <TableHead>Department</TableHead>
                 <TableHead>RM Name</TableHead>
               </TableRow>
             </TableHeader>
@@ -124,15 +130,18 @@ export function ViolationsTable({ records, isLoading, activeFilter, negativeBala
                     </button>
                   </TableCell>
                   <TableCell>{record.client_name}</TableCell>
-                  <TableCell className="text-right font-medium text-green-600">
-                    {formatCurrency(record.previous_balance ?? 0)}
-                  </TableCell>
+                  {showPreviousBalance && (
+                    <TableCell className="text-right font-medium text-green-600">
+                      {formatCurrency(record.previous_balance ?? 0)}
+                    </TableCell>
+                  )}
                   <TableCell className="text-right font-medium text-destructive">
                     {formatCurrency(record.closing_balance ?? 0)}
                   </TableCell>
                   <TableCell className="text-right font-medium">
                     {record.days_negative ?? 0}
                   </TableCell>
+                  <TableCell>{record.department || '-'}</TableCell>
                   <TableCell>{record.rm_name}</TableCell>
                 </TableRow>
               ))}
