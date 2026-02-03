@@ -2408,9 +2408,11 @@ export type Database = {
           public_percent: number | null
           sector: string | null
           total_securities: number | null
+          trade_count: number | null
           trading_code: string
           trailing_pe: number | null
           updated_at: string
+          value: number | null
           volume: number | null
           week_52_high: number | null
           week_52_low: number | null
@@ -2439,9 +2441,11 @@ export type Database = {
           public_percent?: number | null
           sector?: string | null
           total_securities?: number | null
+          trade_count?: number | null
           trading_code: string
           trailing_pe?: number | null
           updated_at?: string
+          value?: number | null
           volume?: number | null
           week_52_high?: number | null
           week_52_low?: number | null
@@ -2470,9 +2474,11 @@ export type Database = {
           public_percent?: number | null
           sector?: string | null
           total_securities?: number | null
+          trade_count?: number | null
           trading_code?: string
           trailing_pe?: number | null
           updated_at?: string
+          value?: number | null
           volume?: number | null
           week_52_high?: number | null
           week_52_low?: number | null

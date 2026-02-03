@@ -22,6 +22,7 @@ export interface StockDaily {
   high_price: number | null;
   low_price: number | null;
   trade_count: number | null;
+  value: number | null;
 }
 
 export interface StockHistorical {
@@ -145,7 +146,8 @@ export function useStockDaily(params: StockDailyParams = {}) {
           open_price: openPrice || null,
           high_price: highPrice || null,
           low_price: lowPrice || null,
-          trade_count: null,
+          trade_count: Number(s.trade_count) || null,
+          value: Number(s.value) || null,
         };
       }) as StockDaily[];
     },
