@@ -20,11 +20,16 @@ export interface ViolationRecord {
   amount: number;
   rm_name: string;
   details?: string;
+  // Over Buy specific fields
+  opening_balance?: number;
+  closing_balance?: number;
+  loan_increase?: number;
 }
 
 interface ViolationsTableProps {
   records: ViolationRecord[];
   isLoading: boolean;
+  activeFilter?: string;
 }
 
 const violationLabels = {
@@ -41,9 +46,11 @@ const violationColors = {
   non_margin_buy: "bg-purple-500/20 text-purple-400 border-purple-500/30",
 };
 
-export function ViolationsTable({ records, isLoading }: ViolationsTableProps) {
+export function ViolationsTable({ records, isLoading, activeFilter }: ViolationsTableProps) {
   const [selectedClientCode, setSelectedClientCode] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  
+  const isOverBuyView = activeFilter === "over_buy";
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-BD", {
@@ -85,6 +92,60 @@ export function ViolationsTable({ records, isLoading }: ViolationsTableProps) {
     );
   }
 
+  // Render Over Buy specific table
+  if (isOverBuyView) {
+    return (
+      <>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Client Code</TableHead>
+                <TableHead>Client Name</TableHead>
+                <TableHead className="text-right">Opening Balance</TableHead>
+                <TableHead className="text-right">Closing Balance</TableHead>
+                <TableHead className="text-right">Loan Increase</TableHead>
+                <TableHead>RM Name</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {records.map((record, index) => (
+                <TableRow key={`${record.client_code}-${index}`}>
+                  <TableCell>
+                    <button
+                      onClick={() => handleClientClick(record.client_code)}
+                      className="font-medium text-primary hover:text-primary/80 hover:underline cursor-pointer transition-colors"
+                    >
+                      {record.client_code}
+                    </button>
+                  </TableCell>
+                  <TableCell>{record.client_name}</TableCell>
+                  <TableCell className="text-right font-medium">
+                    {formatCurrency(record.opening_balance ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium text-destructive">
+                    {formatCurrency(record.closing_balance ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium text-orange-500">
+                    {formatCurrency(record.loan_increase ?? 0)}
+                  </TableCell>
+                  <TableCell>{record.rm_name}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <InvestorViolationDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          clientCode={selectedClientCode}
+        />
+      </>
+    );
+  }
+
+  // Default table view
   return (
     <>
       <div className="overflow-x-auto">

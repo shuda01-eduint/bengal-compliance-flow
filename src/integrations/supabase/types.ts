@@ -3510,6 +3510,19 @@ export type Database = {
           rm_name: string
         }[]
       }
+      get_over_buy_margin_codes: {
+        Args: { p_from_date?: string; p_to_date?: string }
+        Returns: {
+          client_code: string
+          client_name: string
+          closing_balance: number
+          first_date: string
+          last_date: string
+          loan_increase: number
+          opening_balance: number
+          rm_name: string
+        }[]
+      }
       get_stock_daily: {
         Args: {
           _code?: string
