@@ -101,6 +101,21 @@ interface ClientInfo {
   rm_name: string;
 }
 
+interface ZGroupViolationResult {
+  event_date: string;
+  client_code: string;
+  client_name: string;
+  department: string;
+  rm_name: string;
+  z_buy_value: number;
+  z_sell_value: number;
+  other_buy_value: number;
+  other_sell_value: number;
+  opening_balance: number;
+  matured_balance: number;
+  adjustment_amount: number;
+}
+
 export type NegativeBalanceMode = "all" | "new_only";
 
 export function useViolations(
@@ -197,51 +212,16 @@ export function useViolations(
     },
   });
 
-  // Fetch Z group adjustment violations
+  // Fetch Z group adjustment violations using RPC
   const { data: zGroupData, isLoading: isLoadingZGroup, refetch: refetchZGroup } = useQuery({
     queryKey: ["z-group-violations", fromDate, toDate],
     queryFn: async () => {
-      let query = supabase
-        .from("trades")
-        .select("trade_date, investor_code, instrument, side, trade_value")
-        .eq("side", "SELL");
-
-      if (fromDate) {
-        query = query.gte("trade_date", format(fromDate, "yyyy-MM-dd"));
-      }
-      if (toDate) {
-        query = query.lte("trade_date", format(toDate, "yyyy-MM-dd"));
-      }
-
-      const { data: trades, error: tradesError } = await query;
-      if (tradesError) throw tradesError;
-
-      const { data: zInstruments, error: instrError } = await supabase
-        .from("instrument")
-        .select("trading_code")
-        .eq("category", "Z");
-      
-      if (instrError) throw instrError;
-      
-      const zCodes = new Set((zInstruments || []).map(i => i.trading_code));
-      const typedTrades = (trades || []) as TradeRecord[];
-      const zSells = typedTrades.filter(t => zCodes.has(t.instrument));
-      
-      const grouped = new Map<string, { event_date: string; client_code: string; amount: number }>();
-      zSells.forEach(trade => {
-        const key = `${trade.investor_code}-${trade.trade_date}`;
-        if (!grouped.has(key)) {
-          grouped.set(key, {
-            event_date: trade.trade_date,
-            client_code: trade.investor_code,
-            amount: 0,
-          });
-        }
-        const record = grouped.get(key)!;
-        record.amount += trade.trade_value || 0;
+      const { data, error } = await supabase.rpc("get_z_group_violations", {
+        p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
+        p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
       });
-
-      return Array.from(grouped.values());
+      if (error) throw error;
+      return (data || []) as ZGroupViolationResult[];
     },
   });
 
@@ -325,7 +305,7 @@ export function useViolations(
       },
       z_group_adjustment: {
         count: new Set(zGroupRecords.map(r => r.client_code)).size,
-        amount: zGroupRecords.reduce((sum, r) => sum + (r.amount || 0), 0),
+        amount: zGroupRecords.reduce((sum, r) => sum + (r.adjustment_amount || 0), 0),
       },
       non_margin_buy: {
         count: new Set(nonMarginRecords.map(r => r.client_code)).size,
@@ -368,16 +348,22 @@ export function useViolations(
       });
     });
 
-    // Add Z group records - lookup client info from map
+    // Add Z group records from RPC
     (zGroupData || []).forEach(r => {
-      const client = clientMap.get(r.client_code);
       records.push({
         event_date: r.event_date,
         client_code: r.client_code,
-        client_name: client?.investor_name || '',
+        client_name: r.client_name || '',
         violation_type: "z_group_adjustment",
-        amount: r.amount,
-        rm_name: client?.rm_name || '',
+        amount: r.adjustment_amount,
+        rm_name: r.rm_name || '',
+        department: r.department,
+        z_buy_value: r.z_buy_value,
+        z_sell_value: r.z_sell_value,
+        other_buy_value: r.other_buy_value,
+        other_sell_value: r.other_sell_value,
+        opening_balance: r.opening_balance,
+        matured_balance: r.matured_balance,
       });
     });
 
