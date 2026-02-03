@@ -107,30 +107,47 @@ export function useStockDaily(params: StockDailyParams = {}) {
       if (error) throw error;
 
       // Transform securities data to match StockDaily interface
-      return (data || []).map((s: any) => ({
-        code: s.trading_code,
-        name: s.trading_code, // securities table doesn't have full name
-        sector: s.sector,
-        category: s.category,
-        market: null,
-        date: s.last_synced_at ? new Date(s.last_synced_at).toISOString().split('T')[0] : null,
-        close_price: s.close_price,
-        prev_close: s.open_price, // Use open as prev_close approximation for change calc
-        change: s.close_price && s.open_price ? s.close_price - s.open_price : null,
-        change_pct: s.close_price && s.open_price && s.open_price !== 0 
-          ? ((s.close_price - s.open_price) / s.open_price) * 100 
-          : null,
-        market_cap: s.market_cap,
-        pe_ratio: s.audited_pe || s.trailing_pe,
-        eps: s.eps,
-        is_marginable: s.is_marginable,
-        haircut_pct: s.haircut_percentage,
-        volume: s.volume,
-        open_price: s.open_price,
-        high_price: s.high_price,
-        low_price: s.low_price,
-        trade_count: null, // Not available in securities table
-      })) as StockDaily[];
+      return (data || []).map((s: any) => {
+        const closePrice = Number(s.close_price) || 0;
+        const openPrice = Number(s.open_price) || 0;
+        const highPrice = Number(s.high_price) || 0;
+        const lowPrice = Number(s.low_price) || 0;
+        
+        // Calculate change: prefer open_price if available, else estimate from high/low
+        let prevClose = openPrice;
+        if (!prevClose && highPrice && lowPrice) {
+          // Use midpoint of range as approximation if no open price
+          prevClose = (highPrice + lowPrice) / 2;
+        }
+        
+        const change = prevClose && closePrice ? closePrice - prevClose : null;
+        const changePct = prevClose && prevClose !== 0 && change !== null
+          ? (change / prevClose) * 100
+          : null;
+
+        return {
+          code: s.trading_code,
+          name: s.trading_code,
+          sector: s.sector,
+          category: s.category,
+          market: null,
+          date: s.last_synced_at ? new Date(s.last_synced_at).toISOString().split('T')[0] : null,
+          close_price: closePrice,
+          prev_close: prevClose || null,
+          change,
+          change_pct: changePct,
+          market_cap: Number(s.market_cap) || null,
+          pe_ratio: Number(s.audited_pe || s.trailing_pe) || null,
+          eps: Number(s.eps) || null,
+          is_marginable: s.is_marginable,
+          haircut_pct: Number(s.haircut_percentage) || null,
+          volume: Number(s.volume) || null,
+          open_price: openPrice || null,
+          high_price: highPrice || null,
+          low_price: lowPrice || null,
+          trade_count: null,
+        };
+      }) as StockDaily[];
     },
   });
 }
