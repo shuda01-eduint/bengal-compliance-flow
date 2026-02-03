@@ -21,6 +21,7 @@ interface DSEPriceData {
   high_price?: number;
   low_price?: number;
   open_price?: number;
+  prev_close?: number;
   volume?: number;
   value?: number;
   trade_count?: number;
@@ -302,7 +303,7 @@ async function syncPricesToDatabase(prices: DSEPriceData[]): Promise<{ updated: 
   const errors: string[] = [];
 
   for (const price of prices) {
-    console.log(`Updating price for ${price.trading_code}: close=${price.close_price}, volume=${price.volume}`);
+    console.log(`Updating price for ${price.trading_code}: close=${price.close_price}, volume=${price.volume}, trade_count=${price.trade_count}, value=${price.value}`);
     
     // Use update instead of upsert to only update existing records
     const { data, error, count } = await supabase
@@ -313,6 +314,8 @@ async function syncPricesToDatabase(prices: DSEPriceData[]): Promise<{ updated: 
         low_price: price.low_price || null,
         open_price: price.open_price || null,
         volume: price.volume || null,
+        trade_count: price.trade_count || null,
+        value: price.value || null,
         last_synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
