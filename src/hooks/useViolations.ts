@@ -90,13 +90,15 @@ export function useViolations(
         return results;
       } else {
         // "all" mode - get all currently negative balances from eod_ledger_snapshots
+        // Filter for cash accounts only (account_type != 'M')
         const targetDate = toDate ? format(toDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
         
         const { data, error } = await supabase
           .from("eod_ledger_snapshots")
-          .select("eod_date, investor_code, investor_name, rm_name, closing_balance")
+          .select("eod_date, investor_code, investor_name, rm_name, closing_balance, account_type")
           .eq("eod_date", targetDate)
           .lt("closing_balance", 0)
+          .or("account_type.neq.M,account_type.is.null,account_type.eq.")
           .order("closing_balance", { ascending: true });
         
         if (error) throw error;
