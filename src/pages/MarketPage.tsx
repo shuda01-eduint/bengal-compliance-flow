@@ -6,13 +6,17 @@ import { MarketSummaryCardsNew } from "@/components/market/MarketSummaryCardsNew
 import { MarketStrengthChart } from "@/components/market/MarketStrengthChart";
 import { MarketSentiment } from "@/components/market/MarketSentiment";
 import { TopMoversSection } from "@/components/market/TopMoversSection";
+import { ValueAnalysisChart } from "@/components/market/ValueAnalysisChart";
+import { SectoralPerformanceChart } from "@/components/market/SectoralPerformanceChart";
+import { AllStocksTable } from "@/components/market/AllStocksTable";
 import { StockDetailDialog } from "@/components/market/StockDetailDialog";
-import { useStockDaily, useLatestTradeDate } from "@/hooks/useMarketData";
+import { useStockDaily, useLatestTradeDate, useSectors } from "@/hooks/useMarketData";
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function MarketPage() {
   const queryClient = useQueryClient();
   const { data: latestDate, isLoading: latestDateLoading } = useLatestTradeDate();
+  const { data: sectors = [] } = useSectors();
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedStock, setSelectedStock] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -46,6 +50,7 @@ export default function MarketPage() {
     setIsRefreshing(true);
     await queryClient.invalidateQueries({ queryKey: ["stock-daily"] });
     await queryClient.invalidateQueries({ queryKey: ["latest-trade-date"] });
+    await queryClient.invalidateQueries({ queryKey: ["sectors"] });
     setIsRefreshing(false);
   }, [queryClient]);
 
@@ -76,6 +81,26 @@ export default function MarketPage() {
           isLoading={isLoading}
           onStockClick={setSelectedStock}
         />
+
+        {/* Value Analysis Section */}
+        <div className="mt-6">
+          <ValueAnalysisChart stocks={filteredStocks} isLoading={isLoading} />
+        </div>
+
+        {/* Sectoral Performance Section */}
+        <div className="mt-6">
+          <SectoralPerformanceChart stocks={filteredStocks} isLoading={isLoading} />
+        </div>
+
+        {/* All Stocks Table */}
+        <div className="mt-6">
+          <AllStocksTable 
+            stocks={filteredStocks} 
+            sectors={sectors}
+            isLoading={isLoading} 
+            onStockClick={setSelectedStock}
+          />
+        </div>
 
         {/* Stock Detail Dialog */}
         <StockDetailDialog code={selectedStock} onClose={() => setSelectedStock(null)} />
