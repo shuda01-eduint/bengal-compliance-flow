@@ -45,10 +45,6 @@ function parseDseXml(content: string): { trades: TradeRecord[]; errors: string[]
   const trades: TradeRecord[] = [];
   const errors: string[] = [];
 
-  // Use regex-based parsing for Deno (no DOMParser)
-  const normalizeKeyRegex = /[\s_-]+/g;
-  const commaRegex = /,/g;
-
   // Try to parse as Excel XML format (Row/Cell structure)
   const rowMatches = content.match(/<Row[^>]*>[\s\S]*?<\/Row>/gi) || [];
   
@@ -201,9 +197,115 @@ function parseRowToTrade(row: Record<string, string>): TradeRecord | null {
     settlement_date: settlementDate,
     commission: 0,
     category: category || null,
-    fill_type: board || "FILL", // Store board info in fill_type
-    exchange_code: "DSE", // Always DSE for XML imports
+    fill_type: board || "FILL",
+    exchange_code: "DSE",
   };
+}
+
+// Background processing function
+async function processTradesInBackground(
+  jobId: string,
+  tradeDate: string,
+  trades: TradeRecord[],
+  replaceExisting: boolean,
+  supabaseUrl: string,
+  supabaseServiceKey: string
+) {
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  
+  try {
+    // If replacing, delete existing DSE trades for the date
+    if (replaceExisting) {
+      const { error: deleteError } = await supabase
+        .from("trade_file")
+        .delete()
+        .eq("trade_date", tradeDate)
+        .eq("exchange_code", "DSE");
+
+      if (deleteError) {
+        console.error("Delete error:", deleteError);
+      }
+    }
+
+    // Insert trades in batches
+    const batchSize = 500;
+    let insertedCount = 0;
+    let grossBuy = 0;
+    let grossSell = 0;
+
+    for (let i = 0; i < trades.length; i += batchSize) {
+      const batch = trades.slice(i, i + batchSize);
+      
+      const { error: insertError } = await supabase
+        .from("trade_file")
+        .insert(batch);
+
+      if (insertError) {
+        console.error("Insert error:", insertError);
+        // Update job with error
+        await supabase
+          .from("processing_jobs")
+          .update({ 
+            status: "failed", 
+            error: insertError.message,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", jobId);
+        return;
+      }
+
+      insertedCount += batch.length;
+      
+      // Update progress
+      const progress = Math.round((i + batch.length) / trades.length * 100);
+      await supabase
+        .from("processing_jobs")
+        .update({ 
+          progress,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", jobId);
+    }
+
+    // Calculate totals
+    trades.forEach((t) => {
+      const value = t.qty * t.price;
+      if (t.side === "BUY") {
+        grossBuy += value;
+      } else {
+        grossSell += value;
+      }
+    });
+
+    // Update job as complete
+    await supabase
+      .from("processing_jobs")
+      .update({
+        status: "completed",
+        progress: 100,
+        result: {
+          trade_count: insertedCount,
+          gross_buy: grossBuy,
+          gross_sell: grossSell,
+          trade_date: tradeDate,
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", jobId);
+
+  } catch (error: unknown) {
+    console.error("Background processing error:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    
+    await supabase
+      .from("processing_jobs")
+      .update({ 
+        status: "failed", 
+        error: message,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", jobId);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -261,7 +363,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Parse the XML content
+    // Parse the XML content (this is fast)
     const { trades, errors } = parseDseXml(xml_content);
 
     if (trades.length === 0) {
@@ -275,60 +377,60 @@ Deno.serve(async (req) => {
       );
     }
 
-    // If replacing, delete existing DSE trades for the date
-    if (replace_existing) {
-      const { error: deleteError } = await supabase
-        .from("trade_file")
-        .delete()
-        .eq("trade_date", trade_date)
-        .eq("exchange_code", "DSE");
+    // Create a job record for tracking
+    const { data: job, error: jobError } = await supabase
+      .from("processing_jobs")
+      .insert({
+        job_type: "dse_trade_import",
+        status: "processing",
+        progress: 0,
+        metadata: {
+          trade_date,
+          trade_count: trades.length,
+          replace_existing,
+        },
+        created_by: user.id,
+      })
+      .select()
+      .single();
 
-      if (deleteError) {
-        console.error("Delete error:", deleteError);
-      }
+    if (jobError || !job) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Failed to create job" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    // Insert trades in batches
-    const batchSize = 1000;
-    let insertedCount = 0;
-    let grossBuy = 0;
-    let grossSell = 0;
+    // Start background processing using EdgeRuntime.waitUntil
+    // @ts-ignore - EdgeRuntime is available in Supabase Edge Functions
+    EdgeRuntime.waitUntil(
+      processTradesInBackground(
+        job.id,
+        trade_date,
+        trades,
+        replace_existing,
+        supabaseUrl,
+        supabaseServiceKey
+      ).catch((error) => {
+        console.error("Background task error:", error);
+        supabase
+          .from("processing_jobs")
+          .update({ 
+            status: "failed", 
+            error: error.message || "Unknown error",
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", job.id);
+      })
+    );
 
-    for (let i = 0; i < trades.length; i += batchSize) {
-      const batch = trades.slice(i, i + batchSize);
-      
-      const { error: insertError } = await supabase
-        .from("trade_file")
-        .insert(batch);
-
-      if (insertError) {
-        console.error("Insert error:", insertError);
-        return new Response(
-          JSON.stringify({ success: false, error: insertError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      insertedCount += batch.length;
-    }
-
-    // Calculate totals
-    trades.forEach((t) => {
-      const value = t.qty * t.price;
-      if (t.side === "BUY") {
-        grossBuy += value;
-      } else {
-        grossSell += value;
-      }
-    });
-
+    // Return immediately with job ID
     return new Response(
       JSON.stringify({
         success: true,
-        trade_count: insertedCount,
-        gross_buy: grossBuy,
-        gross_sell: grossSell,
-        trade_date,
+        job_id: job.id,
+        trade_count: trades.length,
+        message: "Import started. Poll for status.",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
