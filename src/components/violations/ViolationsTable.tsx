@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { format } from "date-fns";
 import {
   Table,
@@ -9,6 +10,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { InvestorViolationDialog } from "./InvestorViolationDialog";
 
 export interface ViolationRecord {
   event_date: string;
@@ -40,6 +42,9 @@ const violationColors = {
 };
 
 export function ViolationsTable({ records, isLoading }: ViolationsTableProps) {
+  const [selectedClientCode, setSelectedClientCode] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-BD", {
       minimumFractionDigits: 2,
@@ -54,6 +59,11 @@ export function ViolationsTable({ records, isLoading }: ViolationsTableProps) {
     } catch {
       return dateStr;
     }
+  };
+
+  const handleClientClick = (clientCode: string) => {
+    setSelectedClientCode(clientCode);
+    setDialogOpen(true);
   };
 
   if (isLoading) {
@@ -76,40 +86,55 @@ export function ViolationsTable({ records, isLoading }: ViolationsTableProps) {
   }
 
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Event Date</TableHead>
-            <TableHead>Client Code</TableHead>
-            <TableHead>Client Name</TableHead>
-            <TableHead>Violation Type</TableHead>
-            <TableHead className="text-right">Amount</TableHead>
-            <TableHead>RM Name</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {records.map((record, index) => (
-            <TableRow key={`${record.client_code}-${record.event_date}-${index}`}>
-              <TableCell>{formatEventDate(record.event_date)}</TableCell>
-              <TableCell className="font-medium">{record.client_code}</TableCell>
-              <TableCell>{record.client_name}</TableCell>
-              <TableCell>
-                <Badge 
-                  variant="outline"
-                  className={cn("border", violationColors[record.violation_type])}
-                >
-                  {violationLabels[record.violation_type].label}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-right font-medium text-destructive">
-                {formatCurrency(record.amount)}
-              </TableCell>
-              <TableCell>{record.rm_name}</TableCell>
+    <>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Event Date</TableHead>
+              <TableHead>Client Code</TableHead>
+              <TableHead>Client Name</TableHead>
+              <TableHead>Violation Type</TableHead>
+              <TableHead className="text-right">Amount</TableHead>
+              <TableHead>RM Name</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {records.map((record, index) => (
+              <TableRow key={`${record.client_code}-${record.event_date}-${index}`}>
+                <TableCell>{formatEventDate(record.event_date)}</TableCell>
+                <TableCell>
+                  <button
+                    onClick={() => handleClientClick(record.client_code)}
+                    className="font-medium text-primary hover:text-primary/80 hover:underline cursor-pointer transition-colors"
+                  >
+                    {record.client_code}
+                  </button>
+                </TableCell>
+                <TableCell>{record.client_name}</TableCell>
+                <TableCell>
+                  <Badge 
+                    variant="outline"
+                    className={cn("border", violationColors[record.violation_type])}
+                  >
+                    {violationLabels[record.violation_type].label}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right font-medium text-destructive">
+                  {formatCurrency(record.amount)}
+                </TableCell>
+                <TableCell>{record.rm_name}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <InvestorViolationDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        clientCode={selectedClientCode}
+      />
+    </>
   );
 }

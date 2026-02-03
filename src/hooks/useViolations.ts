@@ -30,7 +30,8 @@ interface ClientInfo {
 export function useViolations(
   fromDate: Date | undefined,
   toDate: Date | undefined,
-  searchTerm: string
+  searchTerm: string,
+  negativeBalanceThreshold: number | null = null
 ) {
   const [activeFilter, setActiveFilter] = useState<ViolationType>("all");
 
@@ -56,7 +57,7 @@ export function useViolations(
 
   // Fetch negative balance violations using existing RPC
   const { data: negativeBalanceData, isLoading: isLoadingNegative, refetch: refetchNegative } = useQuery({
-    queryKey: ["negative-balance-violations", fromDate, toDate],
+    queryKey: ["negative-balance-violations", fromDate, toDate, negativeBalanceThreshold],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_negative_balance_codes", {
         p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
@@ -64,13 +65,20 @@ export function useViolations(
         p_search: "",
       });
       if (error) throw error;
-      return (data || []) as Array<{
+      let results = (data || []) as Array<{
         event_date: string;
         client_code: string;
         client_name: string;
         rm_name: string;
         closing_balance: number;
       }>;
+      
+      // Apply threshold filter if set (threshold is negative, so we want balances < threshold)
+      if (negativeBalanceThreshold !== null) {
+        results = results.filter(r => r.closing_balance < negativeBalanceThreshold);
+      }
+      
+      return results;
     },
   });
 

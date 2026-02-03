@@ -7,6 +7,7 @@ import { ViolationsTable } from "./ViolationsTable";
 import { ViolationsFilters } from "./ViolationsFilters";
 import { useViolations, ViolationType } from "@/hooks/useViolations";
 import { useDebounce } from "@/hooks/useDebounce";
+import { NegativeBalanceThresholdFilter, ThresholdBadge } from "./NegativeBalanceThresholdFilter";
 import * as XLSX from "xlsx";
 
 export function ViolationsDashboard() {
@@ -15,6 +16,7 @@ export function ViolationsDashboard() {
   );
   const [toDate, setToDate] = useState<Date | undefined>(new Date());
   const [searchTerm, setSearchTerm] = useState("");
+  const [negativeBalanceThreshold, setNegativeBalanceThreshold] = useState<number | null>(null);
   const debouncedSearch = useDebounce(searchTerm, 300);
 
   const {
@@ -24,7 +26,7 @@ export function ViolationsDashboard() {
     activeFilter,
     setActiveFilter,
     refetchAll,
-  } = useViolations(fromDate, toDate, debouncedSearch);
+  } = useViolations(fromDate, toDate, debouncedSearch, negativeBalanceThreshold);
 
   const handleCardClick = (type: ViolationType) => {
     setActiveFilter(activeFilter === type ? "all" : type);
@@ -61,6 +63,21 @@ export function ViolationsDashboard() {
           isActive={activeFilter === "negative_balance"}
           onClick={() => handleCardClick("negative_balance")}
           isLoading={isLoading}
+          filterComponent={
+            <NegativeBalanceThresholdFilter
+              threshold={negativeBalanceThreshold}
+              onThresholdChange={setNegativeBalanceThreshold}
+              variant="danger"
+            />
+          }
+          filterBadge={
+            negativeBalanceThreshold ? (
+              <ThresholdBadge
+                threshold={negativeBalanceThreshold}
+                onClear={() => setNegativeBalanceThreshold(null)}
+              />
+            ) : null
+          }
         />
         <ViolationCard
           title="Over Buy (Margin)"
