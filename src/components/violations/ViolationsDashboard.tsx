@@ -5,10 +5,11 @@ import { Wallet, TrendingUp, ArrowRightLeft, ShieldX } from "lucide-react";
 import { ViolationCard } from "./ViolationCard";
 import { ViolationsTable } from "./ViolationsTable";
 import { ViolationsFilters } from "./ViolationsFilters";
-import { useViolations, ViolationType } from "@/hooks/useViolations";
+import { useViolations, ViolationType, NegativeBalanceMode } from "@/hooks/useViolations";
 import { useDebounce } from "@/hooks/useDebounce";
 import { NegativeBalanceThresholdFilter, ThresholdBadge } from "./NegativeBalanceThresholdFilter";
 import { NegativeBalanceLookbackFilter } from "./NegativeBalanceLookbackFilter";
+import { NegativeBalanceModeToggle } from "./NegativeBalanceModeToggle";
 import * as XLSX from "xlsx";
 
 export function ViolationsDashboard() {
@@ -19,6 +20,7 @@ export function ViolationsDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [negativeBalanceThreshold, setNegativeBalanceThreshold] = useState<number | null>(null);
   const [negativeBalanceLookbackDays, setNegativeBalanceLookbackDays] = useState<number>(7);
+  const [negativeBalanceMode, setNegativeBalanceMode] = useState<NegativeBalanceMode>("all");
   const debouncedSearch = useDebounce(searchTerm, 300);
 
   const {
@@ -28,7 +30,7 @@ export function ViolationsDashboard() {
     activeFilter,
     setActiveFilter,
     refetchAll,
-  } = useViolations(fromDate, toDate, debouncedSearch, negativeBalanceThreshold, negativeBalanceLookbackDays);
+  } = useViolations(fromDate, toDate, debouncedSearch, negativeBalanceThreshold, negativeBalanceLookbackDays, negativeBalanceMode);
 
   const handleCardClick = (type: ViolationType) => {
     setActiveFilter(activeFilter === type ? "all" : type);
@@ -67,10 +69,16 @@ export function ViolationsDashboard() {
           isLoading={isLoading}
           filterComponent={
             <div className="flex items-center gap-1">
-              <NegativeBalanceLookbackFilter
-                lookbackDays={negativeBalanceLookbackDays}
-                onLookbackChange={setNegativeBalanceLookbackDays}
+              <NegativeBalanceModeToggle
+                mode={negativeBalanceMode}
+                onModeChange={setNegativeBalanceMode}
               />
+              {negativeBalanceMode === "new_only" && (
+                <NegativeBalanceLookbackFilter
+                  lookbackDays={negativeBalanceLookbackDays}
+                  onLookbackChange={setNegativeBalanceLookbackDays}
+                />
+              )}
               <NegativeBalanceThresholdFilter
                 threshold={negativeBalanceThreshold}
                 onThresholdChange={setNegativeBalanceThreshold}
@@ -150,7 +158,7 @@ export function ViolationsDashboard() {
       {/* Data Table */}
       <Card>
         <CardContent className="p-0">
-          <ViolationsTable records={records} isLoading={isLoading} activeFilter={activeFilter} />
+          <ViolationsTable records={records} isLoading={isLoading} activeFilter={activeFilter} negativeBalanceMode={negativeBalanceMode} />
         </CardContent>
       </Card>
     </div>

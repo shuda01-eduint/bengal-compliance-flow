@@ -49,7 +49,7 @@ const violationColors = {
   non_margin_buy: "bg-purple-500/20 text-purple-400 border-purple-500/30",
 };
 
-export function ViolationsTable({ records, isLoading, activeFilter }: ViolationsTableProps) {
+export function ViolationsTable({ records, isLoading, activeFilter, negativeBalanceMode = "all" }: ViolationsTableProps & { negativeBalanceMode?: "all" | "new_only" }) {
   const [selectedClientCode, setSelectedClientCode] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   
@@ -96,8 +96,8 @@ export function ViolationsTable({ records, isLoading, activeFilter }: Violations
     );
   }
 
-  // Render Negative Balance specific table
-  if (isNegativeBalanceView) {
+  // Render Negative Balance specific table (only for "new_only" mode)
+  if (isNegativeBalanceView && negativeBalanceMode === "new_only") {
     return (
       <>
         <div className="overflow-x-auto">
