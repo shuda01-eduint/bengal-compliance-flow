@@ -27,12 +27,15 @@ interface ClientInfo {
   rm_name: string;
 }
 
+export type NegativeBalanceMode = "all" | "new_only";
+
 export function useViolations(
   fromDate: Date | undefined,
   toDate: Date | undefined,
   searchTerm: string,
   negativeBalanceThreshold: number | null = null,
-  negativeBalanceLookbackDays: number = 7
+  negativeBalanceLookbackDays: number = 7,
+  negativeBalanceMode: NegativeBalanceMode = "all"
 ) {
   const [activeFilter, setActiveFilter] = useState<ViolationType>("all");
 
@@ -56,33 +59,65 @@ export function useViolations(
     return map;
   }, [clientsData]);
 
-  // Fetch negative balance violations using existing RPC
+  // Fetch negative balance violations - supports both "all" and "new_only" modes
   const { data: negativeBalanceData, isLoading: isLoadingNegative, refetch: refetchNegative } = useQuery({
-    queryKey: ["negative-balance-violations", fromDate, toDate, negativeBalanceThreshold, negativeBalanceLookbackDays],
+    queryKey: ["negative-balance-violations", fromDate, toDate, negativeBalanceThreshold, negativeBalanceLookbackDays, negativeBalanceMode],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_negative_balance_codes", {
-        p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
-        p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
-        p_search: "",
-        p_lookback_days: negativeBalanceLookbackDays,
-      });
-      if (error) throw error;
-      let results = (data || []) as Array<{
-        event_date: string;
-        client_code: string;
-        client_name: string;
-        rm_name: string;
-        closing_balance: number;
-        previous_balance: number;
-        days_negative: number;
-      }>;
-      
-      // Apply threshold filter if set (threshold is negative, so we want balances < threshold)
-      if (negativeBalanceThreshold !== null) {
-        results = results.filter(r => r.closing_balance < negativeBalanceThreshold);
+      if (negativeBalanceMode === "new_only") {
+        // Use RPC for new negative balances only
+        const { data, error } = await supabase.rpc("get_negative_balance_codes", {
+          p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
+          p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
+          p_search: "",
+          p_lookback_days: negativeBalanceLookbackDays,
+        });
+        if (error) throw error;
+        let results = (data || []) as Array<{
+          event_date: string;
+          client_code: string;
+          client_name: string;
+          rm_name: string;
+          closing_balance: number;
+          previous_balance: number;
+          days_negative: number;
+        }>;
+        
+        // Apply threshold filter if set
+        if (negativeBalanceThreshold !== null) {
+          results = results.filter(r => r.closing_balance < negativeBalanceThreshold);
+        }
+        
+        return results;
+      } else {
+        // "all" mode - get all currently negative balances from eod_ledger_snapshots
+        const targetDate = toDate ? format(toDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
+        
+        const { data, error } = await supabase
+          .from("eod_ledger_snapshots")
+          .select("eod_date, investor_code, investor_name, rm_name, closing_balance")
+          .eq("eod_date", targetDate)
+          .lt("closing_balance", 0)
+          .order("closing_balance", { ascending: true });
+        
+        if (error) throw error;
+        
+        let results = (data || []).map(r => ({
+          event_date: r.eod_date,
+          client_code: r.investor_code,
+          client_name: r.investor_name || '',
+          rm_name: r.rm_name || '',
+          closing_balance: r.closing_balance || 0,
+          previous_balance: 0,
+          days_negative: 0,
+        }));
+        
+        // Apply threshold filter if set
+        if (negativeBalanceThreshold !== null) {
+          results = results.filter(r => r.closing_balance < negativeBalanceThreshold);
+        }
+        
+        return results;
       }
-      
-      return results;
     },
   });
 
