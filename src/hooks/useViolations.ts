@@ -31,7 +31,8 @@ export function useViolations(
   fromDate: Date | undefined,
   toDate: Date | undefined,
   searchTerm: string,
-  negativeBalanceThreshold: number | null = null
+  negativeBalanceThreshold: number | null = null,
+  negativeBalanceLookbackDays: number = 7
 ) {
   const [activeFilter, setActiveFilter] = useState<ViolationType>("all");
 
@@ -57,12 +58,13 @@ export function useViolations(
 
   // Fetch negative balance violations using existing RPC
   const { data: negativeBalanceData, isLoading: isLoadingNegative, refetch: refetchNegative } = useQuery({
-    queryKey: ["negative-balance-violations", fromDate, toDate, negativeBalanceThreshold],
+    queryKey: ["negative-balance-violations", fromDate, toDate, negativeBalanceThreshold, negativeBalanceLookbackDays],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_negative_balance_codes", {
         p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
         p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
         p_search: "",
+        p_lookback_days: negativeBalanceLookbackDays,
       });
       if (error) throw error;
       let results = (data || []) as Array<{
@@ -71,6 +73,8 @@ export function useViolations(
         client_name: string;
         rm_name: string;
         closing_balance: number;
+        previous_balance: number;
+        days_negative: number;
       }>;
       
       // Apply threshold filter if set (threshold is negative, so we want balances < threshold)
@@ -254,6 +258,9 @@ export function useViolations(
         violation_type: "negative_balance",
         amount: r.closing_balance,
         rm_name: r.rm_name,
+        previous_balance: r.previous_balance,
+        closing_balance: r.closing_balance,
+        days_negative: r.days_negative,
       });
     });
 

@@ -24,6 +24,9 @@ export interface ViolationRecord {
   opening_balance?: number;
   closing_balance?: number;
   loan_increase?: number;
+  // Negative Balance specific fields
+  previous_balance?: number;
+  days_negative?: number;
 }
 
 interface ViolationsTableProps {
@@ -51,6 +54,7 @@ export function ViolationsTable({ records, isLoading, activeFilter }: Violations
   const [dialogOpen, setDialogOpen] = useState(false);
   
   const isOverBuyView = activeFilter === "over_buy";
+  const isNegativeBalanceView = activeFilter === "negative_balance";
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-BD", {
@@ -89,6 +93,59 @@ export function ViolationsTable({ records, isLoading, activeFilter }: Violations
       <div className="flex items-center justify-center py-12">
         <p className="text-muted-foreground">No violations found for the selected criteria</p>
       </div>
+    );
+  }
+
+  // Render Negative Balance specific table
+  if (isNegativeBalanceView) {
+    return (
+      <>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Client Code</TableHead>
+                <TableHead>Client Name</TableHead>
+                <TableHead className="text-right">Previous Balance</TableHead>
+                <TableHead className="text-right">Current Balance</TableHead>
+                <TableHead className="text-right">Days Negative</TableHead>
+                <TableHead>RM Name</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {records.map((record, index) => (
+                <TableRow key={`${record.client_code}-${index}`}>
+                  <TableCell>
+                    <button
+                      onClick={() => handleClientClick(record.client_code)}
+                      className="font-medium text-primary hover:text-primary/80 hover:underline cursor-pointer transition-colors"
+                    >
+                      {record.client_code}
+                    </button>
+                  </TableCell>
+                  <TableCell>{record.client_name}</TableCell>
+                  <TableCell className="text-right font-medium text-green-600">
+                    {formatCurrency(record.previous_balance ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium text-destructive">
+                    {formatCurrency(record.closing_balance ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium">
+                    {record.days_negative ?? 0}
+                  </TableCell>
+                  <TableCell>{record.rm_name}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <InvestorViolationDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          clientCode={selectedClientCode}
+        />
+      </>
     );
   }
 
