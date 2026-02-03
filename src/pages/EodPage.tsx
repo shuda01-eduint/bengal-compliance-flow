@@ -14,6 +14,7 @@ import { EodLogTable } from "@/components/eod/EodLogTable";
 import { DseTradeImportDialog } from "@/components/eod/DseTradeImportDialog";
 import { CseTradeImportDialog } from "@/components/eod/CseTradeImportDialog";
 import { DepositsImportDialog } from "@/components/eod/DepositsImportDialog";
+import { MarginListImportDialog } from "@/components/eod/MarginListImportDialog";
 import { SettlementCalculationDialog } from "@/components/eod/SettlementCalculationDialog";
 import { useEodHistoricalData } from "@/hooks/useEodHistoricalData";
 import { useEodStagingSummary } from "@/hooks/useEodStagingSummary";
@@ -81,6 +82,7 @@ export default function EodPage() {
   const [dseImportDialogOpen, setDseImportDialogOpen] = useState(false);
   const [cseImportDialogOpen, setCseImportDialogOpen] = useState(false);
   const [depositsDialogOpen, setDepositsDialogOpen] = useState(false);
+  const [marginListDialogOpen, setMarginListDialogOpen] = useState(false);
   const [settlementDialogOpen, setSettlementDialogOpen] = useState(false);
 
   // Processing state
@@ -135,6 +137,10 @@ export default function EodPage() {
 
   const handleImportDeposits = () => {
     setDepositsDialogOpen(true);
+  };
+
+  const handleImportMarginList = () => {
+    setMarginListDialogOpen(true);
   };
 
   const handleProcessStaged = async () => {
@@ -229,6 +235,7 @@ export default function EodPage() {
           onImportDseTrades={handleImportDseTrades}
           onImportCseTrades={handleImportCseTrades}
           onImportDeposits={handleImportDeposits}
+          onImportMarginList={handleImportMarginList}
           onProcessStaged={handleProcessStaged}
           onCalculateSettlements={() => setSettlementDialogOpen(true)}
           onGenerateReport={() => toast.info("Generate Report - Coming soon")}
@@ -287,6 +294,16 @@ export default function EodPage() {
           onImportComplete={() => {
             queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
             toast.success("Deposits/Withdrawals ready for EOD");
+          }}
+        />
+
+        {/* Margin List & Prices Import Dialog */}
+        <MarginListImportDialog
+          open={marginListDialogOpen}
+          onOpenChange={setMarginListDialogOpen}
+          selectedDate={selectedDate ?? null}
+          onImportComplete={() => {
+            queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
           }}
         />
 

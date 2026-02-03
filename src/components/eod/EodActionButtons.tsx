@@ -7,12 +7,14 @@ import {
   Trash2,
   Wallet,
   UserPlus,
+  ListChecks,
 } from "lucide-react";
 
 interface EodActionButtonsProps {
   onImportDseTrades: () => void;
   onImportCseTrades: () => void;
   onImportDeposits: () => void;
+  onImportMarginList: () => void;
   onProcessStaged: () => void;
   onCalculateSettlements: () => void;
   onGenerateReport: () => void;
@@ -29,6 +31,7 @@ export function EodActionButtons({
   onImportDseTrades,
   onImportCseTrades,
   onImportDeposits,
+  onImportMarginList,
   onProcessStaged,
   onCalculateSettlements,
   onGenerateReport,
@@ -67,6 +70,15 @@ export function EodActionButtons({
       >
         <Wallet className="mr-2 h-4 w-4" />
         Import Deposits / Withdrawals
+      </Button>
+
+      <Button
+        variant="outline"
+        onClick={onImportMarginList}
+        disabled={disabled || !hasDateSelected}
+      >
+        <ListChecks className="mr-2 h-4 w-4" />
+        Import Margin List & Prices
       </Button>
 
       <Button

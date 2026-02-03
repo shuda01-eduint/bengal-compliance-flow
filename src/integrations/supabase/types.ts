@@ -2491,6 +2491,39 @@ export type Database = {
         }
         Relationships: []
       }
+      securities_margin_prices: {
+        Row: {
+          close_price: number
+          created_at: string
+          id: string
+          is_marginable: boolean
+          price_date: string
+          remarks: string | null
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          close_price?: number
+          created_at?: string
+          id?: string
+          is_marginable?: boolean
+          price_date: string
+          remarks?: string | null
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          close_price?: number
+          created_at?: string
+          id?: string
+          is_marginable?: boolean
+          price_date?: string
+          remarks?: string | null
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       security_margin_categories: {
         Row: {
           category: string
