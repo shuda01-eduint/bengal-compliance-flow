@@ -17,6 +17,11 @@ export interface StockDaily {
   eps: number | null;
   is_marginable: boolean | null;
   haircut_pct: number | null;
+  volume: number | null;
+  open_price: number | null;
+  high_price: number | null;
+  low_price: number | null;
+  trade_count: number | null;
 }
 
 export interface StockHistorical {
@@ -79,22 +84,58 @@ interface StockFundamentalsParams {
   code_filter?: string;
 }
 
+// Fetch directly from the securities table that receives real DSE data
 export function useStockDaily(params: StockDailyParams = {}) {
   return useQuery({
-    queryKey: ['stock-daily', params],
+    queryKey: ['stock-daily-securities', params],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_stock_daily', {
-        _date: params.trade_date || undefined,
-        _sector: params.sector_filter || undefined,
-        _code: params.code_filter || undefined,
-      });
-      
+      let query = supabase
+        .from('securities')
+        .select('*')
+        .order('trading_code');
+
+      if (params.sector_filter) {
+        query = query.eq('sector', params.sector_filter);
+      }
+
+      if (params.code_filter) {
+        query = query.ilike('trading_code', `%${params.code_filter}%`);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
-      return (data || []) as StockDaily[];
+
+      // Transform securities data to match StockDaily interface
+      return (data || []).map((s: any) => ({
+        code: s.trading_code,
+        name: s.trading_code, // securities table doesn't have full name
+        sector: s.sector,
+        category: s.category,
+        market: null,
+        date: s.last_synced_at ? new Date(s.last_synced_at).toISOString().split('T')[0] : null,
+        close_price: s.close_price,
+        prev_close: s.open_price, // Use open as prev_close approximation for change calc
+        change: s.close_price && s.open_price ? s.close_price - s.open_price : null,
+        change_pct: s.close_price && s.open_price && s.open_price !== 0 
+          ? ((s.close_price - s.open_price) / s.open_price) * 100 
+          : null,
+        market_cap: s.market_cap,
+        pe_ratio: s.audited_pe || s.trailing_pe,
+        eps: s.eps,
+        is_marginable: s.is_marginable,
+        haircut_pct: s.haircut_percentage,
+        volume: s.volume,
+        open_price: s.open_price,
+        high_price: s.high_price,
+        low_price: s.low_price,
+        trade_count: null, // Not available in securities table
+      })) as StockDaily[];
     },
   });
 }
 
+// Keep the RPC-based historical for detailed stock views (if views exist)
 export function useStockHistorical(params: StockHistoricalParams) {
   return useQuery({
     queryKey: ['stock-historical', params],
@@ -114,16 +155,51 @@ export function useStockHistorical(params: StockHistoricalParams) {
   });
 }
 
+// Fetch fundamentals from securities table directly
 export function useStockFundamentals(params: StockFundamentalsParams = {}) {
   return useQuery({
-    queryKey: ['stock-fundamentals', params],
+    queryKey: ['stock-fundamentals-securities', params],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_stock_fundamentals', {
-        _code: params.code_filter || '',
-      });
-      
+      let query = supabase
+        .from('securities')
+        .select('*');
+
+      if (params.code_filter) {
+        query = query.eq('trading_code', params.code_filter);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
-      return (data || []) as StockFundamentals[];
+
+      return (data || []).map((s: any) => ({
+        code: s.trading_code,
+        name: s.trading_code,
+        isin: null,
+        sector: s.sector,
+        category: s.category,
+        market: null,
+        instrument_type: s.instrument_type,
+        face_value: null,
+        lot_size: null,
+        market_cap: s.market_cap,
+        free_float_mcap: s.free_float_mcap,
+        eps: s.eps,
+        pe_ratio: s.audited_pe || s.trailing_pe,
+        nav: null,
+        week_52_high: s.week_52_high,
+        week_52_low: s.week_52_low,
+        listing_year: null,
+        last_agm_date: null,
+        authorized_cap: null,
+        paid_up_cap: null,
+        total_shares: s.total_securities,
+        is_marginable: s.is_marginable,
+        haircut_pct: s.haircut_percentage,
+        is_active: true,
+        last_synced_at: s.last_synced_at,
+        updated_at: s.updated_at,
+      })) as StockFundamentals[];
     },
     enabled: !!params.code_filter,
   });
@@ -131,10 +207,10 @@ export function useStockFundamentals(params: StockFundamentalsParams = {}) {
 
 export function useSectors() {
   return useQuery({
-    queryKey: ['sectors'],
+    queryKey: ['sectors-securities'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('instrument')
+        .from('securities')
         .select('sector')
         .not('sector', 'is', null)
         .order('sector');
@@ -149,17 +225,60 @@ export function useSectors() {
 
 export function useLatestTradeDate() {
   return useQuery({
-    queryKey: ['latest-trade-date'],
+    queryKey: ['latest-trade-date-securities'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('instrument_prices_eod')
-        .select('trade_date')
-        .order('trade_date', { ascending: false })
+        .from('securities')
+        .select('last_synced_at')
+        .not('last_synced_at', 'is', null)
+        .order('last_synced_at', { ascending: false })
         .limit(1)
         .single();
       
       if (error) return null;
-      return data?.trade_date as string | null;
+      return data?.last_synced_at 
+        ? new Date(data.last_synced_at).toISOString().split('T')[0] 
+        : null;
+    },
+  });
+}
+
+// New hook to get market summary stats
+export function useMarketSummary() {
+  return useQuery({
+    queryKey: ['market-summary-securities'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('securities')
+        .select('close_price, open_price, volume, market_cap');
+      
+      if (error) throw error;
+
+      const stocks = data || [];
+      const totalStocks = stocks.length;
+      const totalVolume = stocks.reduce((sum, s) => sum + (Number(s.volume) || 0), 0);
+      const totalMarketCap = stocks.reduce((sum, s) => sum + (Number(s.market_cap) || 0), 0);
+      
+      const advancers = stocks.filter(s => {
+        const close = Number(s.close_price) || 0;
+        const open = Number(s.open_price) || 0;
+        return close > open;
+      }).length;
+      
+      const decliners = stocks.filter(s => {
+        const close = Number(s.close_price) || 0;
+        const open = Number(s.open_price) || 0;
+        return close < open;
+      }).length;
+
+      return {
+        totalStocks,
+        totalVolume,
+        totalMarketCap,
+        advancers,
+        decliners,
+        unchanged: totalStocks - advancers - decliners,
+      };
     },
   });
 }
