@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
@@ -44,20 +44,15 @@ export function useViolations(
       if (error) throw error;
       return data as ClientInfo[];
     },
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    staleTime: 5 * 60 * 1000,
   });
 
+  // Create stable client lookup map
   const clientMap = useMemo(() => {
     const map = new Map<string, ClientInfo>();
     (clientsData || []).forEach(c => map.set(c.inv_code, c));
     return map;
   }, [clientsData]);
-
-  const getClientInfo = (code: string) => clientMap.get(code) || { 
-    inv_code: code, 
-    investor_name: '', 
-    rm_name: '' 
-  };
 
   // Fetch negative balance violations using existing RPC
   const { data: negativeBalanceData, isLoading: isLoadingNegative, refetch: refetchNegative } = useQuery({
@@ -98,11 +93,9 @@ export function useViolations(
       const { data, error } = await query;
       if (error) throw error;
 
-      // Filter for margin accounts where net buy exceeds available balance
       return (data || []).filter(row => {
         const netBuy = (row.gross_buy || 0) - (row.gross_sell || 0);
         const availableBalance = (row.opening_balance || 0) + (row.ledger_balance || 0);
-        // Over buy: net buy positive and exceeds available balance (simple ratio check)
         return netBuy > 0 && netBuy > availableBalance && row.account_type === 'margin';
       }).map(row => ({
         event_date: row.eod_date,
@@ -118,7 +111,6 @@ export function useViolations(
   const { data: zGroupData, isLoading: isLoadingZGroup, refetch: refetchZGroup } = useQuery({
     queryKey: ["z-group-violations", fromDate, toDate],
     queryFn: async () => {
-      // Query trades that involve SELL side
       let query = supabase
         .from("trades")
         .select("trade_date, investor_code, instrument, side, trade_value")
@@ -134,7 +126,6 @@ export function useViolations(
       const { data: trades, error: tradesError } = await query;
       if (tradesError) throw tradesError;
 
-      // Get Z category instruments
       const { data: zInstruments, error: instrError } = await supabase
         .from("instrument")
         .select("trading_code")
@@ -143,12 +134,9 @@ export function useViolations(
       if (instrError) throw instrError;
       
       const zCodes = new Set((zInstruments || []).map(i => i.trading_code));
-      
-      // Find sells of Z category shares
       const typedTrades = (trades || []) as TradeRecord[];
       const zSells = typedTrades.filter(t => zCodes.has(t.instrument));
       
-      // Group by investor and date
       const grouped = new Map<string, { event_date: string; client_code: string; amount: number }>();
       zSells.forEach(trade => {
         const key = `${trade.investor_code}-${trade.trade_date}`;
@@ -171,7 +159,6 @@ export function useViolations(
   const { data: nonMarginBuyData, isLoading: isLoadingNonMargin, refetch: refetchNonMargin } = useQuery({
     queryKey: ["non-margin-buy-violations", fromDate, toDate],
     queryFn: async () => {
-      // Get non-marginable instruments
       const { data: nonMarginInstruments, error: instrError } = await supabase
         .from("instrument")
         .select("trading_code")
@@ -183,7 +170,6 @@ export function useViolations(
       
       if (nonMarginCodes.size === 0) return [];
 
-      // Get buy trades
       let query = supabase
         .from("trades")
         .select("trade_date, investor_code, instrument, side, trade_value")
@@ -200,7 +186,6 @@ export function useViolations(
       const { data: trades, error: tradesError } = await query;
       if (tradesError) throw tradesError;
 
-      // Get margin accounts
       const { data: marginAccounts, error: marginError } = await supabase
         .from("margin_accounts")
         .select("investor_code");
@@ -209,13 +194,11 @@ export function useViolations(
       
       const marginAccountCodes = new Set((marginAccounts || []).map(a => a.investor_code));
 
-      // Find margin accounts buying non-marginable shares
       const typedTrades = (trades || []) as TradeRecord[];
       const violations = typedTrades.filter(t => 
         marginAccountCodes.has(t.investor_code) && nonMarginCodes.has(t.instrument)
       );
 
-      // Group by investor and date
       const grouped = new Map<string, { event_date: string; client_code: string; amount: number }>();
       violations.forEach(trade => {
         const key = `${trade.investor_code}-${trade.trade_date}`;
@@ -261,7 +244,7 @@ export function useViolations(
     };
   }, [negativeBalanceData, overBuyData, zGroupData, nonMarginBuyData]);
 
-  // Combine all violations into records
+  // Combine all violations into records - use clientMap directly instead of function
   const allRecords: ViolationRecord[] = useMemo(() => {
     const records: ViolationRecord[] = [];
 
@@ -289,45 +272,43 @@ export function useViolations(
       });
     });
 
-    // Add Z group records (need to look up client info)
+    // Add Z group records - lookup client info from map
     (zGroupData || []).forEach(r => {
-      const client = getClientInfo(r.client_code);
+      const client = clientMap.get(r.client_code);
       records.push({
         event_date: r.event_date,
         client_code: r.client_code,
-        client_name: client.investor_name,
+        client_name: client?.investor_name || '',
         violation_type: "z_group_adjustment",
         amount: r.amount,
-        rm_name: client.rm_name,
+        rm_name: client?.rm_name || '',
       });
     });
 
-    // Add non-margin buy records (need to look up client info)
+    // Add non-margin buy records - lookup client info from map
     (nonMarginBuyData || []).forEach(r => {
-      const client = getClientInfo(r.client_code);
+      const client = clientMap.get(r.client_code);
       records.push({
         event_date: r.event_date,
         client_code: r.client_code,
-        client_name: client.investor_name,
+        client_name: client?.investor_name || '',
         violation_type: "non_margin_buy",
         amount: r.amount,
-        rm_name: client.rm_name,
+        rm_name: client?.rm_name || '',
       });
     });
 
     return records;
-  }, [negativeBalanceData, overBuyData, zGroupData, nonMarginBuyData, getClientInfo]);
+  }, [negativeBalanceData, overBuyData, zGroupData, nonMarginBuyData, clientMap]);
 
   // Filter records based on active filter and search
   const filteredRecords = useMemo(() => {
     let records = allRecords;
 
-    // Apply type filter
     if (activeFilter !== "all") {
       records = records.filter(r => r.violation_type === activeFilter);
     }
 
-    // Apply search filter
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
       records = records.filter(r =>
@@ -337,7 +318,6 @@ export function useViolations(
       );
     }
 
-    // Sort by date descending
     return records.sort((a, b) => 
       new Date(b.event_date).getTime() - new Date(a.event_date).getTime()
     );
@@ -345,14 +325,14 @@ export function useViolations(
 
   const isLoading = isLoadingNegative || isLoadingOverBuy || isLoadingZGroup || isLoadingNonMargin;
 
-  const refetchAll = async () => {
+  const refetchAll = useCallback(async () => {
     await Promise.all([
       refetchNegative(),
       refetchOverBuy(),
       refetchZGroup(),
       refetchNonMargin(),
     ]);
-  };
+  }, [refetchNegative, refetchOverBuy, refetchZGroup, refetchNonMargin]);
 
   return {
     summary,
