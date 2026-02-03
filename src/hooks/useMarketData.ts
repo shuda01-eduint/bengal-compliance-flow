@@ -114,17 +114,15 @@ export function useStockDaily(params: StockDailyParams = {}) {
         const highPrice = Number(s.high_price) || 0;
         const lowPrice = Number(s.low_price) || 0;
         
-        // Calculate change: prefer open_price if available, else estimate from high/low
-        let prevClose = openPrice;
-        if (!prevClose && highPrice && lowPrice) {
-          // Use midpoint of range as approximation if no open price
-          prevClose = (highPrice + lowPrice) / 2;
-        }
+        // Use change values from database if available (synced from external API)
+        let change = s.change !== null && s.change !== undefined ? Number(s.change) : null;
+        let changePct = s.change_percent !== null && s.change_percent !== undefined ? Number(s.change_percent) : null;
         
-        const change = prevClose && closePrice ? closePrice - prevClose : null;
-        const changePct = prevClose && prevClose !== 0 && change !== null
-          ? (change / prevClose) * 100
-          : null;
+        // Fallback calculation if DB values not available
+        if (change === null && openPrice && closePrice) {
+          change = closePrice - openPrice;
+          changePct = openPrice !== 0 ? (change / openPrice) * 100 : null;
+        }
 
         return {
           code: s.trading_code,
@@ -134,7 +132,7 @@ export function useStockDaily(params: StockDailyParams = {}) {
           market: null,
           date: s.last_synced_at ? new Date(s.last_synced_at).toISOString().split('T')[0] : null,
           close_price: closePrice,
-          prev_close: prevClose || null,
+          prev_close: openPrice || null,
           change,
           change_pct: changePct,
           market_cap: Number(s.market_cap) || null,

@@ -303,7 +303,10 @@ async function syncPricesToDatabase(prices: DSEPriceData[]): Promise<{ updated: 
   const errors: string[] = [];
 
   for (const price of prices) {
-    console.log(`Updating price for ${price.trading_code}: close=${price.close_price}, volume=${price.volume}, trade_count=${price.trade_count}, value=${price.value}`);
+    console.log(`Updating price for ${price.trading_code}: close=${price.close_price}, change=${price.change}, change_pct=${price.change_percent}, trade_count=${price.trade_count}`);
+    
+    // Calculate prev_close from close and change if available
+    const prevClose = price.change && price.close_price ? price.close_price - price.change : null;
     
     // Use update instead of upsert to only update existing records
     const { data, error, count } = await supabase
@@ -312,10 +315,12 @@ async function syncPricesToDatabase(prices: DSEPriceData[]): Promise<{ updated: 
         close_price: price.close_price,
         high_price: price.high_price || null,
         low_price: price.low_price || null,
-        open_price: price.open_price || null,
+        open_price: prevClose || price.open_price || null, // Use calculated prev_close as open for change calc
         volume: price.volume || null,
         trade_count: price.trade_count || null,
         value: price.value || null,
+        change: price.change || null,
+        change_percent: price.change_percent || null,
         last_synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })

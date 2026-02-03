@@ -2387,6 +2387,8 @@ export type Database = {
         Row: {
           audited_pe: number | null
           category: string | null
+          change: number | null
+          change_percent: number | null
           close_price: number | null
           created_at: string
           director_percent: number | null
@@ -2420,6 +2422,8 @@ export type Database = {
         Insert: {
           audited_pe?: number | null
           category?: string | null
+          change?: number | null
+          change_percent?: number | null
           close_price?: number | null
           created_at?: string
           director_percent?: number | null
@@ -2453,6 +2457,8 @@ export type Database = {
         Update: {
           audited_pe?: number | null
           category?: string | null
+          change?: number | null
+          change_percent?: number | null
           close_price?: number | null
           created_at?: string
           director_percent?: number | null
