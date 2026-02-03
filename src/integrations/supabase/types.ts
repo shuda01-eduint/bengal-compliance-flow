@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_balances: {
+        Row: {
+          account_type: string | null
+          accrued_interest: number | null
+          as_of_date: string
+          code: string
+          commission_rate: number | null
+          created_at: string
+          department: string | null
+          id: string
+          investor_name: string | null
+          ledger_balance: number | null
+          market_value: number | null
+          rm_id: string | null
+          rm_name: string | null
+          total_cost: number | null
+          updated_at: string
+        }
+        Insert: {
+          account_type?: string | null
+          accrued_interest?: number | null
+          as_of_date?: string
+          code: string
+          commission_rate?: number | null
+          created_at?: string
+          department?: string | null
+          id?: string
+          investor_name?: string | null
+          ledger_balance?: number | null
+          market_value?: number | null
+          rm_id?: string | null
+          rm_name?: string | null
+          total_cost?: number | null
+          updated_at?: string
+        }
+        Update: {
+          account_type?: string | null
+          accrued_interest?: number | null
+          as_of_date?: string
+          code?: string
+          commission_rate?: number | null
+          created_at?: string
+          department?: string | null
+          id?: string
+          investor_name?: string | null
+          ledger_balance?: number | null
+          market_value?: number | null
+          rm_id?: string | null
+          rm_name?: string | null
+          total_cost?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       agent_codes: {
         Row: {
           agent_id: string
