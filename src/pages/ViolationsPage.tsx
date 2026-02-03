@@ -1,10 +1,13 @@
 import { MainLayout } from "@/components/layout/MainLayout";
-import { NegativeBalanceReport } from "@/components/violations/NegativeBalanceReport";
+import { ViolationsDashboard } from "@/components/violations/ViolationsDashboard";
 
 const ViolationsPage = () => {
   return (
-    <MainLayout title="Negative Balance Violations" subtitle="Clients with negative closing balance after trades and deposits/withdrawals">
-      <NegativeBalanceReport />
+    <MainLayout 
+      title="Compliance Violations" 
+      subtitle="Monitor and track trading violations across all account types"
+    >
+      <ViolationsDashboard />
     </MainLayout>
   );
 };
