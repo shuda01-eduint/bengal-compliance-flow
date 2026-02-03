@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { LucideIcon } from "lucide-react";
+import { ReactNode } from "react";
 
 interface ViolationCardProps {
   title: string;
@@ -10,6 +11,8 @@ interface ViolationCardProps {
   isActive: boolean;
   onClick: () => void;
   isLoading?: boolean;
+  filterComponent?: ReactNode;
+  filterBadge?: ReactNode;
 }
 
 const variantStyles = {
@@ -56,6 +59,8 @@ export function ViolationCard({
   isActive,
   onClick,
   isLoading,
+  filterComponent,
+  filterBadge,
 }: ViolationCardProps) {
   const styles = variantStyles[variant];
 
@@ -82,14 +87,20 @@ export function ViolationCard({
         <div className={cn("p-3 rounded-lg", styles.icon)}>
           <Icon className="h-5 w-5" />
         </div>
-        {isActive && (
-          <span className={cn("text-xs font-medium px-2 py-1 rounded-full", styles.icon)}>
-            Active
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {filterComponent}
+          {isActive && (
+            <span className={cn("text-xs font-medium px-2 py-1 rounded-full", styles.icon)}>
+              Active
+            </span>
+          )}
+        </div>
       </div>
 
-      <h3 className="text-sm font-medium text-muted-foreground mb-2">{title}</h3>
+      <div className="flex items-center gap-2 mb-2">
+        <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
+        {filterBadge}
+      </div>
 
       {isLoading ? (
         <div className="space-y-2">
