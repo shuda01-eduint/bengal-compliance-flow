@@ -26,7 +26,6 @@ export interface ViolationRecord {
   loan_increase?: number;
   // Negative Balance specific fields
   previous_balance?: number;
-  days_negative?: number;
   department?: string;
 }
 
@@ -113,7 +112,6 @@ export function ViolationsTable({ records, isLoading, activeFilter, negativeBala
                   <TableHead className="text-right">Previous Balance</TableHead>
                 )}
                 <TableHead className="text-right">Current Balance</TableHead>
-                <TableHead className="text-right">Days Negative</TableHead>
                 <TableHead>Department</TableHead>
                 <TableHead>RM Name</TableHead>
               </TableRow>
@@ -137,9 +135,6 @@ export function ViolationsTable({ records, isLoading, activeFilter, negativeBala
                   )}
                   <TableCell className="text-right font-medium text-destructive">
                     {formatCurrency(record.closing_balance ?? 0)}
-                  </TableCell>
-                  <TableCell className="text-right font-medium">
-                    {record.days_negative ?? 0}
                   </TableCell>
                   <TableCell>{record.department || '-'}</TableCell>
                   <TableCell>{record.rm_name}</TableCell>

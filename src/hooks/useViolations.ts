@@ -10,7 +10,6 @@ interface NegativeBalanceAllResult {
   client_name: string;
   rm_name: string;
   closing_balance: number;
-  days_negative: number;
   department: string;
 }
 
@@ -348,9 +347,8 @@ export function useViolations(
         violation_type: "negative_balance",
         amount: r.closing_balance,
         rm_name: r.rm_name,
-        previous_balance: r.previous_balance,
+        previous_balance: (r as NegativeBalanceNewResult).previous_balance ?? 0,
         closing_balance: r.closing_balance,
-        days_negative: r.days_negative,
         department: r.department,
       });
     });
