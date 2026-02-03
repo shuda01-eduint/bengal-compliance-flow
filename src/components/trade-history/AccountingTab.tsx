@@ -558,33 +558,118 @@ const AccountingTab = () => {
   };
 
   const handleExport = async () => {
-    const toastId = toast.loading('Preparing export...');
+    const toastId = toast.loading('Fetching all records for export...');
     
     try {
-      // Use the already processed and sorted data (same as UI displays)
-      const exportData = sortedData;
+      // Fetch ALL records using pagination (bypasses 1000 row limit)
+      const PAGE_SIZE = 1000;
+      let allData: AccountingRow[] = [];
+      let page = 0;
+      let hasMore = true;
       
-      if (!exportData || exportData.length === 0) {
+      while (hasMore) {
+        const from = page * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+        
+        toast.loading(`Fetching records ${from + 1} - ${to + 1}...`, { id: toastId });
+        
+        let query = supabase
+          .from('eod_ledger_snapshots')
+          .select(`
+            investor_code,
+            investor_name,
+            account_type,
+            rm_name,
+            department,
+            opening_balance,
+            total_deposits,
+            total_withdrawals,
+            gross_buy,
+            gross_sell,
+            total_commission,
+            closing_balance
+          `)
+          .eq('eod_date', selectedDateStr)
+          .order('investor_code')
+          .range(from, to);
+        
+        // Apply same filters as UI
+        if (debouncedSearch) {
+          query = query.or(`investor_code.ilike.%${debouncedSearch}%,investor_name.ilike.%${debouncedSearch}%,rm_name.ilike.%${debouncedSearch}%`);
+        }
+        if (accountTypeFilter && accountTypeFilter !== 'all') {
+          query = query.eq('account_type', accountTypeFilter);
+        }
+        if (activityFilter === 'with_trades') {
+          query = query.or('gross_buy.gt.0,gross_sell.gt.0');
+        } else if (activityFilter === 'no_trades') {
+          query = query.or('gross_buy.is.null,gross_buy.eq.0').or('gross_sell.is.null,gross_sell.eq.0');
+        }
+        
+        const { data, error } = await query;
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          // Map to AccountingRow format
+          const mappedRows: AccountingRow[] = data.map((row: any) => ({
+            investor_code: row.investor_code || '',
+            investor_name: row.investor_name || '',
+            account_type: row.account_type || '',
+            rm_name: row.rm_name || '',
+            department: row.department || '',
+            interest_rate: 0,
+            brokerage_commission: 0,
+            ledger_balance: Number(row.opening_balance) || 0,
+            total_deposits: Number(row.total_deposits) || 0,
+            total_withdrawals: Number(row.total_withdrawals) || 0,
+            net_buy: Number(row.gross_buy) || 0,
+            net_sell: Number(row.gross_sell) || 0,
+            adjusted_ledger: 0,
+            accrued_interest: 0,
+            receivable: 0,
+            payable: 0,
+            brokerage_amount: Number(row.total_commission) || 0,
+            final_balance: Number(row.closing_balance) || 0,
+            gross_buy: Number(row.gross_buy) || 0,
+            gross_sell: Number(row.gross_sell) || 0,
+          }));
+          allData = [...allData, ...mappedRows];
+        }
+        
+        hasMore = data?.length === PAGE_SIZE;
+        page++;
+      }
+      
+      if (allData.length === 0) {
         toast.dismiss(toastId);
         toast.error('No data to export');
         return;
       }
       
-      // Get visible columns (same as UI table)
+      toast.loading(`Processing ${allData.length.toLocaleString()} records...`, { id: toastId });
+      
+      // Apply custom field calculations
+      const exportData = allData.map(row => {
+        const processedRow = { ...row };
+        customFields.forEach(field => {
+          processedRow[field.id] = evaluateFormula(field.formula, row);
+        });
+        return processedRow;
+      });
+      
+      // Get visible columns
       const exportColumns = visibleColumns;
       
-      // Build headers from visible column labels
+      // Build headers
       const headers = exportColumns.map(col => col.label);
-      
-      // Add any custom field headers
       const customHeaders = customFields.map(f => f.name);
       const allHeaders = [...headers, ...customHeaders];
       
-      // Build CSV rows using the same data as the UI
+      // Build CSV rows
       const csvData = exportData.map(row => {
         const rowData = exportColumns.map(col => {
           const value = row[col.id];
-          // Handle string columns - escape quotes and commas
           if (col.id === 'investor_code' || col.id === 'investor_name' || 
               col.id === 'account_type' || col.id === 'rm_name' || 
               col.id === 'department') {
@@ -593,14 +678,12 @@ const AccountingTab = () => {
               ? `"${strVal.replace(/"/g, '""')}"` 
               : strVal;
           }
-          // Handle numeric columns - export raw numbers
           if (typeof value === 'number') {
             return value.toFixed(2);
           }
           return value || '';
         });
         
-        // Add custom field values
         const customData = customFields.map(f => {
           const val = row[f.id];
           return typeof val === 'number' ? val.toFixed(2) : (val || 0);
@@ -609,7 +692,7 @@ const AccountingTab = () => {
         return [...rowData, ...customData];
       });
       
-      // Generate CSV content
+      // Generate CSV
       const csv = [allHeaders.join(','), ...csvData.map(row => row.join(','))].join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
@@ -620,7 +703,7 @@ const AccountingTab = () => {
       URL.revokeObjectURL(url);
       
       toast.dismiss(toastId);
-      toast.success(`Exported ${exportData.length} records`);
+      toast.success(`Exported ${allData.length.toLocaleString()} records`);
     } catch (err) {
       console.error('Export error:', err);
       toast.dismiss(toastId);
