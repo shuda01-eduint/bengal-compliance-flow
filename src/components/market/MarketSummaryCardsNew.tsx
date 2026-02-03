@@ -33,10 +33,11 @@ function SummaryCard({ title, value, icon: Icon, gradient, iconBg }: SummaryCard
 }
 
 export function MarketSummaryCardsNew({ stocks, isLoading }: MarketSummaryCardsNewProps) {
-  // Calculate market statistics
-  const totalTrades = stocks.reduce((sum, s) => sum + (s.market_cap ? 1 : 0), 0);
-  const totalVolume = stocks.length * 1000000; // Simulated volume based on stock count
-  const totalValue = stocks.reduce((sum, s) => sum + (s.market_cap || 0), 0);
+  // Calculate market statistics from real data
+  const totalStocks = stocks.length;
+  const totalVolume = stocks.reduce((sum, s) => sum + (s.volume || 0), 0);
+  const totalValue = stocks.reduce((sum, s) => sum + ((s.close_price || 0) * (s.volume || 0)), 0);
+  const totalMarketCap = stocks.reduce((sum, s) => sum + (s.market_cap || 0), 0);
   
   const advancers = stocks.filter(s => (s.change || 0) > 0).length;
   const decliners = stocks.filter(s => (s.change || 0) < 0).length;
@@ -50,8 +51,8 @@ export function MarketSummaryCardsNew({ stocks, isLoading }: MarketSummaryCardsN
 
   const cards = [
     {
-      title: "Total Trade",
-      value: isLoading ? "..." : formatNumber(totalTrades * 1000),
+      title: "Total Stocks",
+      value: isLoading ? "..." : totalStocks.toString(),
       icon: Activity,
       gradient: "bg-gradient-to-br from-amber-500 to-orange-600",
       iconBg: "bg-white/20",
