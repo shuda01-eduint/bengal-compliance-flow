@@ -4,6 +4,81 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { ViolationRecord } from "@/components/violations/ViolationsTable";
 
+interface NegativeBalanceAllResult {
+  event_date: string;
+  client_code: string;
+  client_name: string;
+  rm_name: string;
+  closing_balance: number;
+  days_negative: number;
+  department: string;
+}
+
+interface NegativeBalanceNewResult extends NegativeBalanceAllResult {
+  previous_balance: number;
+}
+
+// Helper to fetch all rows from get_all_negative_cash_balances with pagination
+async function fetchPaginatedAllNegativeCashBalances(
+  targetDate: string,
+  pageSize = 1000,
+  maxPages = 20
+): Promise<NegativeBalanceAllResult[]> {
+  const allData: NegativeBalanceAllResult[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore && page < maxPages) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    
+    const { data, error } = await supabase
+      .rpc("get_all_negative_cash_balances", { p_target_date: targetDate })
+      .range(from, to);
+
+    if (error) throw error;
+    if (data) allData.push(...(data as NegativeBalanceAllResult[]));
+    hasMore = (data?.length ?? 0) === pageSize;
+    page++;
+  }
+
+  return allData;
+}
+
+// Helper to fetch all rows from get_negative_balance_codes with pagination
+async function fetchPaginatedNegativeBalanceCodes(
+  fromDate: string | null,
+  toDate: string | null,
+  lookbackDays: number,
+  pageSize = 1000,
+  maxPages = 20
+): Promise<NegativeBalanceNewResult[]> {
+  const allData: NegativeBalanceNewResult[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore && page < maxPages) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    
+    const { data, error } = await supabase
+      .rpc("get_negative_balance_codes", {
+        p_from_date: fromDate,
+        p_to_date: toDate,
+        p_search: "",
+        p_lookback_days: lookbackDays,
+      })
+      .range(from, to);
+
+    if (error) throw error;
+    if (data) allData.push(...(data as NegativeBalanceNewResult[]));
+    hasMore = (data?.length ?? 0) === pageSize;
+    page++;
+  }
+
+  return allData;
+}
+
 export type ViolationType = "all" | "negative_balance" | "over_buy" | "z_group_adjustment" | "non_margin_buy";
 
 interface ViolationSummary {
@@ -64,27 +139,14 @@ export function useViolations(
     queryKey: ["negative-balance-violations", fromDate, toDate, negativeBalanceThreshold, negativeBalanceLookbackDays, negativeBalanceMode],
     queryFn: async () => {
       if (negativeBalanceMode === "new_only") {
-        // Use RPC for new negative balances only
-        // NOTE: backend queries are capped to 1000 rows by default; request a larger range.
-        const { data, error } = await supabase
-          .rpc("get_negative_balance_codes", {
-            p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
-            p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
-            p_search: "",
-            p_lookback_days: negativeBalanceLookbackDays,
-          })
-          .range(0, 9999);
-        if (error) throw error;
-        let results = (data || []) as Array<{
-          event_date: string;
-          client_code: string;
-          client_name: string;
-          rm_name: string;
-          closing_balance: number;
-          previous_balance: number;
-          days_negative: number;
-          department: string;
-        }>;
+        // Use paginated RPC for new negative balances only
+        const allData = await fetchPaginatedNegativeBalanceCodes(
+          fromDate ? format(fromDate, "yyyy-MM-dd") : null,
+          toDate ? format(toDate, "yyyy-MM-dd") : null,
+          negativeBalanceLookbackDays
+        );
+        
+        let results = allData;
         
         // Apply threshold filter if set
         if (negativeBalanceThreshold !== null) {
@@ -93,30 +155,13 @@ export function useViolations(
         
         return results;
       } else {
-        // "all" mode - use RPC that properly joins with investors table for cash account filtering
+        // "all" mode - use paginated RPC that properly joins with investors table for cash account filtering
         const targetDate = toDate ? format(toDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
         
-        // NOTE: backend queries are capped to 1000 rows by default; request a larger range.
-        const { data, error } = await supabase
-          .rpc("get_all_negative_cash_balances", {
-            p_target_date: targetDate,
-          })
-          .range(0, 9999);
-        
-        if (error) throw error;
-        
-        let results = (data || []) as Array<{
-          event_date: string;
-          client_code: string;
-          client_name: string;
-          rm_name: string;
-          closing_balance: number;
-          days_negative: number;
-          department: string;
-        }>;
+        const allData = await fetchPaginatedAllNegativeCashBalances(targetDate);
         
         // Map to include previous_balance for consistency
-        let mappedResults = results.map(r => ({
+        let mappedResults = allData.map(r => ({
           ...r,
           previous_balance: 0,
         }));
