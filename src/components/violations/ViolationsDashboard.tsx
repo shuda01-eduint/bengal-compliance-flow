@@ -142,7 +142,7 @@ export function ViolationsDashboard() {
       {/* Data Table */}
       <Card>
         <CardContent className="p-0">
-          <ViolationsTable records={records} isLoading={isLoading} />
+          <ViolationsTable records={records} isLoading={isLoading} activeFilter={activeFilter} />
         </CardContent>
       </Card>
     </div>

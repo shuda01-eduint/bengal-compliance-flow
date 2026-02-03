@@ -82,36 +82,25 @@ export function useViolations(
     },
   });
 
-  // Fetch over buy violations from eod_ledger_snapshots
+  // Fetch over buy violations using RPC function
   const { data: overBuyData, isLoading: isLoadingOverBuy, refetch: refetchOverBuy } = useQuery({
     queryKey: ["over-buy-violations", fromDate, toDate],
     queryFn: async () => {
-      let query = supabase
-        .from("eod_ledger_snapshots")
-        .select("eod_date, investor_code, investor_name, rm_name, gross_buy, gross_sell, opening_balance, ledger_balance, account_type")
-        .gt("gross_buy", 0);
-
-      if (fromDate) {
-        query = query.gte("eod_date", format(fromDate, "yyyy-MM-dd"));
-      }
-      if (toDate) {
-        query = query.lte("eod_date", format(toDate, "yyyy-MM-dd"));
-      }
-
-      const { data, error } = await query;
+      const { data, error } = await supabase.rpc("get_over_buy_margin_codes", {
+        p_from_date: fromDate ? format(fromDate, "yyyy-MM-dd") : null,
+        p_to_date: toDate ? format(toDate, "yyyy-MM-dd") : null,
+      });
       if (error) throw error;
-
-      return (data || []).filter(row => {
-        const netBuy = (row.gross_buy || 0) - (row.gross_sell || 0);
-        const availableBalance = (row.opening_balance || 0) + (row.ledger_balance || 0);
-        return netBuy > 0 && netBuy > availableBalance && row.account_type === 'margin';
-      }).map(row => ({
-        event_date: row.eod_date,
-        client_code: row.investor_code,
-        client_name: row.investor_name || '',
-        rm_name: row.rm_name || '',
-        amount: (row.gross_buy || 0) - (row.gross_sell || 0) - ((row.opening_balance || 0) + (row.ledger_balance || 0)),
-      }));
+      return (data || []) as Array<{
+        client_code: string;
+        client_name: string;
+        rm_name: string;
+        opening_balance: number;
+        closing_balance: number;
+        loan_increase: number;
+        first_date: string;
+        last_date: string;
+      }>;
     },
   });
 
@@ -239,7 +228,7 @@ export function useViolations(
       },
       over_buy: {
         count: new Set(overBuyRecords.map(r => r.client_code)).size,
-        amount: overBuyRecords.reduce((sum, r) => sum + (r.amount || 0), 0),
+        amount: overBuyRecords.reduce((sum, r) => sum + (r.loan_increase || 0), 0),
       },
       z_group_adjustment: {
         count: new Set(zGroupRecords.map(r => r.client_code)).size,
@@ -268,15 +257,18 @@ export function useViolations(
       });
     });
 
-    // Add over buy records
+    // Add over buy records with additional fields
     (overBuyData || []).forEach(r => {
       records.push({
-        event_date: r.event_date,
+        event_date: r.first_date,
         client_code: r.client_code,
         client_name: r.client_name,
         violation_type: "over_buy",
-        amount: r.amount,
+        amount: r.loan_increase,
         rm_name: r.rm_name,
+        opening_balance: r.opening_balance,
+        closing_balance: r.closing_balance,
+        loan_increase: r.loan_increase,
       });
     });
 
