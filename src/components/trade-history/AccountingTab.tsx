@@ -316,17 +316,35 @@ const AccountingTab = () => {
 
   const hasEodData = !!eodStatus;
 
-  // Fetch FULL summary aggregates (no limit) for accurate cards
+  // Fetch FULL summary aggregates (with pagination to bypass 1000 row limit)
   const { data: summaryAggregates } = useQuery({
     queryKey: ['accounting-summary-aggregates', selectedDateStr],
     queryFn: async () => {
-      // Fetch only the columns needed for aggregation (no limit)
-      const { data, error } = await supabase
-        .from('eod_ledger_snapshots')
-        .select('total_commission, gross_buy, gross_sell, department')
-        .eq('eod_date', selectedDateStr);
+      // Use pagination to fetch ALL rows and aggregate them
+      const PAGE_SIZE = 1000;
+      let allData: { total_commission: number; gross_buy: number; gross_sell: number; department: string | null }[] = [];
+      let page = 0;
+      let hasMore = true;
       
-      if (error) throw error;
+      while (hasMore) {
+        const from = page * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+        
+        const { data, error } = await supabase
+          .from('eod_ledger_snapshots')
+          .select('total_commission, gross_buy, gross_sell, department')
+          .eq('eod_date', selectedDateStr)
+          .range(from, to);
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allData = [...allData, ...data];
+        }
+        
+        hasMore = data?.length === PAGE_SIZE;
+        page++;
+      }
       
       // Calculate aggregates from full dataset
       let totalCommission = 0;
@@ -335,7 +353,7 @@ const AccountingTab = () => {
       let clientsWithTrades = 0;
       const departments = new Set<string>();
       
-      (data || []).forEach(row => {
+      allData.forEach(row => {
         totalCommission += Number(row.total_commission) || 0;
         totalBuy += Number(row.gross_buy) || 0;
         totalSell += Number(row.gross_sell) || 0;
@@ -350,7 +368,7 @@ const AccountingTab = () => {
         totalTurnover: totalBuy + totalSell,
         clientsWithTrades,
         uniqueDepartments: departments.size,
-        totalRecords: data?.length || 0,
+        totalRecords: allData.length,
       };
     },
     enabled: hasEodData,
