@@ -1,111 +1,183 @@
 
 
-## Plan: Fix Accounting Summary Cards to Show Correct EOD Date Totals
+## Over Buy (Margin) Card Implementation Plan
 
-### Problem
+### Overview
+This plan implements the new "Over Buy (Margin)" violation detection logic that identifies margin accounts where the loan/liability has increased during the selected date range, indicating over-buying on margin.
 
-The Commission view summary cards show incorrect totals because:
-1. Data is fetched with a **LIMIT 1000** (line 364) but Feb 2 has 1,884 clients with trades
-2. Summary is calculated from this limited dataset, not the complete day data
-3. Expected: ৳4,219,971 Commission, ৳1,326,315,061 Turnover, 1,884 Clients
-4. Current: ৳512,647 Commission, ৳198,195,380 Turnover, 65 Clients
+### Business Logic
+```text
++---------------------------+      +---------------------------+
+|    Opening Balance        |      |    Closing Balance        |
+|    (Start of Period)      |      |    (End of Period)        |
+|    e.g., -100,000         | ---> |    e.g., -150,000         |
++---------------------------+      +---------------------------+
+                                   
+Loan Increase = ABS(-150,000) - ABS(-100,000) = 50,000
+Condition: closing_balance < opening_balance (both negative)
+```
 
 ---
 
-### Solution
+### Implementation Steps
 
-Create a separate query that fetches **aggregate totals only** for the selected EOD date without the 1000 row limit. The table can continue to paginate, but summary cards will show complete data.
+#### Step 1: Create RPC Function `get_over_buy_margin_codes`
 
----
+Create a new database function that:
+- Takes `p_from_date` and `p_to_date` parameters
+- Compares the first date's balance with the last date's balance in the range
+- Filters for `account_type = 'Margin'` only
+- Excludes closed accounts via JOIN with `investors` table
+- Returns accounts where the loan increased (closing more negative than opening)
+- Calculates `loan_increase = ABS(closing_balance) - ABS(opening_balance)`
+- Orders results by loan increase amount descending
 
-### Changes
+**Return columns:**
+- `client_code` (investor_code)
+- `client_name` (from investors table)
+- `rm_name` (from investors table)
+- `opening_balance` (ledger_balance on first date in range)
+- `closing_balance` (ledger_balance on last date in range)
+- `loan_increase` (calculated increase amount)
+- `first_date` (start of observation period)
+- `last_date` (end of observation period)
 
-**File: `src/components/trade-history/AccountingTab.tsx`**
+#### Step 2: Update `useViolations` Hook
 
-1. **Add new query for summary aggregates** (around line 315):
-   - Create a new `useQuery` that fetches aggregate totals directly from `eod_ledger_snapshots`
-   - Query: `SELECT SUM(total_commission), SUM(gross_buy), SUM(gross_sell), COUNT(*) ...`
-   - No LIMIT, so it covers all clients for the selected date
+Modify `src/hooks/useViolations.ts`:
+- Replace the existing `overBuyData` query (lines 85-116) with a call to the new RPC function
+- Update the return type to include the new fields (opening_balance, closing_balance, loan_increase)
+- Update summary calculation to sum `loan_increase` instead of the old amount calculation
+- Update record mapping to use the new data structure
 
-2. **Update summary useMemo** (around line 474):
-   - Use the new aggregate query results for the summary cards instead of calculating from limited `accountingData`
-   - Fallback to calculating from `accountingData` if aggregate query fails
+#### Step 3: Update ViolationRecord Interface
 
-3. **Summary cards will use aggregate data**:
-   - Total Commission: From aggregate SUM
-   - Total Turnover: From aggregate SUM(gross_buy + gross_sell) 
-   - Clients with Trades: From aggregate COUNT where gross_buy > 0 OR gross_sell > 0
-   - Departments: From aggregate COUNT(DISTINCT department)
+Extend the `ViolationRecord` interface in `ViolationsTable.tsx` to support additional fields:
+- Add optional `opening_balance?: number`
+- Add optional `closing_balance?: number` 
+- Add optional `loan_increase?: number`
+
+#### Step 4: Update ViolationsTable Component
+
+Modify `src/components/violations/ViolationsTable.tsx` to display different columns based on violation type:
+- When `over_buy` filter is active, show specialized columns:
+  - Client Code (clickable)
+  - Client Name
+  - Opening Balance
+  - Closing Balance
+  - Loan Increase
+  - RM Name
+- For other violation types, keep the existing column structure
 
 ---
 
 ### Technical Details
 
-**New Query Structure:**
-```typescript
-const { data: summaryAggregates } = useQuery({
-  queryKey: ['accounting-summary-aggregates', selectedDateStr],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from('eod_ledger_snapshots')
-      .select('total_commission, gross_buy, gross_sell, department')
-      .eq('eod_date', selectedDateStr);
-    
-    if (error) throw error;
-    
-    // Calculate aggregates
-    let totalCommission = 0;
-    let totalBuy = 0;
-    let totalSell = 0;
-    let clientsWithTrades = 0;
-    const departments = new Set<string>();
-    
-    (data || []).forEach(row => {
-      totalCommission += Number(row.total_commission) || 0;
-      totalBuy += Number(row.gross_buy) || 0;
-      totalSell += Number(row.gross_sell) || 0;
-      if ((row.gross_buy || 0) > 0 || (row.gross_sell || 0) > 0) {
-        clientsWithTrades++;
-      }
-      if (row.department) departments.add(row.department);
-    });
-    
-    return {
-      totalCommission,
-      totalTurnover: totalBuy + totalSell,
-      clientsWithTrades,
-      uniqueDepartments: departments.size
-    };
-  },
-  enabled: hasEodData,
-});
+#### Database Migration - RPC Function
+
+```sql
+CREATE OR REPLACE FUNCTION public.get_over_buy_margin_codes(
+  p_from_date date DEFAULT NULL,
+  p_to_date date DEFAULT NULL
+)
+RETURNS TABLE(
+  client_code text,
+  client_name text,
+  rm_name text,
+  opening_balance numeric,
+  closing_balance numeric,
+  loan_increase numeric,
+  first_date date,
+  last_date date
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = 'public'
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH date_range AS (
+    SELECT 
+      COALESCE(p_from_date, CURRENT_DATE - INTERVAL '30 days')::date as start_dt,
+      COALESCE(p_to_date, CURRENT_DATE)::date as end_dt
+  ),
+  first_last_balances AS (
+    SELECT 
+      e.investor_code,
+      FIRST_VALUE(e.ledger_balance) OVER (
+        PARTITION BY e.investor_code 
+        ORDER BY e.eod_date ASC
+      ) as opening_bal,
+      FIRST_VALUE(e.ledger_balance) OVER (
+        PARTITION BY e.investor_code 
+        ORDER BY e.eod_date DESC
+      ) as closing_bal,
+      FIRST_VALUE(e.eod_date) OVER (
+        PARTITION BY e.investor_code 
+        ORDER BY e.eod_date ASC
+      ) as first_dt,
+      FIRST_VALUE(e.eod_date) OVER (
+        PARTITION BY e.investor_code 
+        ORDER BY e.eod_date DESC
+      ) as last_dt,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.investor_code 
+        ORDER BY e.eod_date ASC
+      ) as rn
+    FROM eod_ledger_snapshots e
+    CROSS JOIN date_range d
+    WHERE LOWER(e.account_type) = 'margin'
+      AND e.eod_date >= d.start_dt
+      AND e.eod_date <= d.end_dt
+  )
+  SELECT 
+    f.investor_code as client_code,
+    COALESCE(i.investor_name, '') as client_name,
+    COALESCE(i.rm_name, '') as rm_name,
+    f.opening_bal as opening_balance,
+    f.closing_bal as closing_balance,
+    (ABS(f.closing_bal) - ABS(f.opening_bal)) as loan_increase,
+    f.first_dt as first_date,
+    f.last_dt as last_date
+  FROM first_last_balances f
+  LEFT JOIN investors i ON i.investor_code = f.investor_code
+  WHERE f.rn = 1
+    AND f.closing_bal < 0
+    AND f.opening_bal < 0
+    AND f.closing_bal < f.opening_bal  -- Loan increased (more negative)
+    AND (i.status IS NULL OR UPPER(i.status) NOT IN ('CLOSED'))
+  ORDER BY (ABS(f.closing_bal) - ABS(f.opening_bal)) DESC;
+END;
+$$;
 ```
 
-**Updated Summary Object:**
-```typescript
-const summary = useMemo(() => {
-  // Use aggregate data for cards (complete day totals)
-  return {
-    totalCommission: summaryAggregates?.totalCommission ?? 0,
-    totalTradeValue: summaryAggregates?.totalTurnover ?? 0,
-    clientsWithTrades: summaryAggregates?.clientsWithTrades ?? 0,
-    uniqueDepartments: summaryAggregates?.uniqueDepartments ?? 0,
-    // Keep table-specific calculations from accountingData
-    totalAccounts: accountingData.length,
-    ...
-  };
-}, [summaryAggregates, accountingData]);
-```
+#### Frontend Hook Changes
+
+The `useViolations` hook will be updated to:
+1. Call `get_over_buy_margin_codes` RPC instead of direct table query
+2. Pass the date range parameters
+3. Map response to include the new fields for display
+
+#### Table Display Logic
+
+The ViolationsTable will conditionally render columns:
+- Default view: Event Date, Client Code, Client Name, Violation Type, Amount, RM Name
+- Over Buy filtered view: Client Code, Client Name, Opening Balance, Closing Balance, Loan Increase, RM Name
 
 ---
 
-### Expected Result
+### Files to be Modified
 
-After implementation:
-- **Total Commission**: ৳4,219,971 (from complete EOD snapshot)
-- **Total Turnover**: ৳1,326,315,061 (from complete EOD snapshot)  
-- **Clients with Trades**: 1,884 (from complete EOD snapshot)
-- **Departments**: Correct count from all data
+| File | Changes |
+|------|---------|
+| `supabase/migrations/[timestamp].sql` | New RPC function `get_over_buy_margin_codes` |
+| `src/hooks/useViolations.ts` | Replace overBuy query with RPC call, update types |
+| `src/components/violations/ViolationsTable.tsx` | Add conditional columns for over_buy type |
 
-The table will still show paginated/limited results, but summary cards will reflect the full day's activity.
+### Testing Considerations
+- Verify that only margin accounts appear in the Over Buy card
+- Confirm closed accounts are excluded
+- Validate the loan_increase calculation matches expected values
+- Test date range filtering works correctly
+- Ensure the table displays correct columns when Over Buy filter is active
 
