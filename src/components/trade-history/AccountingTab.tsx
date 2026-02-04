@@ -541,7 +541,7 @@ const AccountingTab = () => {
     queryFn: async () => {
       // Use pagination to fetch ALL rows (bypasses 1000 row limit)
       const PAGE_SIZE = 1000;
-      let allData: { department: string | null; gross_buy: number | null; gross_sell: number | null }[] = [];
+      let allData: { department: string | null; gross_buy: number | null; gross_sell: number | null; investor_name: string | null }[] = [];
       let page = 0;
       let hasMore = true;
       
@@ -551,7 +551,7 @@ const AccountingTab = () => {
         
         const { data, error } = await supabase
           .from('eod_ledger_snapshots')
-          .select('department, gross_buy, gross_sell')
+          .select('department, gross_buy, gross_sell, investor_name')
           .eq('eod_date', selectedDateStr)
           .range(from, to);
         
@@ -565,31 +565,41 @@ const AccountingTab = () => {
         page++;
       }
       
-      // Group by department and calculate totals
+      // Group by department and calculate totals + track top performer
       const deptMap = new Map<string, { 
         department: string; 
         total_turnover: number; 
         trade_count: number;
         active_clients: number;
+        top_performer: string;
+        top_performer_turnover: number;
       }>();
       
       allData.forEach(row => {
         const dept = row.department || 'Unknown';
         const turnover = (Number(row.gross_buy) || 0) + (Number(row.gross_sell) || 0);
         const hasTrade = turnover > 0 ? 1 : 0;
+        const investorName = row.investor_name || 'Unknown';
         
         const existing = deptMap.get(dept);
         
         if (existing) {
           existing.total_turnover += turnover;
           existing.trade_count += hasTrade;
-          existing.active_clients += hasTrade; // Count clients with trades
+          existing.active_clients += hasTrade;
+          // Track top performer
+          if (turnover > existing.top_performer_turnover) {
+            existing.top_performer = investorName;
+            existing.top_performer_turnover = turnover;
+          }
         } else {
           deptMap.set(dept, {
             department: dept,
             total_turnover: turnover,
             trade_count: hasTrade,
             active_clients: hasTrade,
+            top_performer: investorName,
+            top_performer_turnover: turnover,
           });
         }
       });
