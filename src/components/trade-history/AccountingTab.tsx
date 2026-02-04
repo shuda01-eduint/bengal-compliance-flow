@@ -15,7 +15,7 @@ import { format, parseISO } from "date-fns";
 import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award, ArrowUpDown, GripVertical, AlertTriangle, RefreshCw, Link as LinkIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { DepartmentCommissionGrid } from "./DepartmentCommissionGrid";
+import { DepartmentTurnoverGrid } from "./DepartmentTurnoverGrid";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/balance-utils";
@@ -535,51 +535,69 @@ const AccountingTab = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Fetch commission by department from eod_ledger_snapshots - aggregated correctly
-  const { data: commissionByDept } = useQuery({
-    queryKey: ['accounting-commission-by-department', selectedDateStr],
+  // Fetch turnover by department from eod_ledger_snapshots - with pagination to get ALL data
+  const { data: turnoverByDept } = useQuery({
+    queryKey: ['accounting-turnover-by-department-full', selectedDateStr],
     queryFn: async () => {
-      // Aggregate commission data directly from eod_ledger_snapshots (the correct source)
-      const { data, error } = await supabase
-        .from('eod_ledger_snapshots')
-        .select('department, total_commission, gross_buy, gross_sell')
-        .eq('eod_date', selectedDateStr);
+      // Use pagination to fetch ALL rows (bypasses 1000 row limit)
+      const PAGE_SIZE = 1000;
+      let allData: { department: string | null; gross_buy: number | null; gross_sell: number | null }[] = [];
+      let page = 0;
+      let hasMore = true;
       
-      if (error) throw error;
+      while (hasMore) {
+        const from = page * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+        
+        const { data, error } = await supabase
+          .from('eod_ledger_snapshots')
+          .select('department, gross_buy, gross_sell')
+          .eq('eod_date', selectedDateStr)
+          .range(from, to);
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allData = [...allData, ...data];
+        }
+        
+        hasMore = data?.length === PAGE_SIZE;
+        page++;
+      }
       
       // Group by department and calculate totals
       const deptMap = new Map<string, { 
         department: string; 
-        total_commission: number; 
         total_turnover: number; 
-        trade_count: number 
+        trade_count: number;
+        active_clients: number;
       }>();
       
-      (data || []).forEach(row => {
+      allData.forEach(row => {
         const dept = row.department || 'Unknown';
-        const existing = deptMap.get(dept);
-        const commission = Number(row.total_commission) || 0;
         const turnover = (Number(row.gross_buy) || 0) + (Number(row.gross_sell) || 0);
         const hasTrade = turnover > 0 ? 1 : 0;
         
+        const existing = deptMap.get(dept);
+        
         if (existing) {
-          existing.total_commission += commission;
           existing.total_turnover += turnover;
           existing.trade_count += hasTrade;
+          existing.active_clients += hasTrade; // Count clients with trades
         } else {
           deptMap.set(dept, {
             department: dept,
-            total_commission: commission,
             total_turnover: turnover,
             trade_count: hasTrade,
+            active_clients: hasTrade,
           });
         }
       });
       
-      // Convert to array and sort by commission descending
+      // Convert to array and sort by turnover descending - include ALL departments with any turnover
       return Array.from(deptMap.values())
-        .filter(d => d.total_commission > 0)
-        .sort((a, b) => b.total_commission - a.total_commission);
+        .filter(d => d.total_turnover > 0)
+        .sort((a, b) => b.total_turnover - a.total_turnover);
     },
     enabled: chartView === 'commission' && hasEodData,
     staleTime: 5 * 60 * 1000,
@@ -1405,10 +1423,10 @@ const AccountingTab = () => {
                     </div>
                   </div>
 
-                  {/* Department Commission Grid */}
-                  <DepartmentCommissionGrid 
-                    data={commissionByDept || []} 
-                    totalCommission={summary.totalCommission}
+                  {/* Department Turnover Grid */}
+                  <DepartmentTurnoverGrid 
+                    data={turnoverByDept || []} 
+                    totalTurnover={summary.totalTradeValue}
                   />
                 </div>
               )}

@@ -1,17 +1,17 @@
 import { formatCurrency } from "@/lib/balance-utils";
 import { cn } from "@/lib/utils";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, Users } from "lucide-react";
 
-interface DepartmentCommission {
+interface DepartmentTurnover {
   department: string;
-  total_commission: number;
   total_turnover: number;
   trade_count: number;
+  active_clients: number;
 }
 
-interface DepartmentCommissionGridProps {
-  data: DepartmentCommission[];
-  totalCommission: number;
+interface DepartmentTurnoverGridProps {
+  data: DepartmentTurnover[];
+  totalTurnover: number;
 }
 
 // Generate consistent colors for departments based on index
@@ -30,28 +30,28 @@ const DEPARTMENT_COLORS = [
   { bg: "from-sky-500/20 to-sky-500/5", border: "border-sky-500/30", accent: "bg-sky-500", text: "text-sky-400" },
 ];
 
-export function DepartmentCommissionGrid({ data, totalCommission }: DepartmentCommissionGridProps) {
+export function DepartmentTurnoverGrid({ data, totalTurnover }: DepartmentTurnoverGridProps) {
   if (!data || data.length === 0) {
     return (
       <div className="p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
         <div className="flex items-center justify-between mb-4">
-          <h4 className="text-sm font-semibold">Commission by Department</h4>
+          <h4 className="text-sm font-semibold">Turnover by Department</h4>
         </div>
         <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
-          No commission data available for this period
+          No turnover data available for this period
         </div>
       </div>
     );
   }
 
-  const sortedData = [...data].sort((a, b) => b.total_commission - a.total_commission);
+  const sortedData = [...data].sort((a, b) => b.total_turnover - a.total_turnover);
 
   return (
     <div className="p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
       <div className="flex items-center justify-between mb-4">
         <h4 className="text-sm font-semibold flex items-center gap-2">
-          <TrendingUp className="h-4 w-4 text-emerald-400" />
-          Commission by Department
+          <TrendingUp className="h-4 w-4 text-blue-400" />
+          Turnover by Department
         </h4>
         <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-full bg-muted/50">
           {data.length} Departments
@@ -61,8 +61,8 @@ export function DepartmentCommissionGrid({ data, totalCommission }: DepartmentCo
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-1">
         {sortedData.map((dept, index) => {
           const colorScheme = DEPARTMENT_COLORS[index % DEPARTMENT_COLORS.length];
-          const percentage = totalCommission > 0 
-            ? ((dept.total_commission / totalCommission) * 100).toFixed(1) 
+          const percentage = totalTurnover > 0 
+            ? ((dept.total_turnover / totalTurnover) * 100).toFixed(1) 
             : "0.0";
           
           return (
@@ -101,12 +101,23 @@ export function DepartmentCommissionGrid({ data, totalCommission }: DepartmentCo
                   {dept.department || 'Unknown'}
                 </p>
                 
-                {/* Commission amount */}
-                <p className={cn("text-lg font-bold mb-1", colorScheme.text)}>
-                  {formatCurrency(dept.total_commission)}
+                {/* Turnover amount */}
+                <p className={cn("text-lg font-bold mb-1.5", colorScheme.text)}>
+                  {formatCurrency(dept.total_turnover)}
                 </p>
                 
-                {/* Percentage badge */}
+                {/* Active Clients Badge - Prominent */}
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/20 border border-primary/30">
+                    <Users className="h-3 w-3 text-primary" />
+                    <span className="text-xs font-bold text-primary">
+                      {dept.active_clients.toLocaleString()}
+                    </span>
+                    <span className="text-[9px] text-primary/70">clients</span>
+                  </div>
+                </div>
+                
+                {/* Percentage and trades */}
                 <div className="flex items-center justify-between">
                   <span className={cn(
                     "text-[10px] font-semibold px-1.5 py-0.5 rounded-md",
