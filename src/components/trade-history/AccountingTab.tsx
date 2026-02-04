@@ -15,6 +15,7 @@ import { format, parseISO } from "date-fns";
 import { Search, Download, Wallet, TrendingUp, TrendingDown, Percent, Users, Plus, X, Settings, CalendarIcon, ArrowRight, FileText, ArrowDownToLine, ArrowUpFromLine, Eye, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Calculator, DollarSign, ArrowDownRight, ArrowUpRight, Award, ArrowUpDown, GripVertical, AlertTriangle, RefreshCw, Link as LinkIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { DepartmentCommissionGrid } from "./DepartmentCommissionGrid";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/balance-utils";
@@ -1404,162 +1405,11 @@ const AccountingTab = () => {
                     </div>
                   </div>
 
-                  {/* Charts and Table Row */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Commission Pie Chart */}
-                    <div className="lg:col-span-1 p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-semibold">Commission Split</h4>
-                        <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-full bg-muted/50">
-                          By Department
-                        </span>
-                      </div>
-                      <div className="h-56 w-full">
-                        {commissionByDept && commissionByDept.length > 0 ? (
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <defs>
-                                <linearGradient id="commGrad1" x1="0" y1="0" x2="1" y2="1">
-                                  <stop offset="0%" stopColor="hsl(160, 84%, 50%)" />
-                                  <stop offset="100%" stopColor="hsl(160, 84%, 35%)" />
-                                </linearGradient>
-                                <linearGradient id="commGrad2" x1="0" y1="0" x2="1" y2="1">
-                                  <stop offset="0%" stopColor="hsl(217, 91%, 60%)" />
-                                  <stop offset="100%" stopColor="hsl(217, 91%, 45%)" />
-                                </linearGradient>
-                                <linearGradient id="commGrad3" x1="0" y1="0" x2="1" y2="1">
-                                  <stop offset="0%" stopColor="hsl(43, 96%, 56%)" />
-                                  <stop offset="100%" stopColor="hsl(43, 96%, 40%)" />
-                                </linearGradient>
-                                <linearGradient id="commGrad4" x1="0" y1="0" x2="1" y2="1">
-                                  <stop offset="0%" stopColor="hsl(280, 87%, 65%)" />
-                                  <stop offset="100%" stopColor="hsl(280, 87%, 50%)" />
-                                </linearGradient>
-                                <linearGradient id="commGrad5" x1="0" y1="0" x2="1" y2="1">
-                                  <stop offset="0%" stopColor="hsl(350, 89%, 60%)" />
-                                  <stop offset="100%" stopColor="hsl(350, 89%, 45%)" />
-                                </linearGradient>
-                              </defs>
-                              <Pie
-                                data={commissionByDept.map((dept: { department: string; total_commission: number }) => ({
-                                  name: dept.department || 'Unknown',
-                                  value: Number(dept.total_commission),
-                                }))}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={50}
-                                outerRadius={85}
-                                paddingAngle={3}
-                                dataKey="value"
-                                stroke="none"
-                              >
-                                {commissionByDept.map((_: any, index: number) => (
-                                  <Cell 
-                                    key={`cell-${index}`} 
-                                    fill={`url(#commGrad${(index % 5) + 1})`}
-                                    className="drop-shadow-lg"
-                                  />
-                                ))}
-                              </Pie>
-                              <Tooltip 
-                                formatter={(value: number) => formatCurrency(value)}
-                                contentStyle={{ 
-                                  backgroundColor: 'hsl(var(--popover))', 
-                                  border: '1px solid hsl(var(--border))',
-                                  borderRadius: '12px',
-                                  fontSize: '12px',
-                                  boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
-                                }}
-                              />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        ) : (
-                          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                            No commission data available
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Commission by Department Table */}
-                    <div className="lg:col-span-2 p-4 rounded-xl bg-gradient-to-br from-muted/50 to-transparent border border-border/50">
-                      <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-semibold">Department Performance</h4>
-                        <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-full bg-muted/50">
-                          {commissionByDept?.length || 0} Departments
-                        </span>
-                      </div>
-                      <div className="max-h-64 overflow-y-auto">
-                        {commissionByDept && commissionByDept.length > 0 ? (
-                          <div className="space-y-2">
-                            {commissionByDept
-                              .sort((a: { total_commission: number }, b: { total_commission: number }) => Number(b.total_commission) - Number(a.total_commission))
-                              .map((dept: { department: string; total_commission: number; total_turnover: number; trade_count: number }, index: number) => {
-                                const maxComm = Math.max(...commissionByDept.map((d: { total_commission: number }) => Number(d.total_commission)));
-                                const barWidth = maxComm > 0 ? (Number(dept.total_commission) / maxComm) * 100 : 0;
-                                
-                                return (
-                                  <div 
-                                    key={index}
-                                    className={cn(
-                                      "relative p-3 rounded-lg border transition-all duration-200 hover:border-border group",
-                                      index % 2 === 0 ? "bg-muted/20" : "bg-transparent",
-                                      "border-border/30"
-                                    )}
-                                  >
-                                    <div 
-                                      className="absolute left-0 top-0 h-full rounded-lg bg-gradient-to-r from-emerald-500/10 to-transparent transition-all duration-500"
-                                      style={{ width: `${barWidth}%` }}
-                                    />
-                                    
-                                    <div className="relative flex items-center gap-3">
-                                      {/* Rank Badge */}
-                                      <div className={cn(
-                                        "flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold",
-                                        index === 0 ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30" :
-                                        index === 1 ? "bg-slate-400/20 text-slate-400 ring-1 ring-slate-400/30" :
-                                        index === 2 ? "bg-orange-600/20 text-orange-400 ring-1 ring-orange-600/30" :
-                                        "bg-muted/50 text-muted-foreground"
-                                      )}>
-                                        {index + 1}
-                                      </div>
-
-                                      {/* Department Info */}
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium truncate">{dept.department || 'Unknown'}</p>
-                                        <p className="text-[10px] text-muted-foreground">
-                                          {(dept.trade_count || 0).toLocaleString()} trades
-                                        </p>
-                                      </div>
-
-                                      {/* Values */}
-                                      <div className="flex items-center gap-4 text-right">
-                                        <div className="hidden sm:block">
-                                          <p className="text-[10px] text-muted-foreground">Turnover</p>
-                                          <p className="text-xs font-medium text-blue-400">
-                                            {formatCurrency(Number(dept.total_turnover || 0))}
-                                          </p>
-                                        </div>
-                                        <div>
-                                          <p className="text-[10px] text-muted-foreground">Commission</p>
-                                          <p className="text-sm font-bold text-emerald-400">
-                                            {formatCurrency(Number(dept.total_commission))}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        ) : (
-                          <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
-                            No commission data available for this period
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  {/* Department Commission Grid */}
+                  <DepartmentCommissionGrid 
+                    data={commissionByDept || []} 
+                    totalCommission={summary.totalCommission}
+                  />
                 </div>
               )}
             </div>
