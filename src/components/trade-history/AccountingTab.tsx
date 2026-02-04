@@ -541,7 +541,7 @@ const AccountingTab = () => {
     queryFn: async () => {
       // Use pagination to fetch ALL rows (bypasses 1000 row limit)
       const PAGE_SIZE = 1000;
-      let allData: { department: string | null; gross_buy: number | null; gross_sell: number | null; investor_name: string | null }[] = [];
+      let allData: { department: string | null; gross_buy: number | null; gross_sell: number | null; rm_name: string | null }[] = [];
       let page = 0;
       let hasMore = true;
       
@@ -551,7 +551,7 @@ const AccountingTab = () => {
         
         const { data, error } = await supabase
           .from('eod_ledger_snapshots')
-          .select('department, gross_buy, gross_sell, investor_name')
+          .select('department, gross_buy, gross_sell, rm_name')
           .eq('eod_date', selectedDateStr)
           .range(from, to);
         
@@ -565,7 +565,34 @@ const AccountingTab = () => {
         page++;
       }
       
-      // Group by department and calculate totals + track top performer
+      // First pass: aggregate turnover by RM within each department
+      const rmByDept = new Map<string, Map<string, number>>();
+      
+      allData.forEach(row => {
+        const dept = row.department || 'Unknown';
+        const rmName = row.rm_name || '';
+        const turnover = (Number(row.gross_buy) || 0) + (Number(row.gross_sell) || 0);
+        
+        if (!rmByDept.has(dept)) {
+          rmByDept.set(dept, new Map());
+        }
+        const deptRms = rmByDept.get(dept)!;
+        deptRms.set(rmName, (deptRms.get(rmName) || 0) + turnover);
+      });
+      
+      // Find top RM for each department
+      const topRmByDept = new Map<string, { name: string; turnover: number }>();
+      rmByDept.forEach((rms, dept) => {
+        let topRm = { name: '', turnover: 0 };
+        rms.forEach((turnover, rmName) => {
+          if (rmName && turnover > topRm.turnover) {
+            topRm = { name: rmName, turnover };
+          }
+        });
+        topRmByDept.set(dept, topRm);
+      });
+      
+      // Second pass: aggregate department totals
       const deptMap = new Map<string, { 
         department: string; 
         total_turnover: number; 
@@ -579,7 +606,6 @@ const AccountingTab = () => {
         const dept = row.department || 'Unknown';
         const turnover = (Number(row.gross_buy) || 0) + (Number(row.gross_sell) || 0);
         const hasTrade = turnover > 0 ? 1 : 0;
-        const investorName = row.investor_name || '';
         
         const existing = deptMap.get(dept);
         
@@ -587,19 +613,15 @@ const AccountingTab = () => {
           existing.total_turnover += turnover;
           existing.trade_count += hasTrade;
           existing.active_clients += hasTrade;
-          // Track top performer - only consider if turnover > 0 and has a name
-          if (turnover > 0 && turnover > existing.top_performer_turnover && investorName) {
-            existing.top_performer = investorName;
-            existing.top_performer_turnover = turnover;
-          }
         } else {
+          const topRm = topRmByDept.get(dept) || { name: '', turnover: 0 };
           deptMap.set(dept, {
             department: dept,
             total_turnover: turnover,
             trade_count: hasTrade,
             active_clients: hasTrade,
-            top_performer: (turnover > 0 && investorName) ? investorName : '',
-            top_performer_turnover: turnover > 0 ? turnover : 0,
+            top_performer: topRm.name,
+            top_performer_turnover: topRm.turnover,
           });
         }
       });
