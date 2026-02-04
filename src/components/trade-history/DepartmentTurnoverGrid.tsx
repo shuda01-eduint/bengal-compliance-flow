@@ -113,11 +113,16 @@ export function DepartmentTurnoverGrid({ data, totalTurnover }: DepartmentTurnov
                   {formatCrore(dept.total_turnover)}
                 </p>
                 
-                {/* Top RM Performer */}
-                <div className="flex items-center gap-1 mb-1.5 min-h-[20px]">
+                {/* Top RM Performer with Turnover */}
+                <div className="flex items-center gap-1 mb-1.5 min-h-[24px] bg-amber-500/10 rounded-md px-1.5 py-0.5 border border-amber-500/20">
                   <Trophy className="h-3 w-3 text-amber-400 shrink-0" />
-                  <span className="text-[10px] text-amber-300 truncate" title={dept.top_performer || '-'}>
-                    Top RM: {dept.top_performer ? (dept.top_performer.length > 12 ? dept.top_performer.substring(0, 12) + '...' : dept.top_performer) : '-'}
+                  <span className="text-[10px] text-amber-300 truncate flex-1" title={dept.top_performer ? `${dept.top_performer} (${formatCrore(dept.top_performer_turnover)})` : '-'}>
+                    {dept.top_performer ? (
+                      <>
+                        <span className="font-medium">{dept.top_performer.length > 10 ? dept.top_performer.substring(0, 10) + '..' : dept.top_performer}</span>
+                        <span className="text-amber-400/70 ml-1">({formatCrore(dept.top_performer_turnover)})</span>
+                      </>
+                    ) : '-'}
                   </span>
                 </div>
                 
