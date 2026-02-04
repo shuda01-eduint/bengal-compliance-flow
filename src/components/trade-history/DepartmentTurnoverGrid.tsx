@@ -1,13 +1,20 @@
-import { formatCurrency } from "@/lib/balance-utils";
 import { cn } from "@/lib/utils";
-import { TrendingUp, Users } from "lucide-react";
+import { TrendingUp, Users, Trophy } from "lucide-react";
 
 interface DepartmentTurnover {
   department: string;
   total_turnover: number;
   trade_count: number;
   active_clients: number;
+  top_performer: string;
+  top_performer_turnover: number;
 }
+
+// Format number to Crore format
+const formatCrore = (value: number): string => {
+  const croreValue = value / 10000000;
+  return `${croreValue.toFixed(2)} Cr`;
+};
 
 interface DepartmentTurnoverGridProps {
   data: DepartmentTurnover[];
@@ -97,18 +104,26 @@ export function DepartmentTurnoverGrid({ data, totalTurnover }: DepartmentTurnov
               
               <div className="pl-2">
                 {/* Department name */}
-                <p className="text-xs font-medium text-foreground truncate mb-2 pr-6" title={dept.department || 'Unknown'}>
+                <p className="text-xs font-medium text-foreground truncate mb-1.5 pr-6" title={dept.department || 'Unknown'}>
                   {dept.department || 'Unknown'}
                 </p>
                 
-                {/* Turnover amount */}
+                {/* Turnover amount in Crore */}
                 <p className={cn("text-lg font-bold mb-1.5", colorScheme.text)}>
-                  {formatCurrency(dept.total_turnover)}
+                  {formatCrore(dept.total_turnover)}
                 </p>
                 
+                {/* Top Performer */}
+                <div className="flex items-center gap-1 mb-1.5 min-h-[20px]">
+                  <Trophy className="h-3 w-3 text-amber-400 shrink-0" />
+                  <span className="text-[10px] text-amber-300 truncate" title={dept.top_performer}>
+                    Top: {dept.top_performer?.length > 15 ? dept.top_performer.substring(0, 15) + '...' : dept.top_performer || 'N/A'}
+                  </span>
+                </div>
+                
                 {/* Active Clients Badge - Prominent */}
-                <div className="flex items-center gap-1.5 mb-2">
-                  <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/20 border border-primary/30">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-primary/20 border border-primary/30">
                     <Users className="h-3 w-3 text-primary" />
                     <span className="text-xs font-bold text-primary">
                       {dept.active_clients.toLocaleString()}
