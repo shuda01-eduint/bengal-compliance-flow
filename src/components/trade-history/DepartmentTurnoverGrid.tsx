@@ -16,6 +16,19 @@ const formatCrore = (value: number): string => {
   return `${croreValue.toFixed(2)} Cr`;
 };
 
+// Clean up department name by removing common prefixes
+const cleanDepartmentName = (name: string): string => {
+  if (!name) return 'Unknown';
+  
+  // Remove "Extension of Head Office, " or "Extension of Head Office - " prefix
+  let cleaned = name.replace(/^Extension of Head Office[,\s-]+\s*/i, '');
+  
+  // Remove "Digital Booth, " or "Digital Booth - " prefix
+  cleaned = cleaned.replace(/^Digital Booth[,\s-]+\s*/i, '');
+  
+  return cleaned.trim() || name;
+};
+
 interface DepartmentTurnoverGridProps {
   data: DepartmentTurnover[];
   totalTurnover: number;
@@ -103,9 +116,12 @@ export function DepartmentTurnoverGrid({ data, totalTurnover }: DepartmentTurnov
               )}
               
               <div className="pl-2">
-                {/* Department name */}
-                <p className="text-xs font-medium text-foreground truncate mb-1.5 pr-6" title={dept.department || 'Unknown'}>
-                  {dept.department || 'Unknown'}
+                {/* Department name - cleaned, with full name in tooltip */}
+                <p 
+                  className="text-xs font-medium text-foreground truncate mb-1.5 pr-6" 
+                  title={dept.department || 'Unknown'}
+                >
+                  {cleanDepartmentName(dept.department || 'Unknown')}
                 </p>
                 
                 {/* Turnover amount in Crore */}
