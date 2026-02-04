@@ -579,7 +579,7 @@ const AccountingTab = () => {
         const dept = row.department || 'Unknown';
         const turnover = (Number(row.gross_buy) || 0) + (Number(row.gross_sell) || 0);
         const hasTrade = turnover > 0 ? 1 : 0;
-        const investorName = row.investor_name || 'Unknown';
+        const investorName = row.investor_name || '';
         
         const existing = deptMap.get(dept);
         
@@ -587,8 +587,8 @@ const AccountingTab = () => {
           existing.total_turnover += turnover;
           existing.trade_count += hasTrade;
           existing.active_clients += hasTrade;
-          // Track top performer
-          if (turnover > existing.top_performer_turnover) {
+          // Track top performer - only consider if turnover > 0 and has a name
+          if (turnover > 0 && turnover > existing.top_performer_turnover && investorName) {
             existing.top_performer = investorName;
             existing.top_performer_turnover = turnover;
           }
@@ -598,8 +598,8 @@ const AccountingTab = () => {
             total_turnover: turnover,
             trade_count: hasTrade,
             active_clients: hasTrade,
-            top_performer: investorName,
-            top_performer_turnover: turnover,
+            top_performer: (turnover > 0 && investorName) ? investorName : '',
+            top_performer_turnover: turnover > 0 ? turnover : 0,
           });
         }
       });
