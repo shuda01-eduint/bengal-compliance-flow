@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 
 interface EodRunHistory {
@@ -129,7 +129,7 @@ export function EodLogTable({ limit = 20 }: EodLogTableProps) {
             return (
               <TableRow key={row.id}>
                 <TableCell className="font-medium whitespace-nowrap">
-                  {format(new Date(row.run_date), "dd MMM yyyy")}
+                  {format(parseISO(row.run_date), "dd MMM yyyy")}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
                   {format(new Date(row.run_at), "dd MMM HH:mm")}
