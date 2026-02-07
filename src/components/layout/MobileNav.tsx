@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { 
   LayoutDashboard, 
   FileText, 
@@ -15,6 +15,11 @@ import {
   Calculator,
   PieChart,
   Menu,
+  UserCog,
+  AlertTriangle,
+  TrendingUp,
+  CalendarClock,
+  LineChart
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,27 +28,45 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useSwipeable } from "react-swipeable";
 import { BottomNav } from "./BottomNav";
+import { useUserRole } from "@/hooks/useUserRole";
 
-const navigation = [
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  adminOnly?: boolean;
+}
+
+const navigation: NavItem[] = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "CEO Dashboard", href: "/ceo-dashboard", icon: PieChart },
-  { name: "Trade History", href: "/trade-history", icon: History },
+  { name: "Market", href: "/market", icon: LineChart },
+  { name: "Admin Panel", href: "/admin/panel", icon: UserCog, adminOnly: true },
+  { name: "CEO Dashboard", href: "/ceo-dashboard", icon: PieChart, adminOnly: true },
+  { name: "Trade History", href: "/trade-history", icon: History, adminOnly: true },
+  { name: "EOD Processing", href: "/eod", icon: CalendarClock, adminOnly: true },
   { name: "Admin Balances", href: "/admin/balances", icon: Wallet },
-  { name: "Securities", href: "/securities", icon: Landmark },
+  { name: "Margin Loan", href: "/margin-loan", icon: TrendingUp, adminOnly: true },
+  { name: "Securities", href: "/securities", icon: Landmark, adminOnly: true },
   { name: "Accounting", href: "/accounting", icon: Calculator },
-  { name: "Investors", href: "/investors", icon: Contact },
-  { name: "Compliance Reports", href: "/reports", icon: FileText },
-  { name: "Post-Report Activity", href: "/activity", icon: Activity },
+  { name: "Investors", href: "/investors", icon: Contact, adminOnly: true },
+  { name: "Violations", href: "/violations", icon: AlertTriangle, adminOnly: true },
+  { name: "Compliance Reports", href: "/reports", icon: FileText, adminOnly: true },
+  { name: "Post-Report Activity", href: "/activity", icon: Activity, adminOnly: true },
   { name: "Organization", href: "/employees", icon: Users },
-  { name: "Compliance Rules", href: "/rules", icon: Shield },
-  { name: "Notifications", href: "/notifications", icon: Bell },
+  { name: "Compliance Rules", href: "/rules", icon: Shield, adminOnly: true },
+  { name: "Notifications", href: "/notifications", icon: Bell, adminOnly: true },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
   const { signOut, user } = useAuth();
+  const { isAdmin } = useUserRole();
   const navigate = useNavigate();
+
+  const filteredNavigation = navigation.filter(item => 
+    !item.adminOnly || isAdmin
+  );
 
   const handleSignOut = async () => {
     await signOut();
@@ -117,7 +140,7 @@ export function MobileNav() {
 
             {/* Navigation */}
             <nav className="flex-1 overflow-y-auto space-y-1 px-3 py-4">
-              {navigation.map((item) => (
+              {filteredNavigation.map((item) => (
                 <NavLink
                   key={item.name}
                   to={item.href}
