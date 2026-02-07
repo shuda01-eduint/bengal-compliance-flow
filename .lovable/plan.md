@@ -1,69 +1,41 @@
 
-# Fix: EOD History Table Not Showing Feb 3rd Data
+# Fix: EOD Date Display Shifted by 1 Day (Timezone Issue)
 
 ## Problem Identified
-The EOD history table is not updating after processing trades for Feb 3rd. Investigation reveals:
+The EOD Run History table is displaying dates shifted by 1 day:
+- Database has `2026-02-05` but UI shows `04 Feb 2026`
+- Database has `2026-02-03` but UI shows `02 Feb 2026` (which looks like it's missing)
 
-1. The database **does** contain the Feb 3rd EOD record (verified via SQL query)
-2. The API **is** returning Feb 3rd in the response (visible in network logs as 2nd entry)
-3. The EOD Summary cards **are** showing the correct data from Feb 3rd
-4. The issue is a **React Query caching problem** - the table component is showing stale cached data
-
-The `invalidateQueries` call after `handleProcessStaged` isn't forcing a proper refetch in the EodLogTable component.
-
-## Root Cause
-The EodLogTable component uses React Query with default caching behavior. When `invalidateQueries` is called from EodPage, the query is marked as stale but may not immediately refetch if the component doesn't re-render or if there's a timing issue.
+**Root Cause:** When JavaScript parses a date-only string like `"2026-02-05"` using `new Date()`, it interprets it as midnight UTC. For users in Bangladesh (UTC+6), this becomes `2026-02-04 18:00:00` local time, causing the date to shift back by one day when formatted.
 
 ## Solution
+Use `parseISO` from `date-fns` which properly handles date-only strings, or manually parse the date to avoid timezone conversion.
 
-### 1. Force Immediate Refetch in EodLogTable
-Add `refetchOnWindowFocus: true` and reduce `staleTime` to ensure fresh data:
+### Fix in `EodLogTable.tsx` (Line 132)
 
-**File:** `src/components/eod/EodLogTable.tsx`
+**Current (broken):**
 ```typescript
-const { data: history, isLoading } = useQuery({
-  queryKey: ["eod-run-history", limit],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from("eod_run_history")
-      .select("*")
-      .order("run_date", { ascending: false })
-      .limit(limit);
-
-    if (error) throw error;
-    return data as EodRunHistory[];
-  },
-  staleTime: 0,            // Always consider data stale
-  refetchOnWindowFocus: true,
-  refetchOnMount: "always" // Force refetch when component mounts
-});
+{format(new Date(row.run_date), "dd MMM yyyy")}
 ```
 
-### 2. Ensure Proper Query Invalidation in EodPage
-Use `refetchQueries` instead of `invalidateQueries` to force an immediate refetch:
-
-**File:** `src/pages/EodPage.tsx`
+**Fixed:**
 ```typescript
-// In handleProcessStaged, after success:
-if (result.success) {
-  toast.success(`Processed trades for ${dateStr}`, {
-    description: `${result.snapshots_created?.toLocaleString()} snapshots, ${result.positions_captured?.toLocaleString()} positions`,
-  });
-  setShowSummary(true);
-  // Force immediate refetch instead of just invalidating
-  await queryClient.refetchQueries({ queryKey: ["eod-run-history"] });
-}
+// Option 1: Use parseISO which handles date-only strings correctly
+import { parseISO } from "date-fns";
+{format(parseISO(row.run_date), "dd MMM yyyy")}
+
+// Note: parseISO parses "2026-02-05" as local date at midnight,
+// avoiding the UTC interpretation that causes the shift
 ```
 
-## Changes Summary
+### Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/components/eod/EodLogTable.tsx` | Add `staleTime: 0`, `refetchOnMount: "always"` to ensure fresh data |
-| `src/pages/EodPage.tsx` | Change `invalidateQueries` to `refetchQueries` for immediate update |
+| `src/components/eod/EodLogTable.tsx` | Import `parseISO` from date-fns and use it to parse `run_date` to avoid timezone shift |
 
-## Technical Details
-- `staleTime: 0` - Data is considered stale immediately, triggering refetch checks
-- `refetchOnMount: "always"` - Forces refetch every time the component mounts, not just when data is stale
-- `refetchQueries` - Immediately fetches new data instead of just marking as stale
-- These changes ensure the table always shows the latest EOD run history after processing
+### Technical Details
+- `new Date("2026-02-05")` parses as UTC midnight, causing timezone offset issues
+- `parseISO("2026-02-05")` from date-fns handles date-only strings correctly and returns a local date
+- This ensures `05 Feb 2026` displays correctly regardless of user timezone
+- The `run_at` timestamp can continue using `new Date()` since it includes timezone info (`2026-02-05T10:38:37.699698+00:00`)
