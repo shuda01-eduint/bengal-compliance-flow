@@ -169,7 +169,7 @@ export default function EodPage() {
           description: `${result.snapshots_created?.toLocaleString()} snapshots, ${result.positions_captured?.toLocaleString()} positions`,
         });
         setShowSummary(true);
-        queryClient.invalidateQueries({ queryKey: ["eod-run-history"] });
+        await queryClient.refetchQueries({ queryKey: ["eod-run-history"] });
       } else {
         setLastError(result.error || "Unknown error");
         toast.error("Processing failed", {

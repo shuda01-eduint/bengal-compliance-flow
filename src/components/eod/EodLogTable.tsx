@@ -47,6 +47,9 @@ export function EodLogTable({ limit = 20 }: EodLogTableProps) {
       if (error) throw error;
       return data as EodRunHistory[];
     },
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   const formatCurrency = (value: number | null): string => {
