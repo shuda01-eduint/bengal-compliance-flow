@@ -1,115 +1,69 @@
 
+# Fix: EOD History Table Not Showing Feb 3rd Data
 
-# Fix: Import Preview Shows 0 Deposits/Withdrawals When Data Already Exists
+## Problem Identified
+The EOD history table is not updating after processing trades for Feb 3rd. Investigation reveals:
 
-## Problem Analysis
+1. The database **does** contain the Feb 3rd EOD record (verified via SQL query)
+2. The API **is** returning Feb 3rd in the response (visible in network logs as 2nd entry)
+3. The EOD Summary cards **are** showing the correct data from Feb 3rd
+4. The issue is a **React Query caching problem** - the table component is showing stale cached data
 
-The Import Preview dialog shows "Deposits (0)" and "Withdrawals (0)" with `৳0.00` amounts, even though the file contains 401 valid records. This happens because:
-
-1. **Preview totals are calculated only from `uniqueRecords`** - Records that don't already exist in the database
-2. **Since all 401 records already exist** as duplicates, `uniqueRecords` is empty, causing zero totals
-3. **When "Replace existing" is checked**, the "Will Import" count correctly changes to 401, but the deposit/withdrawal totals remain at zero because they were pre-calculated
+The `invalidateQueries` call after `handleProcessStaged` isn't forcing a proper refetch in the EodLogTable component.
 
 ## Root Cause
-
-In `DepositsImportDialog.tsx` lines 412-427, the totals are calculated by iterating over `uniqueRecords` only:
-
-```typescript
-// Current (buggy) code - only counts unique records
-uniqueRecords.forEach(record => {
-  if (upper === "DEPOSIT") {
-    totalDeposits += record.amount;
-    depositCount++;
-  }
-  // ...
-});
-```
-
-The preview needs to show totals from ALL valid records when "Replace existing" is selected.
-
----
+The EodLogTable component uses React Query with default caching behavior. When `invalidateQueries` is called from EodPage, the query is marked as stale but may not immediately refetch if the component doesn't re-render or if there's a timing issue.
 
 ## Solution
 
-### 1. Update ImportPreviewData Interface
+### 1. Force Immediate Refetch in EodLogTable
+Add `refetchOnWindowFocus: true` and reduce `staleTime` to ensure fresh data:
 
-Add new fields to track totals for ALL valid records (used when replacing):
-
+**File:** `src/components/eod/EodLogTable.tsx`
 ```typescript
-export interface ImportPreviewData {
-  // ... existing fields ...
-  
-  // NEW: Totals for ALL valid records (used when "Replace" is selected)
-  allTotalDeposits: number;
-  allTotalWithdrawals: number;
-  allDepositCount: number;
-  allWithdrawalCount: number;
+const { data: history, isLoading } = useQuery({
+  queryKey: ["eod-run-history", limit],
+  queryFn: async () => {
+    const { data, error } = await supabase
+      .from("eod_run_history")
+      .select("*")
+      .order("run_date", { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data as EodRunHistory[];
+  },
+  staleTime: 0,            // Always consider data stale
+  refetchOnWindowFocus: true,
+  refetchOnMount: "always" // Force refetch when component mounts
+});
+```
+
+### 2. Ensure Proper Query Invalidation in EodPage
+Use `refetchQueries` instead of `invalidateQueries` to force an immediate refetch:
+
+**File:** `src/pages/EodPage.tsx`
+```typescript
+// In handleProcessStaged, after success:
+if (result.success) {
+  toast.success(`Processed trades for ${dateStr}`, {
+    description: `${result.snapshots_created?.toLocaleString()} snapshots, ${result.positions_captured?.toLocaleString()} positions`,
+  });
+  setShowSummary(true);
+  // Force immediate refetch instead of just invalidating
+  await queryClient.refetchQueries({ queryKey: ["eod-run-history"] });
 }
 ```
 
-### 2. Update DepositsImportDialog to Calculate Both Sets of Totals
-
-Calculate totals for both `uniqueRecords` AND `allValidRecords`:
-
-```typescript
-// Calculate preview totals for unique records (non-duplicates)
-let totalDeposits = 0, totalWithdrawals = 0;
-let depositCount = 0, withdrawalCount = 0;
-
-uniqueRecords.forEach(record => { /* ... */ });
-
-// Calculate totals for ALL valid records (for replace mode)
-let allTotalDeposits = 0, allTotalWithdrawals = 0;
-let allDepositCount = 0, allWithdrawalCount = 0;
-
-valid.forEach(record => { /* ... */ });
-
-const preview: ImportPreviewData = {
-  // ... existing fields ...
-  allTotalDeposits,
-  allTotalWithdrawals,
-  allDepositCount,
-  allWithdrawalCount,
-};
-```
-
-### 3. Update ImportPreviewDialog to Show Correct Totals
-
-Display the appropriate totals based on whether "Replace existing" is checked:
-
-```typescript
-// Use ALL records totals when replacing, otherwise use unique records totals
-const displayDeposits = replaceExisting 
-  ? previewData.allTotalDeposits 
-  : previewData.totalDeposits;
-const displayWithdrawals = replaceExisting 
-  ? previewData.allTotalWithdrawals 
-  : previewData.totalWithdrawals;
-const displayDepositCount = replaceExisting 
-  ? previewData.allDepositCount 
-  : previewData.depositCount;
-const displayWithdrawalCount = replaceExisting 
-  ? previewData.allWithdrawalCount 
-  : previewData.withdrawalCount;
-```
-
----
-
-## Files to Modify
+## Changes Summary
 
 | File | Change |
 |------|--------|
-| `src/components/trade-history/ImportPreviewDialog.tsx` | Add 4 new optional fields to interface, conditionally display totals based on `replaceExisting` |
-| `src/components/eod/DepositsImportDialog.tsx` | Calculate both sets of totals and pass them to the preview |
+| `src/components/eod/EodLogTable.tsx` | Add `staleTime: 0`, `refetchOnMount: "always"` to ensure fresh data |
+| `src/pages/EodPage.tsx` | Change `invalidateQueries` to `refetchQueries` for immediate update |
 
----
-
-## Expected Behavior After Fix
-
-**Before (current bug):**
-- Replace checkbox checked: Shows "Deposits (0)" and "Withdrawals (0)"
-
-**After (fixed):**
-- Replace checkbox unchecked: Shows totals from new/unique records only
-- Replace checkbox checked: Shows totals from ALL valid records in the file (251 deposits, 150 withdrawals)
-
+## Technical Details
+- `staleTime: 0` - Data is considered stale immediately, triggering refetch checks
+- `refetchOnMount: "always"` - Forces refetch every time the component mounts, not just when data is stale
+- `refetchQueries` - Immediately fetches new data instead of just marking as stale
+- These changes ensure the table always shows the latest EOD run history after processing
