@@ -83,7 +83,7 @@ export const ImportPreviewDialog = ({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="max-w-md">
+      <AlertDialogContent className="max-w-md max-h-[90vh] flex flex-col">
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5 text-primary" />
@@ -94,7 +94,7 @@ export const ImportPreviewDialog = ({
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 py-4 flex-1 overflow-y-auto max-h-[60vh]">
           {/* Date Detection */}
           <Card className="border-primary/20">
             <CardContent className="pt-4">
@@ -219,7 +219,7 @@ export const ImportPreviewDialog = ({
           </Card>
         </div>
 
-        <AlertDialogFooter>
+        <AlertDialogFooter className="flex-shrink-0 pt-4">
           <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
           <AlertDialogAction 
             onClick={onConfirm}
