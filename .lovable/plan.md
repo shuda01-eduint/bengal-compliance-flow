@@ -1,81 +1,173 @@
 
-# Fix: Import Deposits/Withdrawals "OK" Button Not Visible
+# Add Ledger Tab to Accounting Page
 
-## Problem Identified
-The Import Preview Dialog for deposits/withdrawals is showing all content (file date, row counts, replace option, totals), but the **footer with the "Cancel" and "Import Records" buttons is being cut off** below the visible viewport. This happens because:
+## Overview
+Add a third "Ledger" tab to the Accounting page after the existing "Margin Loan" and "Commission" tabs. The Ledger tab will provide a daily overview of all investor ledger entries from EOD snapshots, with drill-down capability to view individual investor transaction history.
 
-1. **No max-height constraint**: The `AlertDialogContent` can grow indefinitely based on content
-2. **No scrolling**: The dialog content area has no overflow handling
-3. **Tall content**: When the "Replace existing data" option is visible and checked, it adds extra UI elements that push the footer out of view, especially on mobile screens
+## Architecture
 
-## Root Cause Analysis
-Looking at the code:
-- `ImportPreviewDialog.tsx` uses `AlertDialogContent` with `className="max-w-md"`
-- The dialog has 4-5 Cards stacking vertically inside `<div className="space-y-4 py-4">`
-- There is no `max-h-[...] overflow-y-auto` on the scrollable area
-- `AlertDialogContent` uses `fixed top-[50%] translate-y-[-50%]` which centers vertically but doesn't prevent overflow
-
-## Solution
-Add proper viewport constraints and scrolling behavior to the ImportPreviewDialog:
-
-### Changes to `src/components/trade-history/ImportPreviewDialog.tsx`
-
-1. **Add max-height to AlertDialogContent**: Constrain the dialog to 90vh maximum
-2. **Add overflow-y-auto to the content area**: Make the middle section scrollable while keeping header and footer fixed
-3. **Ensure footer is always visible**: Keep buttons outside the scrollable area
+The implementation follows the existing tab pattern used in AccountingTab.tsx, which uses a custom button toggle system (not the Tabs component) to switch between views.
 
 ```text
-+-------------------------------------+
-|  Import Preview (Header)           |  <- Fixed header
-|-------------------------------------|
-|  [Scrollable Content Area]         |  <- max-h with overflow-y-auto
-|  - Detected Date card              |
-|  - Row Counts card                 |
-|  - Replace Option card             |
-|  - Totals card                     |
-|-------------------------------------|
-|  [Cancel]        [Import Records]  |  <- Fixed footer (always visible)
-+-------------------------------------+
++-------------------------------------------+
+|  Tab Toggle: [Margin Loan] [Commission] [Ledger] |
++-------------------------------------------+
+|  Ledger Tab Content:                      |
+|  +---------------------------------------+|
+|  |  Summary Cards (3):                   ||
+|  |  [Total Debit] [Total Credit] [Net]   ||
+|  +---------------------------------------+|
+|  |  Searchable Investor Table            ||
+|  |  (from eod_ledger_snapshots)          ||
+|  +---------------------------------------+|
+|  |  Click Row -> Drill-down Dialog       ||
+|  |  - Date range filter                  ||
+|  |  - Transaction table                  ||
+|  |  - Daily balance chart                ||
+|  +---------------------------------------+|
++-------------------------------------------+
 ```
 
-### Technical Implementation
+## Database Changes
 
-| Line Range | Change Description |
-|------------|-------------------|
-| Line 86 | Add `max-h-[90vh] flex flex-col` to `AlertDialogContent` |
-| Line 97 | Add `flex-1 overflow-y-auto max-h-[60vh]` to the content wrapper div |
+### 1. Create View: `v_ledger_dashboard`
+Aggregates daily ledger totals from EOD snapshots.
 
-### Code Changes
-
-**AlertDialogContent (line 86):**
-```typescript
-// Before:
-<AlertDialogContent className="max-w-md">
-
-// After:
-<AlertDialogContent className="max-w-md max-h-[90vh] flex flex-col">
+```sql
+CREATE VIEW v_ledger_dashboard AS
+SELECT 
+  eod_date,
+  COALESCE(SUM(total_deposits), 0) + COALESCE(SUM(gross_sell), 0) as total_credit,
+  COALESCE(SUM(total_withdrawals), 0) + COALESCE(SUM(gross_buy), 0) + COALESCE(SUM(total_commission), 0) as total_debit,
+  (COALESCE(SUM(total_deposits), 0) + COALESCE(SUM(gross_sell), 0)) - 
+  (COALESCE(SUM(total_withdrawals), 0) + COALESCE(SUM(gross_buy), 0) + COALESCE(SUM(total_commission), 0)) as net_balance,
+  COUNT(DISTINCT investor_code) as client_count
+FROM eod_ledger_snapshots
+GROUP BY eod_date;
 ```
 
-**Content wrapper (line 97):**
-```typescript
-// Before:
-<div className="space-y-4 py-4">
+### 2. Create RPC Function: `get_ledger_by_date`
+Returns investor ledger entries for a specific date, with role-based filtering.
 
-// After:
-<div className="space-y-4 py-4 flex-1 overflow-y-auto max-h-[60vh]">
+```sql
+CREATE FUNCTION get_ledger_by_date(
+  _eod_date date,
+  _search text DEFAULT NULL,
+  _limit int DEFAULT 500
+) RETURNS TABLE (
+  investor_code text,
+  investor_name text,
+  account_type text,
+  rm_name text,
+  department text,
+  total_deposits numeric,
+  total_withdrawals numeric,
+  gross_buy numeric,
+  gross_sell numeric,
+  total_commission numeric,
+  opening_balance numeric,
+  closing_balance numeric,
+  total_debit numeric,
+  total_credit numeric
+) ...
 ```
 
-**Footer (line 222):**
-```typescript
-// Before:
-<AlertDialogFooter>
+### 3. Create RPC Function: `get_investor_ledger`
+Returns detailed ledger transactions for a specific investor and date range.
 
-// After:
-<AlertDialogFooter className="flex-shrink-0 pt-4">
+```sql
+CREATE FUNCTION get_investor_ledger(
+  _investor_code text,
+  _from_date date,
+  _to_date date
+) RETURNS TABLE (
+  txn_date date,
+  entry_type text,
+  scrip_name text,
+  qty integer,
+  rate numeric,
+  trade_value numeric,
+  commission numeric,
+  debit numeric,
+  credit numeric,
+  running_balance numeric
+) ...
 ```
 
-## Benefits
-- The "Cancel" and "Import Records" buttons will always be visible
-- Long content scrolls within the dialog
-- Works on all screen sizes including mobile
-- Maintains the existing UI appearance and functionality
+### 4. Create RPC Function: `get_investor_daily_balances`
+Returns daily closing balances for the balance chart.
+
+```sql
+CREATE FUNCTION get_investor_daily_balances(
+  _investor_code text,
+  _from_date date,
+  _to_date date
+) RETURNS TABLE (
+  balance_date date,
+  closing_balance numeric
+) ...
+```
+
+## Frontend Changes
+
+### 1. Update AccountingTab.tsx
+
+| Section | Change |
+|---------|--------|
+| Type definition | Add `'ledger'` to `ChartView` type |
+| Tab toggle buttons | Add third "Ledger" button after Commission |
+| Conditional rendering | Add `{chartView === 'ledger' && <LedgerView ... />}` section |
+| EOD date sharing | Reuse existing `selectedDate` state |
+
+### 2. Create New Component: `LedgerView.tsx`
+
+**Location:** `src/components/trade-history/LedgerView.tsx`
+
+**Features:**
+- 3 summary cards (Total Debit, Total Credit, Net Balance) matching existing card styling
+- Searchable table with columns: Investor Code, Investor Name, Entry Type, Scrip, Qty, Rate, Trade Value, Commission, Debit, Credit, Balance
+- Row click opens drill-down dialog
+
+### 3. Create Drill-down Dialog: `InvestorLedgerDrilldown.tsx`
+
+**Location:** `src/components/trade-history/InvestorLedgerDrilldown.tsx`
+
+**Features:**
+- Date range picker (From/To)
+- Investor summary header
+- Transaction table showing all ledger entries
+- Daily balance area chart using Recharts
+- Export to CSV functionality
+
+## UI/Styling Requirements
+
+All components will match the existing dark theme styling:
+- Gradient cards with `from-{color}-500/20 via-{color}-500/10 to-transparent`
+- Border colors with `border-{color}-500/30`
+- Icon accent colors matching card themes
+- Glass card effect using existing `glass-card` class
+- Table styling with `hover:bg-muted/50` rows
+
+## Data Flow
+
+1. **Summary Cards**: Query `v_ledger_dashboard` view filtered by `selectedDate`
+2. **Investor Table**: Call `get_ledger_by_date` RPC with date and optional search term
+3. **Drill-down Transactions**: Call `get_investor_ledger` RPC with investor code and date range
+4. **Balance Chart**: Call `get_investor_daily_balances` RPC with investor code and date range
+
+## Files to Create/Modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `supabase/migrations/xxx_add_ledger_views_and_functions.sql` | Create | Database view and RPC functions |
+| `src/components/trade-history/LedgerView.tsx` | Create | Main ledger tab content component |
+| `src/components/trade-history/InvestorLedgerDrilldown.tsx` | Create | Drill-down dialog for investor details |
+| `src/components/trade-history/AccountingTab.tsx` | Modify | Add Ledger tab toggle and conditional render |
+| `src/integrations/supabase/types.ts` | Auto-update | Types regenerated after migration |
+
+## Technical Notes
+
+1. **Role-based Security**: RPC functions use SECURITY DEFINER with internal role checks (per existing pattern in `get_accounting_data`)
+2. **Pagination**: Table limited to 500 rows with search filtering to ensure performance
+3. **Date Handling**: Uses `parseISO` from date-fns to avoid timezone issues (as established in recent fixes)
+4. **Query Caching**: React Query with 5-minute staleTime matching existing patterns
