@@ -24,6 +24,7 @@ import { AccountingReconciliationDialog } from "./AccountingReconciliationDialog
 import { TradeDetailsDialog } from "./TradeDetailsDialog";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useUnmatchedStagingData, hasSignificantUnmatchedData } from "@/hooks/useUnmatchedStagingData";
+import { LedgerView } from "./LedgerView";
 
 export interface AccountingRow {
   investor_code: string;
@@ -138,7 +139,7 @@ const evaluateFormula = (formula: string, row: AccountingRow): number => {
   }
 };
 
-type ChartView = 'margin' | 'commission';
+type ChartView = 'margin' | 'commission' | 'ledger';
 
 // Normalize a date to local midnight to avoid timezone issues with react-day-picker
 const normalizeToLocalDate = (date: Date): Date => {
@@ -1061,6 +1062,17 @@ const AccountingTab = () => {
               >
                 Commission
               </button>
+              <button
+                onClick={() => setChartView('ledger')}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                  chartView === 'ledger' 
+                    ? "bg-primary text-primary-foreground shadow-sm" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                )}
+              >
+                Ledger
+              </button>
             </div>
 
             <div className="flex flex-col lg:flex-row gap-4">
@@ -1461,6 +1473,14 @@ const AccountingTab = () => {
                     totalTurnover={summary.totalTradeValue}
                   />
                 </div>
+              )}
+
+              {/* Ledger View */}
+              {chartView === 'ledger' && (
+                <LedgerView
+                  selectedDate={selectedDate}
+                  onDateChange={setSelectedDate}
+                />
               )}
             </div>
           </CardContent>

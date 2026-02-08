@@ -3020,6 +3020,16 @@ export type Database = {
         }
         Relationships: []
       }
+      v_ledger_dashboard: {
+        Row: {
+          client_count: number | null
+          eod_date: string | null
+          net_balance: number | null
+          total_credit: number | null
+          total_debit: number | null
+        }
+        Relationships: []
+      }
       vw_api_stock_daily: {
         Row: {
           category: string | null
@@ -3554,12 +3564,34 @@ export type Database = {
         }[]
       }
       get_employee_id_for_user: { Args: never; Returns: string }
+      get_investor_daily_balances: {
+        Args: { _from_date: string; _investor_code: string; _to_date: string }
+        Returns: {
+          balance_date: string
+          closing_balance: number
+        }[]
+      }
       get_investor_filter_options: {
         Args: never
         Returns: {
           account_types: string[]
           investor_types: string[]
           statuses: string[]
+        }[]
+      }
+      get_investor_ledger: {
+        Args: { _from_date: string; _investor_code: string; _to_date: string }
+        Returns: {
+          commission: number
+          credit: number
+          debit: number
+          entry_type: string
+          qty: number
+          rate: number
+          running_balance: number
+          scrip_name: string
+          trade_value: number
+          txn_date: string
         }[]
       }
       get_investor_rm: {
@@ -3571,6 +3603,25 @@ export type Database = {
           rm_email: string
           rm_id: string
           rm_name: string
+        }[]
+      }
+      get_ledger_by_date: {
+        Args: { _eod_date: string; _limit?: number; _search?: string }
+        Returns: {
+          account_type: string
+          closing_balance: number
+          department: string
+          gross_buy: number
+          gross_sell: number
+          investor_code: string
+          investor_name: string
+          opening_balance: number
+          rm_name: string
+          total_commission: number
+          total_credit: number
+          total_debit: number
+          total_deposits: number
+          total_withdrawals: number
         }[]
       }
       get_margin_client_accounts: {
