@@ -17,53 +17,80 @@ export type Database = {
       admin_balances: {
         Row: {
           account_type: string | null
-          accrued_interest: number | null
           as_of_date: string
-          code: string
+          avg_cost: number | null
+          boid: string | null
+          charge_rate: number | null
+          cheque_in_tran_hand: number | null
           commission_rate: number | null
           created_at: string
           department: string | null
           id: string
+          instrument: string | null
+          investor_code: string
           investor_name: string | null
           ledger_balance: number | null
-          market_value: number | null
+          matured_balance: number | null
+          receivable_sales: number | null
+          rm: string | null
+          rm_email: string | null
           rm_id: string | null
-          rm_name: string | null
+          saleable: number | null
           total_cost: number | null
+          total_mv: number | null
+          total_stock: number | null
           updated_at: string
         }
         Insert: {
           account_type?: string | null
-          accrued_interest?: number | null
           as_of_date?: string
-          code: string
+          avg_cost?: number | null
+          boid?: string | null
+          charge_rate?: number | null
+          cheque_in_tran_hand?: number | null
           commission_rate?: number | null
           created_at?: string
           department?: string | null
           id?: string
+          instrument?: string | null
+          investor_code: string
           investor_name?: string | null
           ledger_balance?: number | null
-          market_value?: number | null
+          matured_balance?: number | null
+          receivable_sales?: number | null
+          rm?: string | null
+          rm_email?: string | null
           rm_id?: string | null
-          rm_name?: string | null
+          saleable?: number | null
           total_cost?: number | null
+          total_mv?: number | null
+          total_stock?: number | null
           updated_at?: string
         }
         Update: {
           account_type?: string | null
-          accrued_interest?: number | null
           as_of_date?: string
-          code?: string
+          avg_cost?: number | null
+          boid?: string | null
+          charge_rate?: number | null
+          cheque_in_tran_hand?: number | null
           commission_rate?: number | null
           created_at?: string
           department?: string | null
           id?: string
+          instrument?: string | null
+          investor_code?: string
           investor_name?: string | null
           ledger_balance?: number | null
-          market_value?: number | null
+          matured_balance?: number | null
+          receivable_sales?: number | null
+          rm?: string | null
+          rm_email?: string | null
           rm_id?: string | null
-          rm_name?: string | null
+          saleable?: number | null
           total_cost?: number | null
+          total_mv?: number | null
+          total_stock?: number | null
           updated_at?: string
         }
         Relationships: []
