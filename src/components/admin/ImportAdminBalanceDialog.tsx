@@ -587,7 +587,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
         
         const { data: updatedCount, error } = await supabase.rpc(
           'update_investor_balances_bulk', 
-          { updates: JSON.stringify(updates) }
+          { updates: updates as any }
         );
         
         if (error) {
@@ -620,7 +620,7 @@ export const ImportAdminBalanceDialog = ({ onSuccess }: { onSuccess?: () => void
             
             const { data: updatedCount, error } = await supabase.rpc(
               'update_investor_commissions_bulk',
-              { updates: JSON.stringify(updates) }
+              { updates: updates as any }
             );
             
             if (error) {
